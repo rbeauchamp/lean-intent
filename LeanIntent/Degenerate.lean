@@ -1,5 +1,5 @@
 import LeanIntent.Codes
-import LeanIntent.Answers
+import LeanIntent.Explain
 
 /-!
 # The degenerate subjects of a subject's type
@@ -45,10 +45,11 @@ meets `r`: `true` that it does, `false` that it does not, as goals the agent pro
 each verdict is a theorem Lean's kernel checks, never the result of running code. The verdicts are
 part of the theorem's statement, and a list of the wrong length is refused (`verdicts_correct`).
 `metBy W bs` lists the degenerate subjects the verdicts say meet the record, which are exactly those
-that do (`mem_metBy`). `possibilities W bs` reports each as a `Consequence` of kind possibility,
-the predicate that the subject is that degenerate subject (`Degenerate.consequence`), shown with a
-model of the record that satisfies it (`possibilities_model`), so the owner's answer to it can be
-stored and kept by every later revision (`LeanIntent.Answers`). A declined one is kept by exactly the
+that do (`mem_metBy`). `possibilities h`, from a proof `h : Verdicts r bs`, reports each as a
+`Consequence` of kind possibility, the predicate that the subject is that degenerate subject
+(`Degenerate.consequence`), which holds of the record as it is shown (`possibilities_holdsOf`), so
+it can be shown to the owner (`LeanIntent.Shown`) and the owner's answer to it stored and kept by
+every later revision (`LeanIntent.Answers`). A report exists only for proved verdicts. A declined one is kept by exactly the
 revisions that the degenerate subject does not meet (`Degenerate.declined_keptBy_iff`).
 -/
 
@@ -456,24 +457,24 @@ theorem Degenerate.declined_keptBy_iff (d : Degenerate c.sig) (r : IntentRecord 
   simp only [Answer.KeptBy, Degenerate.consequence]
   exact ⟨fun h hm => h _ hm rfl, fun h w hm e => h (e ▸ hm)⟩
 
-/-- The consequences reported to the owner: one for each degenerate subject the verdicts `bs` say
-meets the record, in order. -/
-def possibilities (W : Type) [c : Covered W] (bs : List Bool) : List (Consequence W) :=
+/-- The consequences reported to the owner: one for each degenerate subject the proved verdicts
+`bs` say meets the record, in order. It takes the proof of the verdicts, so no report exists for
+verdicts that are not proved. -/
+def possibilities {r : IntentRecord W} {bs : List Bool} (_ : Verdicts r bs) : List (Consequence W) :=
   (metBy W bs).map Degenerate.consequence
 
 /-- Under proved verdicts, the reported consequences are exactly those of the degenerate subjects
 that meet the record. -/
 theorem mem_possibilities {r : IntentRecord W} {bs : List Bool} (h : Verdicts r bs)
     (x : Consequence W) :
-    x ∈ possibilities W bs ↔ ∃ d ∈ degenerate W, r.Meets d.subject ∧ x = d.consequence := by
+    x ∈ possibilities h ↔ ∃ d ∈ degenerate W, r.Meets d.subject ∧ x = d.consequence := by
   simp only [possibilities, List.mem_map, mem_metBy h]
   exact ⟨fun ⟨d, ⟨hd, hm⟩, e⟩ => ⟨d, hd, hm, e.symm⟩, fun ⟨d, hd, hm, e⟩ => ⟨d, ⟨hd, hm⟩, e.symm⟩⟩
 
-/-- Each reported consequence is a possibility shown with a model of the record that satisfies
-it. -/
-theorem possibilities_model {r : IntentRecord W} {bs : List Bool} (h : Verdicts r bs)
-    (x : Consequence W) (hx : x ∈ possibilities W bs) :
-    x.kind = .possibility ∧ ∃ w, r.Meets w ∧ x.holds w := by
+/-- Each reported consequence is a possibility that holds of the record as it is shown: a model of
+the record satisfies it, the degenerate subject itself. -/
+theorem possibilities_holdsOf {r : IntentRecord W} {bs : List Bool} (h : Verdicts r bs)
+    (x : Consequence W) (hx : x ∈ possibilities h) : x.kind = .possibility ∧ x.HoldsOf r := by
   obtain ⟨d, _, hm, rfl⟩ := (mem_possibilities h x).mp hx
   exact ⟨rfl, d.subject, hm, rfl⟩
 
