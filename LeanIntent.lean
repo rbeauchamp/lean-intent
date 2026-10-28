@@ -6,3 +6,4 @@ import LeanIntent.Answers
 import LeanIntent.Explain
 import LeanIntent.Codes
 import LeanIntent.Degenerate
+import LeanIntent.Cone
