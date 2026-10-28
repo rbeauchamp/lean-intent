@@ -30,7 +30,9 @@ the declarations its meaning depends on, transitively.
   implementation's declarations are the names the caller gives and every declaration named under
   one of them, which is how Lean names the auxiliary declarations it makes (`isImplDecl`); and the
   check refuses when the caller gives no name, or one the environment does not declare, since an
-  exclusion of nothing would accept every record. `requireIndependent` runs it in `CoreM`.
+  exclusion of nothing would accept every record. A record whose cone reaches a declaration of
+  the implementation is refused (`checkRecord_ne_ok_of_reaches`). `requireIndependent` runs the
+  check in `CoreM`.
 
 Every name is reached through declarations of any kind, so a dependency reached only through an
 auxiliary declaration Lean generates, such as a `match` compiler or a recursion helper, or through
@@ -558,6 +560,15 @@ theorem checkRecord_eq_ok_iff (env : Environment) (record : Name) (impl axioms :
       not_false_eq_true, true_and]
     split <;> rename_i h <;> rw [h] <;> simp
     split <;> simp_all
+
+/-- **An intent record defined from its implementation is refused.** If a declaration of the
+implementation is reached from `record`, the check refuses, whatever the axioms and fuel. -/
+theorem checkRecord_ne_ok_of_reaches {env : Environment} {record c : Name}
+    {impl axioms : List Name} {fuel : Nat} (hc : Reaches (lookupIn env) RefersTo [record] c)
+    (hi : isImplDecl impl c = true) : checkRecord env record impl axioms fuel ≠ .ok () := by
+  intro h
+  have := (((checkRecord_eq_ok_iff env record impl axioms fuel).mp h).2.2.1 c hc).1
+  simp_all
 
 /-- What a refusal of `checkRecord` says, for the record `record`. -/
 def describe (record : Name) : Unchecked ⊕ Refusal → String
