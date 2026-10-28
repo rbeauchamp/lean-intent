@@ -1,0 +1,35 @@
+# Runs the repository's checks (tools/check.lean) on GitHub's machines when someone starts it by
+# hand. lean-intent has no CI: the local no-mistakes validation, whose Test step runs the same
+# checks (.no-mistakes.yaml, `commands.test`), is its merge gate, so no pull request or push starts
+# this workflow.
+name: check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lean:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install elan (v4.2.4); lean-toolchain selects Lean
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/227caca133724d5516bee25c2aeb3e609478f2d8/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      # LAKE-CONFIG, LEAN-BUILD and AXIOMS: no other package is required, every library module
+      # builds with no error and no warning, and every declaration rests only on Lean's axioms.
+      - name: Build the library and audit its axioms
+        run: lean --run tools/check.lean
+      # The repository establishes its claims by proof, so its listing of tests is empty.
+      - name: Check that the repository has no tests
+        run: |
+          set -euo pipefail
+          lean --run tools/check.lean --tests > "$RUNNER_TEMP/tests"
+          if [ -s "$RUNNER_TEMP/tests" ]; then
+            echo "The listing of tests is not empty; lean-intent establishes its claims by proof:"
+            cat "$RUNNER_TEMP/tests"
+            exit 1
+          fi
