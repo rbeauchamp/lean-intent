@@ -49,8 +49,9 @@ that do (`mem_metBy`). `possibilities h`, from a proof `h : Verdicts r bs`, repo
 `Consequence` of kind possibility, the predicate that the subject is that degenerate subject
 (`Degenerate.consequence`), which holds of the record as it is shown (`possibilities_holdsOf`), so
 it can be shown to the owner (`LeanIntent.Shown`) and the owner's answer to it stored and kept by
-every later revision (`LeanIntent.Answers`). A report exists only for proved verdicts. A declined one is kept by exactly the
-revisions that the degenerate subject does not meet (`Degenerate.declined_keptBy_iff`).
+every later revision (`LeanIntent.Answers`). A report exists only for proved verdicts. A declined
+one is kept by exactly the revisions that the degenerate subject does not meet
+(`Degenerate.declined_keptBy_iff`).
 -/
 
 namespace LeanIntent
