@@ -148,7 +148,7 @@ A reviewer reads a statement's text, the project commits it and a check reads it
 | `Statement.parseUTF8_eq_some_iff` | the bytes of a committed file are read as `s` exactly when they are the UTF-8 encoding of `print s` |
 | `Statement.plain_print` | the text's only control character is the line feed that ends each line, and it holds no line or paragraph separator and no bidirectional formatting character, so each line a display shows is a line the parser reads |
 
-The grammar leaves the printer no freedom: each field has a fixed place and keyword, a list is printed in the statement's order after its length, a number in decimal with no leading zero, a date as `YYYY-MM-DD`, a name of a project, principal or statement in a closed set of ASCII characters, a public key as OpenSSH writes its first two fields, and any other string on one line or as lines that start with `| `, with `\` and each control, separator or bidirectional formatting character written as an escape. The printer and the parser are assembled from codecs (`LeanIntent.Codec`), each a printer with a parser and a proof that the parser reads back what it prints, so the round trip of the whole grammar holds by construction; `Codec.read` accepts a text only when printing what it read gives the same text back, which makes the parser exact.
+The grammar leaves the printer no freedom: each field has a fixed place and keyword, a list is printed in the statement's order after its length, a number in decimal with no leading zero, a date as `YYYY-MM-DD`, a name of a project, principal or statement in a closed set of ASCII characters, a public key as OpenSSH writes its first two fields, and any other string on one line, or as the number of its lines and then each line after `| `, with `\` and each control, separator or bidirectional formatting character written as an escape. The printer and the parser are assembled from codecs (`LeanIntent.Codec`), each a printer with a parser and a proof that the parser reads back what it prints, so the round trip of the whole grammar holds by construction; `Codec.read` accepts a text only when printing what it read gives the same text back, which makes the parser exact.
 
 An answer, as [`LeanIntentExamples/Statements.lean`](LeanIntentExamples/Statements.lean) states it and proves its text (`declined_text`):
 
@@ -215,4 +215,4 @@ The log is read, not yet judged: whether an answer's authority traces back to a 
 
 ## Design
 
-The obligations are Lean propositions about the record, and the store of statements is Lean's environment, in which a record, once declared, has a fixed value.
+The obligations are Lean propositions about the record, and the store of a record's statements is Lean's environment, in which a record, once declared, has a fixed value.
