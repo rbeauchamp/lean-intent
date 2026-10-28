@@ -1,0 +1,93 @@
+# Configuration of the no-mistakes pipeline that every change to lean-intent passes through.
+#
+# `test` is no-mistakes' fixed name for one of its steps and for the key below; lean-intent itself
+# has no tests. Every claim the library makes about itself is a theorem Lean's kernel checks, and
+# tools/check.lean is the repository's one check program: it builds the library with warnings as
+# errors and audits the axioms every declaration rests on, and with --tests it lists the
+# repository's tests. no-mistakes honours `test.instructions`, `test.no_surface` and
+# `test.tests_as_evidence` only from the copy of this file on the default branch, so a change to
+# any of them governs the runs that follow its merge.
+#
+# Memory. Lean work runs through `no-mistakes admit` with a bound above its peak, so that it waits
+# until the bound fits the machine's memory budget beside all other admitted work. Measured on
+# 2026-10-27 as the largest sum of resident memory over the processes each ran, which counts the
+# .olean files every Lean process maps and so bounds their footprint from above: the check, from a
+# clean checkout, 1.7 GiB; the listing, which elaborates tools/check.lean against Lean and Lake,
+# 4.8 GiB per side. Measure again when the library grows, and raise a bound before a peak comes
+# within 15% of it.
+test:
+  instructions: |
+    On lean-intent this step is verification. A change's claims are established by machine-checked proof, by derivation and by reading; lean-intent has no running product to drive.
+    1. Run the repository's checks from the worktree root and cite the command and its exit status: no-mistakes admit --memory 3GiB --limit "none; measured peak 1.7 GiB" -- lean --run tools/check.lean. It exits 0 only when lakefile.toml requires no other package, Lake builds every library module with no error and no warning (a sorry is a warning), and every declaration of the library rests only on Lean's axioms propext, Classical.choice and Quot.sound. tools/check.lean's module comment says what each rule decides; claim no more than that.
+    2. Do not write, request or suggest a test, and do not improvise disposable break-it runs as evidence: lean-intent establishes its claims by theorems. A claim about what a theorem states is settled by reading its statement, binders and hypotheses included, never its docstring or name alone.
+    3. Report each claim by how it was established: machine-checked (a Lean proof that the check above built; cite the theorem and the command's exit status), argued (by derivation or by reading; cite the file and lines), observed (executed in this run for this claim), assumed (a hypothesis the change relies on; say why it is trusted) or open (not established; say what would establish it and which issue tracks it).
+  # lean-intent has no running product; proof, its check and reading settle its claims.
+  no_surface: proceed
+  # lean-intent adds no tests, and this makes the pipeline hold every change to that. The listing
+  # is tools/check.lean run with --tests, which prints one line for each command whose verdict comes
+  # from running code on chosen inputs, read through Lean's frontend, and fails rather than printing
+  # nothing when it cannot read a file. Its module comment says what it lists and what it does not.
+  tests_as_evidence:
+    policy: forbid
+    list_command: no-mistakes admit --memory 5GiB --limit "none; measured peak 4.8 GiB" -- lean --run tools/check.lean --tests
+
+# The merge gate. lean-intent has no CI: on 2026-10-28 the owner made the validation no-mistakes
+# runs before a pull request opens the repository's merge gate, in place of GitHub Actions, so the
+# checks CI ran on GitHub's machines run on the owner's machine instead. `no_ci` declares that a
+# pull request with no checks has nothing pending; a check the forge does report is still waited
+# on. no-mistakes honours `commands`, `no_ci` and `build_outputs` only from the copy of this file
+# on the default branch.
+no_ci: true
+
+# The Test step runs this command first, in the run's own checkout of the change it validates, and
+# parks when it exits with any status but 0. It runs every check the repository has, never a part
+# chosen by what a change seems to touch: tools/check.lean, and then its listing of tests, which
+# must print nothing. `set -e` ends the command with a status other than 0 as soon as either fails,
+# cannot start (`admit` exits 126 or 127) or is killed. Each also fails rather than passing when
+# it finds nothing to check: the checks refuse a library with no Lean file or no declaration, and
+# the listing a project with no Lean file. Measured on 2026-10-28 from a clean clone, with nothing
+# to reuse: the whole command took 28 seconds, and the resident memory of its processes summed to
+# at most 4.7 GiB, below the listing's 6 GiB bound by more than the 15% the paragraph on memory
+# above asks for.
+#
+# What a change re-checks is Lake's decision: Lake reuses an earlier output only where its own
+# record of the module's inputs matches, the trace in .lake/build or the input hash that finds an
+# output in its artifact cache. LAKE_CACHE_DIR names the cache that build_outputs below seeds, so
+# Lake never reads its shared default cache in the toolchain's directory. LAKE_ARTIFACT_CACHE is
+# unset, so Lake reads that cache, as it does by default, and never writes it. Lake stores no
+# build log with a cached output, so a module it takes from the cache into a build directory that
+# holds no trace of it replays no warning, and `lake build --wfail` passes it whatever its build
+# printed (Lake's traces in .lake/build do keep each build's log). The cache must therefore hold
+# only outputs whose build printed no warning: only the seed below writes it, and its outputs are
+# stored only when they all built with none.
+commands:
+  test: |
+    set -eu
+    export LAKE_CACHE_DIR="$PWD/.lake/cache"
+    unset LAKE_ARTIFACT_CACHE
+    no-mistakes admit --memory 3GiB --limit "none; measured peak 1.7 GiB" -- lean --run tools/check.lean
+    mkdir -p .lake
+    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.8 GiB" -- lean --run tools/check.lean --tests > .lake/tests-listing
+    if [ -s .lake/tests-listing ]; then
+      echo "The listing of tests is not empty; lean-intent establishes its claims by proof:"
+      cat .lake/tests-listing
+      exit 1
+    fi
+
+# The outputs a run starts from: Lake's artifact cache, written by the repository's checks run
+# once on a fresh checkout of the run's base commit. no-mistakes stores the directory only when
+# the command exits 0, and the checks exit 0 only when `lake build --wfail` built every library
+# module, each from source since the checkout and the cache start empty, with no warning. Each run
+# gets a private copy, used only while lean-toolchain is unchanged, and Lake takes an output from
+# it only for a module whose input hash (its source, its imports' outputs, its options and the
+# toolchain) is the one that output was built from. no-mistakes does not admit this build against
+# the machine's heavy-work budget, so the command admits itself. LAKE_RESTORE_ARTIFACTS has Lake
+# put any output it takes from the cache in .lake/build too, where the axiom audit reads it; the
+# Test command needs no such setting, because Lake restores every output it takes from a cache it
+# only reads.
+build_outputs:
+  command: no-mistakes admit --memory 3GiB --limit "none; measured peak 1.7 GiB" -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true lean --run tools/check.lean
+  directories:
+    - .lake/cache
+  toolchain_files:
+    - lean-toolchain
