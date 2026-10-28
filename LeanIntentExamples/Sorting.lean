@@ -211,12 +211,13 @@ theorem sort_fulfils : sorting.Fulfilled sort := fulfils implSpec_refines fun _ 
 /-! ## The records explained for their owner
 
 Each explanation glosses every statement of its record in plain words and lists the consequences
-the owner is asked to confirm or decline, each with its proof. `LeanIntent.Render` renders them
-with every statement printed exactly. Shown `sortedOnlyExplained`, the owner declines its
-consequence that the function returning the empty list meets the record, which is how the
-forgotten rearrangement property comes to light in plain words; shown `sortingExplained`, they
-confirm that exactly one function meets the corrected record, and that the empty-list function
-fails it. -/
+the owner is asked to confirm or decline, each shown as an entailment or as a possibility, with a
+proof that it holds of the record as shown. `LeanIntent.Render` renders them with every statement
+printed exactly. Shown `sortedOnlyExplained`, the owner declines the possibility that a function
+meeting the record returns the empty list for every input, which is how the forgotten
+rearrangement property comes to light in plain words; shown `sortingExplained`, they confirm that
+every function meeting the corrected record is Lean's merge sort, and so not the empty-list
+function. -/
 
 /-- The plain words for a function from lists of integers to lists of integers. -/
 def listFunctionShape : Gloss where
@@ -269,14 +270,18 @@ def sortedOnlyExplained : Explanation sortedOnly where
   props := [sortedGloss]
   vocab := [sortedPredGloss]
   consequences := [
-    (⟨"The function returning the empty list meets the record", sortedOnly.Meets nilSort,
-        sortedOnly_meets_nilSort⟩,
-      { requires := "That the function returning the empty list for every input meets every \
-          statement of the record."
-        rulesOut := "Nothing: it states what the record allows, not a further demand."
-        allows := "The function that returns the empty list for every input, beside a real sort."
-        freedom := "The record does not fix the output: a sort and the empty-list function both \
-          meet it. An owner who wanted a sort declines this consequence." })]
+    { consequence := ⟨"returning the empty list for every input", .possibility,
+        fun f => f = nilSort⟩
+      holds := show ∃ f, sortedOnly.Meets f ∧ f = nilSort from
+        ⟨nilSort, sortedOnly_meets_nilSort, rfl⟩
+      gloss :=
+        { requires := "Nothing of a function: it states that some function meeting the record \
+            returns the empty list for every input."
+          rulesOut := "Nothing: it states what the record allows, not a further demand."
+          allows := "The function that returns the empty list for every input, beside a real \
+            sort."
+          freedom := "The record does not fix the output: a sort and the empty-list function \
+            both meet it. An owner who wanted a sort declines this consequence." } }]
 
 /-- The corrected record, explained. -/
 def sortingExplained : Explanation sorting where
@@ -285,19 +290,27 @@ def sortingExplained : Explanation sorting where
   props := [sortedGloss, permGloss]
   vocab := [sortedPredGloss, permPredGloss]
   consequences := [
-    (⟨"The function returning the empty list fails the record", ¬ sorting.Meets nilSort,
-        sorting_refutes_nilSort⟩,
-      { requires := "That the function returning the empty list does not meet the record."
-        rulesOut := "The function returning the empty list, whose output for [0] is not a \
-          rearrangement of [0]."
-        allows := "Every function that meets the record."
-        freedom := "None that this consequence adds." }),
-    (⟨"Any two functions that meet the record are equal", O5 sorting .eq, sorting_o5_eq⟩,
-      { requires := "That any two functions meeting the record return the same output for every \
-          input: the record fixes the function completely."
-        rulesOut := "Two different functions both meeting the record."
-        allows := "Exactly one function, the one returning the ascending rearrangement of its \
-          input, such as Lean's merge sort."
-        freedom := "None: obligation O5 holds with equality." })]
+    { consequence := ⟨"is not the function returning the empty list for every input",
+        .entailment, fun f => f ≠ nilSort⟩
+      holds := show ∀ f, sorting.Meets f → f ≠ nilSort from
+        fun f hf h => sorting_refutes_nilSort (h ▸ hf)
+      gloss :=
+        { requires := "That every function meeting the record differs from the function \
+            returning the empty list for every input."
+          rulesOut := "The function returning the empty list, whose output for [0] is not a \
+            rearrangement of [0]."
+          allows := "Every function that meets the record."
+          freedom := "None that this consequence adds." } },
+    { consequence := ⟨"is Lean's merge sort", .entailment, fun f => f = sort⟩
+      holds := show ∀ f, sorting.Meets f → f = sort from
+        fun f hf => sorting_o5_eq.relates hf sorting_meets_sort
+      gloss :=
+        { requires := "That every function meeting the record returns, for every input, the \
+            same output as Lean's merge sort: the record fixes the function completely."
+          rulesOut := "Every function other than the sort, among them any that orders some \
+            input differently or drops an element."
+          allows := "Exactly one function, the one returning the ascending rearrangement of its \
+            input."
+          freedom := "None: obligation O5 holds with equality." } }]
 
 end LeanIntentExamples.Sorting

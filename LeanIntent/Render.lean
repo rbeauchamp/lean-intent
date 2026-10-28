@@ -6,9 +6,11 @@ import LeanIntent.Print
 # Rendering an intent record for its owner
 
 `renderExplanation` renders an `Explanation r` as a Markdown document: the record `r`'s shape, each
-domain hypothesis, property and vocabulary predicate, and each consequence, printed exactly and
-followed by its gloss in four parts; then the definitions the printed statements use from outside
-Lean's own libraries and this one, each printed with its type and, for a definition, its value.
+domain hypothesis, property and vocabulary predicate, and each consequence shown to the owner, its
+predicate printed exactly under a heading that says whether it is shown as an entailment or as a
+possibility, each followed by its gloss in four parts; then the definitions the printed statements
+use from outside Lean's own libraries and this one, each printed with its type and, for a
+definition, its value.
 `#render_intent e` shows the rendering of the explanation `e` as information. This module imports
 all of Lean, so a project that only writes records and explanations need not import it.
 
@@ -207,14 +209,21 @@ def renderExplanation (decl : Name) : MetaM String := do
       else
         doc := doc ++ statement (← strLit a[1]!) (← printExact a[2]!) (← readGloss gloss)
         printed := printed.push a[2]!
-  doc := doc ++ "## Consequences\n\n"
+  doc := doc ++ "## Consequences, each to confirm or decline\n\n"
   let consequences ← listElems ex[6]!
   if consequences.isEmpty then doc := doc ++ "None.\n\n"
-  for pair in consequences do
-    let p ← ctorArgs pair ``Prod.mk 4
-    let c ← ctorArgs p[2]! ``Consequence.mk 3
-    doc := doc ++ statement (← strLit c[0]!) (← printExact c[1]!) (← readGloss p[3]!)
-    printed := printed.push c[1]!
+  for shown in consequences do
+    let s ← ctorArgs shown ``Shown.mk 5
+    let c ← ctorArgs s[2]! ``Consequence.mk 4
+    let kind ← whnf c[2]!
+    let shownAs ←
+      if kind.isConstOf ``Consequence.Kind.entailment then
+        pure "an entailment: every subject that meets the record satisfies it"
+      else if kind.isConstOf ``Consequence.Kind.possibility then
+        pure "a possibility: some subject that meets the record satisfies it"
+      else throwError "expected the kind of a consequence, found{indentExpr kind}"
+    doc := doc ++ statement s!"{← strLit c[1]!}, {shownAs}" (← printExact c[3]!) (← readGloss s[4]!)
+    printed := printed.push c[3]!
   -- The record's own constant is the record shown above, statement by statement.
   let shown : NameSet := if let .const c _ := ex[1]! then ({} : NameSet).insert c else {}
   let deps ← dependencies printed shown

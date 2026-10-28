@@ -1,4 +1,4 @@
-import LeanIntent.Record
+import LeanIntent.Answers
 
 /-!
 # Plain-word explanations of an intent record
@@ -16,16 +16,19 @@ read either.
 An `Explanation r` gives a gloss for every statement of the intent record `r`: its shape, and each
 of its domain hypotheses, properties and vocabulary predicates, in the record's order. Its type
 requires as many glosses of each kind as the record has statements, so no statement is left
-without one. It also lists the record's consequences that the owner is asked to confirm or
-decline, each a named proposition with its proof (`Consequence`) and its gloss, so that no
-consequence shown to the owner is false. Keeping the owner's answers across revisions, and
-recording that only the owner gave them, are separate issues of this repository (lean-intent #3
-and #5).
+without one. It also lists the consequences of `r` shown to the owner, the consequences the owner
+answers (`LeanIntent.Consequence`), each with its gloss and a proof that it holds of `r` as shown
+(`Consequence.HoldsOf`): an entailment, that every model of `r` satisfies it; a possibility, that
+some model does. So no consequence is shown to the owner as entailed or as possible unless it is.
+The owner's answers to them are kept across revisions by `LeanIntent.Answers`; recording that only
+the owner gave them is lean-intent #5.
 -/
 
 namespace LeanIntent
 
 universe u
+
+variable {W : Type u}
 
 /-- A plain-word explanation of one statement, in four parts. Written by a model and trusted, not
 proved. -/
@@ -40,22 +43,27 @@ structure Gloss where
   may still differ in. -/
   freedom : String
 
-/-- A consequence of a record that the owner is asked to confirm or decline: a named proposition,
-such as that the record refutes a subject or meets an obligation, with its proof. The owner is
-shown only consequences that hold; declining one says that the record is not what they meant. -/
-structure Consequence where
-  /-- The name the owner reads the consequence by. -/
-  name : String
-  /-- The proposition. -/
-  statement : Prop
-  /-- Its proof. -/
-  proof : statement
+/-- The consequence `c` holds of the record `r` as it is shown: for an entailment, every model of
+`r` satisfies it; for a possibility, some model of `r` does. This is what the owner's confirming it
+asks of `r` (`Answer.KeptBy`). -/
+def Consequence.HoldsOf (c : Consequence W) (r : IntentRecord W) : Prop :=
+  (Answer.mk c .confirmed).KeptBy r
+
+/-- A consequence of the record `r` shown to the owner: the consequence, a proof that it holds of
+`r` as shown, and its gloss. -/
+structure Shown (r : IntentRecord W) where
+  /-- The consequence. -/
+  consequence : Consequence W
+  /-- It holds of `r` as it is shown. -/
+  holds : consequence.HoldsOf r
+  /-- Its gloss. -/
+  gloss : Gloss
 
 /-- An explanation of the intent record `r` for its owner: a gloss for its shape and for each of its
-domain hypotheses, properties and vocabulary predicates, in the record's order, and its
-consequences, each with its gloss. The default proofs of the three lengths are `rfl`, which holds
+domain hypotheses, properties and vocabulary predicates, in the record's order, and the
+consequences shown to the owner. The default proofs of the three lengths are `rfl`, which holds
 whenever the record's lists reduce to lists of known length. -/
-structure Explanation {W : Type u} (r : IntentRecord W) where
+structure Explanation (r : IntentRecord W) where
   /-- The gloss of the record's shape. -/
   shape : Gloss
   /-- The glosses of the domain hypotheses, in order. -/
@@ -64,8 +72,8 @@ structure Explanation {W : Type u} (r : IntentRecord W) where
   props : List Gloss
   /-- The glosses of the vocabulary predicates, in order. -/
   vocab : List Gloss
-  /-- The consequences shown to the owner, each with its gloss. -/
-  consequences : List (Consequence × Gloss)
+  /-- The consequences shown to the owner. -/
+  consequences : List (Shown r)
   dom_length : dom.length = r.dom.length := by rfl
   props_length : props.length = r.props.length := by rfl
   vocab_length : vocab.length = r.vocab.length := by rfl
