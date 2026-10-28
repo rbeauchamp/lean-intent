@@ -272,9 +272,9 @@ def sortedOnlyExplained : Explanation sortedOnly where
   consequences := [
     (⟨"The function returning the empty list meets the record", sortedOnly.Meets nilSort,
         sortedOnly_meets_nilSort⟩,
-      { requires := "Nothing more of a function than the record does: this states what the \
-          record already allows."
-        rulesOut := "Nothing."
+      { requires := "That the function returning the empty list for every input meets every \
+          statement of the record."
+        rulesOut := "Nothing: it states what the record allows, not a further demand."
         allows := "The function that returns the empty list for every input, beside a real sort."
         freedom := "The record does not fix the output: a sort and the empty-list function both \
           meet it. An owner who wanted a sort declines this consequence." })]

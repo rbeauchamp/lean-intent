@@ -13,7 +13,9 @@ Lean's own libraries and this one, each printed with its type and, for a definit
 all of Lean, so a project that only writes records and explanations need not import it.
 
 Every term is printed by `LeanIntent.Print.print`, whose output `LeanIntent.Print.parse` reads back
-as the very term printed, for every term (`LeanIntent.Print.parse_print`). Before a printed term is
+as the very term printed, for every term (`LeanIntent.Print.parse_print`), after
+`LeanIntent.Print.canon` renames the binders whose names cannot be written or would be misread,
+which changes nothing but those names (`LeanIntent.Print.eraseNames_canon`). Before a printed term is
 shown, Lean itself must read it back: Lean's parser and elaborator, in the root namespace with
 nothing opened, must elaborate the printed text to the same term, binder names aside, which Lean's
 kernel ignores. When they do not, the rendering is refused. So what the owner reads is what Lean
