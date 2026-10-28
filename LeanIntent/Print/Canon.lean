@@ -77,6 +77,18 @@ def canon (avoid : List Name) : List Name → Expr → Expr
   | sc, .proj s i e => .proj s i (canon avoid sc e)
   | _, e => e
 
+/-- `e` with every metadata node replaced by the term it annotates. Lean documents an annotated
+term, `Expr.mdata data e`, as definitionally equal to `e` itself, so this changes nothing a term
+means; `LeanIntent.Render` applies it before printing, since the printer writes no metadata. -/
+def eraseMData : Expr → Expr
+  | .app f a => .app (eraseMData f) (eraseMData a)
+  | .lam n t b bi => .lam n (eraseMData t) (eraseMData b) bi
+  | .forallE n t b bi => .forallE n (eraseMData t) (eraseMData b) bi
+  | .letE n t v b nd => .letE n (eraseMData t) (eraseMData v) (eraseMData b) nd
+  | .mdata _ e => eraseMData e
+  | .proj s i e => .proj s i (eraseMData e)
+  | e => e
+
 /-- `e` with every binder name erased. -/
 def eraseNames : Expr → Expr
   | .app f a => .app (eraseNames f) (eraseNames a)
