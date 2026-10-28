@@ -17,6 +17,12 @@ equality since a sorted rearrangement of a list is unique, and it refutes the em
 implementation specified by `ImplSpec` refines it, so the implementation `sort` fulfils the intent
 by the refinement link (`sort_fulfils`).
 
+The degenerate check finds the same omission from the subject's type alone: the degenerate subjects
+of `List Int → List Int` are the function returning the empty list and the identity
+(`degenerate_subjects`), the first meets `sortedOnly` and is reported as a possibility for the owner
+(`sortedOnly_verdicts`, `sortedOnly_possibilities`), and neither meets `sorting`
+(`sorting_verdicts`).
+
 The obligations also refuse in the other direction: a record under a contradictory domain
 hypothesis fails O2 (`contraDom_not_o2`), and a record whose property nothing fails fails O3
 (`anything_not_o3`).
@@ -166,6 +172,40 @@ theorem sorting_progress :
       O5 sorting .widest :=
   progress sorting ((o2_correct _).mp sorting_o2).1 ((o2_correct _).mp sorting_o2).2
     ((o3_correct _).mp sorting_o3) (fun _ h => nomatch h)
+
+/-! ## The degenerate subjects -/
+
+/-- The degenerate subjects of a function from lists of integers to lists of integers: the function
+returning the empty list, since lists are infinitely many and the class takes a list constant only
+at the empty list, and the identity, the one projection. -/
+theorem degenerate_subjects :
+    (degenerate (List Int → List Int)).map Degenerate.subject = [nilSort, fun l => l] := rfl
+
+/-- The record that forgets the rearrangement property is met by the function returning the empty
+list and not by the identity. -/
+theorem sortedOnly_verdicts : Verdicts sortedOnly [true, false] := by
+  show sortedOnly.Meets nilSort ∧ ¬ sortedOnly.Meets (fun l => l) ∧ True
+  refine ⟨sortedOnly_meets_nilSort, fun h => ?_, trivial⟩
+  exact absurd (List.rel_of_pairwise_cons (sortedOnly_meets.mp h [1, 0])
+    (List.mem_singleton_self 0)) (by decide)
+
+/-- So the check reports the function returning the empty list, as the possibility the owner is
+shown: "your specification allows returning the empty list for every input". -/
+theorem sortedOnly_metBy : (metBy (List Int → List Int) [true, false]).map Degenerate.subject =
+    [nilSort] := rfl
+
+theorem sortedOnly_possibilities :
+    (possibilities sortedOnly_verdicts).map Possibility.holds = [fun f => f = nilSort] :=
+  possibilities_holds sortedOnly_verdicts
+
+/-- The corrected record is met by neither, so the check reports nothing. -/
+theorem sorting_verdicts : Verdicts sorting [false, false] := by
+  show ¬ sorting.Meets nilSort ∧ ¬ sorting.Meets (fun l => l) ∧ True
+  refine ⟨sorting_refutes_nilSort, fun h => ?_, trivial⟩
+  exact absurd (List.rel_of_pairwise_cons ((sorting_meets.mp h).1 [1, 0])
+    (List.mem_singleton_self 0)) (by decide)
+
+theorem sorting_metBy_nil : metBy (List Int → List Int) [false, false] = [] := rfl
 
 /-! ## Records the obligations refuse -/
 
