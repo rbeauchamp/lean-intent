@@ -5,3 +5,4 @@ import LeanIntentExamples.Answers
 import LeanIntentExamples.Decision
 import LeanIntentExamples.Cone
 import LeanIntentExamples.Declared
+import LeanIntentExamples.Statements

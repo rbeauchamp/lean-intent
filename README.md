@@ -2,7 +2,7 @@
 
 A Lean library for writing what an owner wants as formal properties, and for checking that those properties are adequate, before any code is written.
 
-A proof shows that code meets its specification, never that the specification says what its owner meant. A specification that misses the owner's intent is a bug of the same standing as code that misses its specification. This library gives a Lean project, and the coding assistant working in it, seven things:
+A proof shows that code meets its specification, never that the specification says what its owner meant. A specification that misses the owner's intent is a bug of the same standing as code that misses its specification. This library gives a Lean project, and the coding assistant working in it, eight things:
 
 - **An intent record** (`LeanIntent.IntentRecord`): named properties of one deliverable's subject, over a vocabulary of predicates, under named domain hypotheses, written before the implementation exists.
 - **The adequacy obligations O1 to O5**, each computed from the record by a goal former whose correctness theorem is proved, so an assistant obtains each obligation from the library instead of writing a weaker one by hand: the record is well formed (O1), its hypotheses and then the whole record have a model (O2), each property can fail (O3), a subject that does nothing fails it (O4), and any two subjects that meet it are equal or differ only in a freedom the owner confirms (O5).
@@ -11,10 +11,11 @@ A proof shows that code meets its specification, never that the specification sa
 - **A rendering for the owner** (`LeanIntent.Render`): each statement of a record and each consequence shown to the owner printed exactly, by a printer proved to parse back what it prints, beside a plain-word explanation of what it requires, rules out, still allows, and the freedom it leaves, followed by every declaration the record's meaning reaches, printed in full, and the Lean release whose libraries the rest are. The owner confirms the record by reading it, and each answer has a canonical text of the same kind.
 - **The owner's answers** (`LeanIntent.Answer`, `LeanIntent.Accepted`): each consequence of a record the owner confirms or declines stays a requirement of every later revision, and a revision that breaks one is refused, by the answer it breaks.
 - **Cone exclusion** (`LeanIntent.Cone.checkRecord`): a decision procedure, with a theorem stating what it decides, that refuses an intent record whose meaning depends on a declaration of its implementation, read from Lean's own environment.
+- **The owners' log** (`LeanIntent.Statement`): who may answer for a project's intent, and each answer with where it came from, as statements committed in the project, each with exactly one text, whose parser reads back exactly what its printer writes and refuses every other text.
 
-**Complete in this version:** the intent record, the five obligations with their goal formers and correctness theorems, the progress theorem (the obligations refuse no record with content), the degenerate-subject check with the theorems that fix its class, the codes of the structures and inductive types a project declares, written from each declaration by a deriving handler, the refinement link with its transfer theorems, the audited printer and the rendering of records and their consequences with every declaration their meaning reaches, the canonical text of an answer, the owner's answers with the type of the revisions that keep them, cone exclusion with the theorem stating what it decides, and worked examples. Every claim the library makes about itself is a theorem Lean's kernel checks, resting only on Lean's own axioms, except the one the rendering checks each time it runs, that Lean reads each printed statement back as the term it is; that the code of each type a project declares is the one its declaration fixes, which rests on the deriving handler reading the declaration in order and on nothing else applying the private constructor that marks a declared type's code; and those listed under [What is trusted](#what-is-trusted) as argued, such as that the rendering prints each declaration it reaches in full. The repository has no tests.
+**Complete in this version:** the intent record, the five obligations with their goal formers and correctness theorems, the progress theorem (the obligations refuse no record with content), the degenerate-subject check with the theorems that fix its class, the codes of the structures and inductive types a project declares, written from each declaration by a deriving handler, the refinement link with its transfer theorems, the audited printer and the rendering of records and their consequences with every declaration their meaning reaches, the canonical text of an answer, the owner's answers with the type of the revisions that keep them, cone exclusion with the theorem stating what it decides, the grammar of the owners' log with its printer, its parser and their round trip, and worked examples. Every claim the library makes about itself is a theorem Lean's kernel checks, resting only on Lean's own axioms, except the one the rendering checks each time it runs, that Lean reads each printed statement back as the term it is; that the code of each type a project declares is the one its declaration fixes, which rests on the deriving handler reading the declaration in order and on nothing else applying the private constructor that marks a declared type's code; and those listed under [What is trusted](#what-is-trusted) as argued, such as that the rendering prints each declaration it reaches in full. The repository has no tests.
 
-**Not yet built**, each a separate issue of this repository: recording the owner's confirmations so that only the owner can make them (#5), extending the degenerate check to recursive, nested and mutual declared types (#23) and to higher-order subjects and large finite types (#11), an audit that each declared type's code is the one its declaration fixes (#24), and rendering a record whose meaning reaches a definition by recursion or one that uses `let`, which the rendering refuses today (#22). Until #5 lands, nothing in the library establishes that the owner made a stored answer, or confirmed a record or a freedom.
+**Not yet built**, each a separate issue of this repository: deciding from the owners' log whether each answer's authority traces back to a declared owner (#5, through #18), extending the degenerate check to recursive, nested and mutual declared types (#23) and to higher-order subjects and large finite types (#11), an audit that each declared type's code is the one its declaration fixes (#24), and rendering a record whose meaning reaches a definition by recursion or one that uses `let`, which the rendering refuses today (#22). Until #5 lands, nothing in the library establishes that the owner made a stored answer, or confirmed a record or a freedom.
 
 ## Using it
 
@@ -126,6 +127,56 @@ A record written from the code proves nothing about intent: the property `fun f 
 
 It follows every declaration's type, every definition's value, an inductive type's mutual block, constructors and recursors (`I.rec`, and, for a block with nested occurrences, the recursors `b.rec_1`, `b.rec_2` and so on that Lean names after the block's first type `b`), a constructor's inductive type, and a recursor's mutual block and rules, but not a theorem's proof or an opaque constant's value: Lean's kernel never unfolds an opaque constant, and with definitional proof irrelevance any two proofs of a proposition are equal, so neither changes what the record means. Nor does it follow the mutual block of a definition, theorem or opaque constant, which Lean's kernel does not read; since Lean may compile mutually recursive definitions into one helper named under only one of them (`f._mutual` for `f` and `g`), name every member of such a block as the implementation's. It refuses rather than accepts when it cannot read the whole cone: a reached name with no declaration, or a reached axiom other than Lean's three. In a module of Lean's module system, an imported theorem, and an imported definition whose body is not exposed, are shown as axioms, so run the check where every module is imported in full, such as in a file outside the module system. A property that restates the implementation's body without naming it passes the check; it reaches the owner as "the output is computed exactly as this expression", and noticing that is left to the owner's confirmation.
 
+## The owners' log
+
+A project records who may answer for its intent, and each answer, as statements committed in the project (`LeanIntent.Statement`). An answer counts only when a declared owner made it, or a party acting under a delegation that traces back to one, within its scope; the log is the record of where each came from, reviewed like any other change. There are five kinds of statement:
+
+- an owners declaration: the principals, each with the public keys it signs with, if any, and optionally how many owners must approve the next declaration;
+- a delegation: who grants it, as an owner or under which delegation; the delegate; the records it covers (all, or those named); whether the delegate may confirm, decline and retract; and whether it may pass the delegation on;
+- an answer: who answers, and under which delegation, if any; the intent record and the revision of it that was shown; the consequence's name, kind and predicate as they were shown; and the verdict;
+- a retraction of an answer, and a revocation of a delegation, each naming the statement it withdraws.
+
+Every statement also names its project, its id, the date, and its source: the owner's words, or a reference to where they are kept. Nothing requires a signature; a project that signs signs the same text.
+
+A reviewer reads a statement's text, the project commits it and a check reads it, so each statement has exactly one text:
+
+| Theorem | What it establishes, for every statement `s` and text `t` |
+|---|---|
+| `Statement.parse_eq_some_iff` | `parse t = some s` exactly when `print s = t`: the parser accepts exactly the printed texts, reads each as the statement printed, and refuses every other text |
+| `Statement.parse_print` | `parse (print s) = some s` |
+| `Statement.print_injective` | two statements with the same text are equal |
+| `Statement.parseUTF8_eq_some_iff` | the bytes of a committed file are read as `s` exactly when they are the UTF-8 encoding of `print s` |
+| `Statement.plain_print` | the text's only control character is the line feed that ends each line, and it holds no line or paragraph separator and no bidirectional formatting character, so each line a display shows is a line the parser reads |
+
+The grammar leaves the printer no freedom: each field has a fixed place and keyword, a list is printed in the statement's order after its length, a number in decimal with no leading zero, a date as `YYYY-MM-DD`, a name of a project, principal or statement in a closed set of ASCII characters, a public key as OpenSSH writes its first two fields, and any other string on one line or as lines that start with `| `, with `\` and each control, separator or bidirectional formatting character written as an escape. The printer and the parser are assembled from codecs (`LeanIntent.Codec`), each a printer with a parser and a proof that the parser reads back what it prints, so the round trip of the whole grammar holds by construction; `Codec.read` accepts a text only when printing what it read gives the same text back, which makes the parser exact.
+
+An answer, as [`LeanIntentExamples/Statements.lean`](LeanIntentExamples/Statements.lean) states it and proves its text (`declined_text`):
+
+```
+lean-intent statement 1
+kind answer
+project lean-intent
+id sorting-empty-list
+date 2026-10-28
+words 1
+| No: a sort that returns the empty list for every input is not what I mean.
+by richard
+as owner
+record LeanIntentExamples.sorting
+revision 2
+| sorted: ∀ l, Sorted (f l)
+| rearranges: ∀ l, (f l).Perm l
+consequence returning the empty list for every input
+shown as possibility
+predicate 1
+| fun f => f = fun _ => []
+verdict declined
+```
+
+A checkout that rewrites a statement's bytes, by converting its line endings or adding a byte-order mark, makes the parser refuse it; a project keeps its log out of Git's line-ending conversion, for example with `-text` in `.gitattributes`.
+
+The log is read, not yet judged: whether an answer's authority traces back to a declared owner within the scope of every delegation on the way is #18's decision, how an answer prints its predicate's full meaning is #17's, and checking signatures, for a project that signs, is #19's.
+
 ## Worked examples
 
 - [`LeanIntentExamples/Sorting.lean`](LeanIntentExamples/Sorting.lean): a sorting record that forgets that the output is a rearrangement of the input fails O5, because the function returning the empty list meets it (`sortedOnly_not_o5_eq`); the corrected record meets O1 to O5, refutes that function, and is fulfilled by `List.mergeSort` through the refinement link. The degenerate check reports the empty-list function for the first record (`sortedOnly_verdicts`, `sortedOnly_possibilities`) and nothing for the corrected one (`sorting_verdicts`), which keeps the owner's declining it (`sorting_keeps_declined`). A contradictory domain hypothesis fails O2, and a property nothing fails fails O3. Both records are explained for their owner (`sortedOnlyExplained`, `sortingExplained`): shown the first, the owner declines its possibility that a function meeting it returns the empty list for every input.
@@ -134,6 +185,7 @@ It follows every declaration's type, every definition's value, an inductive type
 - [`LeanIntentExamples/Declared.lean`](LeanIntentExamples/Declared.lean): a structure `Point`, an inductive type `Light`, a structure with a parameter and a structure with a field of a declared type, each coded by `deriving LeanIntent.HasCode`; the codes and isomorphisms follow the declarations (`point_code`, `light_iso`). A function from points to numbers has the constant at zero and the projections onto the coordinates, and a record asking only for a result at least the first coordinate is met by the projection onto it, which the check reports (`atLeastX_verdicts`); a function from lights to lights has the constant at each light and the identity, and a record asking only that red follow green is met by the constant at red.
 - [`LeanIntentExamples/Transfer.lean`](LeanIntentExamples/Transfer.lean): a refinement link carries the record's guarantees to the mapping's image, not to the implementations themselves.
 - [`LeanIntentExamples/Answers.lean`](LeanIntentExamples/Answers.lean): the owner has declined the possibility of returning the empty list for every input and confirmed that returning `[1, 2]` for `[2, 1, 1]` is ruled out; the corrected sorting record keeps both and is accepted, so every accepted revision excludes the empty-list function; a revision that drops the rearrangement property is refused, breaking each answer by a witness; and a revision that renames the vocabulary and restates the two properties as one keeps both.
+- [`LeanIntentExamples/Statements.lean`](LeanIntentExamples/Statements.lean): the owner's answer declining that possibility, as a statement of the owners' log, and its text.
 - [`LeanIntentExamples/Cone.lean`](LeanIntentExamples/Cone.lean): on a small environment written by hand, cone exclusion refuses a record that reaches the implementation through a helper (`cheat_refused`) and accepts one that does not (`honest_accepted`).
 
 ## What is trusted
@@ -154,6 +206,8 @@ It follows every declaration's type, every definition's value, an inductive type
 - That a project checks its current revision against its stored answers, by declaring a value of `Accepted` for it under all of them; a project that declares none checks nothing.
 - That a record was written before its implementation was read. That it does not depend on its implementation is decided by cone exclusion against the declarations the caller names; that those names, with the declarations Lean names under them, cover the implementation, every member of a block of mutually recursive definitions included, is trusted.
 - That Lean's compiler runs cone exclusion as it is defined, and that `Environment.find?` returns the declarations Lean's kernel checked: cone exclusion's theorems are about its definitions.
+- That a statement of the owners' log is true: that its author made it, on its date, as its source says. The log records where each statement came from, and review of the change that commits it checks that, unless the project also signs it. The grammar fixes only what the statement says.
+- That a display shows the lines of a statement's text as its line feeds break them. A printed text holds no character that moves, erases, breaks or reorders a line, but characters that look alike stay alike, so two names a reader cannot tell apart may be different names.
 
 ## Checks
 
