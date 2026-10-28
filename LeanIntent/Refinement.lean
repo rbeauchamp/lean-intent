@@ -5,11 +5,10 @@ import LeanIntent.Progress
 
 Below the intent record every link is proved. An implementation of type `A` has a specification
 `S : A → Prop`, and a mapping `m : A → W` reads an implementation as the record's subject; the
-identity when the two types agree. `S` refines the record when every
-implementation meeting `S`, wherever the record's domain hypotheses hold of its subject, has a
-subject that meets every property (`Refines`). Specifications may be stacked: a lower specification
-refines a higher one under the same domain hypotheses (`RefinesSpec`), and the links compose
-(`Refines.comp`).
+identity when the two types agree. `S` refines the record when every implementation meeting `S`,
+wherever the record's domain hypotheses hold of its subject, has a subject that meets every
+property (`Refines`). Specifications may be stacked: a lower specification refines a higher one
+under the same domain hypotheses (`RefinesSpec`), and the links compose (`Refines.comp`).
 
 The link that matters is `fulfils`: from a proof that an implementation meets its specification and
 a proof that the specification refines the record, the implementation fulfils the record, for every

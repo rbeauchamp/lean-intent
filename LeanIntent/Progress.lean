@@ -6,9 +6,9 @@ import LeanIntent.Obligations
 The obligations must not refuse intent that has content. A record passes O1 to O5 whenever its
 domain hypotheses have a joint model, each predicate of its vocabulary has an instance, each
 property has a non-instance, and, for a subject with state, no subject that does nothing meets it;
-O5 is then met by the widest freedom, which is shown to the owner (`progress`). Before a deliverable runs, the record's joint model is supplied by
-the deliverable itself (`o2Run_of_meets`), so no record is asked for a model before the work that
-finds one.
+O5 is then met by the widest freedom, which is shown to the owner (`progress`). Before a
+deliverable runs, the record's joint model is supplied by the deliverable itself
+(`o2Run_of_meets`), so no record is asked for a model before the work that finds one.
 -/
 
 namespace LeanIntent
