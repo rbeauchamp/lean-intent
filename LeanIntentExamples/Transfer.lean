@@ -3,14 +3,13 @@ import LeanIntent
 /-!
 # What a refinement link does not carry
 
-Loam's record 0026 section 2.4 shows that refutability and determinacy at the intent record do not
-make a refining specification refutable or determinate: the record's guarantee holds of the
-mapping's image, not of the implementations themselves. Take the record over `Nat` with the one
-property `n = 0`, the specification `fun _ => True` over `Bool`, and the mapping sending every
-boolean to `0`. The link holds (`link`), the record meets O3 and O5 with equality
-(`isZero_o3`, `isZero_o5_eq`), and yet the specification has no counterexample
-(`spec_not_refutable`) and two distinct implementations meet it (`spec_not_determinate`): no
-counterexample to the record lies in the image.
+Refutability and determinacy at the intent record do not make a refining specification refutable
+or determinate: the record's guarantee holds of the mapping's image, not of the implementations
+themselves. Take the record over `Nat` with the one property `n = 0`, the specification
+`fun _ => True` over `Bool`, and the mapping sending every boolean to `0`. The link holds (`link`),
+the record meets O3 and O5 with equality (`isZero_o3`, `isZero_o5_eq`), and yet the specification
+has no counterexample (`spec_not_refutable`) and two distinct implementations meet it
+(`spec_not_determinate`): no counterexample to the record lies in the image.
 -/
 
 namespace LeanIntentExamples.Transfer

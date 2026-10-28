@@ -3,20 +3,19 @@ import LeanIntent.Progress
 /-!
 # Refinement links from an intent record to an implementation
 
-Below the intent record every link is proved (loam's record 0026 section 2.1). An implementation of
-type `A` has a specification `S : A → Prop`, and a mapping `m : A → W` reads an implementation as
-the record's subject; the identity when the two types agree. `S` refines the record when every
-implementation meeting `S`, wherever the record's domain hypotheses hold of its subject, has a
-subject that meets every property (`Refines`). Specifications may be stacked: a lower specification
-refines a higher one under the same domain hypotheses (`RefinesSpec`), and the links compose
-(`Refines.comp`).
+Below the intent record every link is proved. An implementation of type `A` has a specification
+`S : A → Prop`, and a mapping `m : A → W` reads an implementation as the record's subject; the
+identity when the two types agree. `S` refines the record when every implementation meeting `S`,
+wherever the record's domain hypotheses hold of its subject, has a subject that meets every
+property (`Refines`). Specifications may be stacked: a lower specification refines a higher one
+under the same domain hypotheses (`RefinesSpec`), and the links compose (`Refines.comp`).
 
 The link that matters is `fulfils`: from a proof that an implementation meets its specification and
 a proof that the specification refines the record, the implementation fulfils the record, for every
 implementation and every record. So a proof that the code meets its specification composes into a
 proof that it meets the intent.
 
-What the link carries, and what it does not (record 0026 section 2.4):
+What the link carries, and what it does not:
 
 * the freedom O5 confirms holds of the subjects of any two implementations meeting the
   specification, not of the implementations themselves (`Refines.determinate`), so concrete

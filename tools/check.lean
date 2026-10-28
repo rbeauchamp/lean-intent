@@ -35,9 +35,9 @@ The rules:
   target, and a `sorry` is a warning.
 * `AXIOMS`: no library module declares an axiom, and every constant a library module declares rests
   only on `propext`, `Classical.choice` and `Quot.sound`, Lean's own axioms. So no claim the
-  library makes about itself rests on `sorry` (`sorryAx`), on code run to decide it
-  (`Lean.ofReduceBool`, which `native_decide` adds) or on an axiom of the project. The library's
-  modules must declare at least one constant.
+  library makes about itself rests on `sorry` (`sorryAx`), on code run to decide it (the axiom
+  `native_decide` adds to the module that uses it, asserting what that code returned) or on an
+  axiom of the project. The library's modules must declare at least one constant.
 
 The rules read what the build produced, so they hold only if no code the build runs was written to
 defeat them: elaborating a Lean file runs the metaprograms it invokes.
@@ -48,8 +48,8 @@ With `--tests` this program checks nothing and prints the tests of the repositor
 for the no-mistakes pipeline, whose `test.tests_as_evidence` setting in `.no-mistakes.yaml` blocks
 a change whose listing gains a line that its base's listing lacks. A test is code whose verdict
 comes from running it on chosen inputs, rather than from a proof or a type-check over every input.
-This listing is loam's (`tools/proofs.lean` there), restated for one Lake project at the top level
-and for the Lean this repository pins. It reads:
+It reads one Lake project, the one at the repository's top level, and runs only under the Lean
+this repository pins (`testsLean`). It reads:
 
 * the project's Lean files, every one Git's index lists, `tools/` included, in an order in which
   every file comes after the files of the project it imports, as Lean's parser reads its header
@@ -82,8 +82,7 @@ configurations above; a proof about a chosen input, such as `example : f 3 = 9 :
 left to review. A proof written with `by` is read only as its syntax, so code that a project's macro
 or elaborator, or a configuration given as a term, would run inside it is not seen; nor is code
 that Lean evaluates to another end than a verdict, such as `include_str`'s path or a
-configuration's value. A term that uses `Lean.reduceBool` directly is refused by `AXIOMS` through
-the axiom `Lean.ofReduceBool` its proof needs.
+configuration's value.
 -/
 
 open Lean
@@ -215,14 +214,16 @@ partial def nodes (stx : Syntax) (acc : Array Syntax) : Array Syntax :=
   | _ => acc
 
 
-/-- The Lean release whose elaborators `testTokens`, `otherTokens` and `nativeConfig` describe. Loam
-read them from Lean 4.35.0; for 4.34.1 they were read again: its token table, with `Lean`, `Lake`
-and `Std` imported, holds the same 29 tokens that start with `#` and a letter, and its calls of
-`evalTerm`, `evalExpr`, `evalConst` and `Meta.nativeEqTrue` under `Lean/Elab`, `Lean/Meta` and
-`Std` differ from 4.35.0's only by a moved file and by `Meta.reduceBoolNative`, which serves
-`Lean.reduceBool` and so `native_decide`. The listing refuses to run under any other release,
-whose elaborators they may not describe. -/
-def testsLean : String := "4.34.1"
+/-- The Lean release whose elaborators `testTokens`, `otherTokens` and `nativeConfig` describe. They
+were read from Lean 4.34.1 and again from 4.35.0: 4.35.0's token table, with `Lean`, `Lake` and
+`Std` imported, holds the same 29 tokens that start with `#` and a letter as 4.34.1's; and the
+declarations of its modules under `Lean.Elab`, `Lean.Meta`, `Std` and `Lake` that use
+`evalTerm`, `evalExpr`, `evalConst` or `Meta.nativeEqTrue` differ from 4.34.1's only by one
+declaration moved to another module, by the configuration of the `constructor` tactic, which Lean
+evaluates to its value, and by the removal of `Meta.reduceBoolNative`, which served
+`Lean.reduceBool`, a constant 4.35.0 no longer has. The listing refuses to run under any other
+release, whose elaborators they may not describe. -/
+def testsLean : String := "4.35.0"
 
 /-- The tokens of the commands, terms and tactics of the pinned Lean whose verdict comes from
 running code on inputs the file chooses, rather than from Lean's elaborator and kernel checking
@@ -232,8 +233,8 @@ that a term has a type. Two kinds, read from the pinned Lean's elaborators:
   `evalConst`) and fail when the evaluation throws or yields `false`: `#eval`, `#eval!` and `#guard`;
   `run_cmd`, `run_elab`, `run_meta` and `run_tac`, which run a metaprogram, and `by_elab`, which runs
   one to make a term; `test_extern`, which compares a function's compiled implementation with its
-  definition on an input; and `native_decide`, whose decision Lean's kernel takes from compiled
-  code (`Meta.nativeEqTrue`) instead of reducing it;
+  definition on an input; and `native_decide`, which takes its decision from compiled code
+  (`Meta.nativeEqTrue`) and adds an axiom asserting it, instead of Lean's kernel reducing it;
 * those that run a command, a tactic or a simp set on an input the file chooses and compare what it
   produced with what the file states: `#guard_msgs`, `#guard_panic`, `#guard_expr`, `#check_simp`,
   `#check_tactic` and `#check_tactic_failure`.
