@@ -2,3 +2,4 @@ import LeanIntentExamples.Sorting
 import LeanIntentExamples.Counter
 import LeanIntentExamples.Transfer
 import LeanIntentExamples.Answers
+import LeanIntentExamples.Decision
