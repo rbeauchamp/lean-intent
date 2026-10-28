@@ -41,16 +41,16 @@ def env : Name → Option ConstantInfo
 /-- The implementation's declarations: `impl` and everything Lean would name under it. -/
 def isImpl : Name → Bool := isImplDecl [`impl]
 
-theorem refersTo_defn {n c : Name} {v : Expr} : RefersTo (defn n v) c ↔ Mentions c v ∨ c = n := by
+theorem refersTo_defn {n c : Name} {v : Expr} : RefersTo (defn n v) c ↔ Mentions c v := by
   simp [defn, RefersTo, Mentions]
 
 /-- `cheat` is refused: its cone reaches `impl`, through `helper`. -/
 theorem cheat_refused (fuel : Nat) :
     exclude env declRefs isImpl leanAxioms fuel [`cheat] ≠ none := by
   have hHelper : Reaches env RefersTo [`cheat] `helper :=
-    .step (.root (List.mem_singleton.mpr rfl)) rfl (refersTo_defn.mpr (.inl rfl))
+    .step (.root (List.mem_singleton.mpr rfl)) rfl (refersTo_defn.mpr rfl)
   have hImpl : Reaches env RefersTo [`cheat] `impl :=
-    .step hHelper rfl (refersTo_defn.mpr (.inl rfl))
+    .step hHelper rfl (refersTo_defn.mpr rfl)
   exact exclude_ne_none_of_reaches mem_declRefs hImpl (by decide)
 
 /-- The cone of `honest` is `honest` and `vocab`. -/
@@ -59,7 +59,7 @@ theorem honest_cone {c : Name} (h : Reaches env RefersTo [`honest] c) :
   induction h with
   | root hr => exact .inl (List.mem_singleton.mp hr)
   | step _ hd hr ih =>
-    rcases ih with rfl | rfl <;> cases hd <;> simp_all [refersTo_defn, Mentions, or_comm]
+    rcases ih with rfl | rfl <;> cases hd <;> simp_all [refersTo_defn, Mentions]
 
 /-- `honest` is accepted, given fuel for its two declarations. -/
 theorem honest_accepted : exclude env declRefs isImpl leanAxioms 2 [`honest] = none := by

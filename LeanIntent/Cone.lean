@@ -12,11 +12,16 @@ the declarations its meaning depends on, transitively.
 * **What an expression names** (`Mentions`): a constant, the structure a projection reads, or the
   type of a literal. `exprRefs` lists them (`mem_exprRefs`).
 * **What a declaration refers to** (`RefersTo`): the names its type mentions; a definition's value;
-  the mutual block of a definition, theorem or opaque constant; an inductive type's block and
-  constructors; a constructor's inductive type; a recursor's block and rules. `declRefs` lists them
+  an inductive type's block, constructors and recursors, named as Lean names them (`I.rec`, and
+  `b.rec_1` to `b.rec_n` for the `n` auxiliary types of nested occurrences in a block whose first
+  type is `b`); a constructor's inductive type; a recursor's block and rules. `declRefs` lists them
   (`mem_declRefs`). A theorem's proof and an opaque constant's value are not followed: Lean's
   kernel never unfolds an opaque constant, and by definitional proof irrelevance any two proofs of
-  a proposition are equal, so neither changes what a term that names the constant means.
+  a proposition are equal, so neither changes what a term that names the constant means. Nor is the
+  mutual block of a definition, theorem or opaque constant, which Lean's kernel does not read. A
+  recursor reached through `casesOn`, `recOn`, `brecOn` or `below` is found through their values,
+  and one reached through a structure's projection through the structure, which the projection
+  names.
 * **The procedure** (`exclude`): a closure over names from the record, with a set of the names it
   has visited, that visits each name once and refuses at the first reached name that is a
   declaration of the implementation, that the environment does not declare, or that is an axiom
@@ -28,11 +33,13 @@ the declarations its meaning depends on, transitively.
 * **In a Lean environment** (`checkRecord`, `checkRecord_eq_ok_iff`): the lookup is
   `Environment.find?` with the bodies of the environment's own module visible; the
   implementation's declarations are the names the caller gives and every declaration named under
-  one of them, which is how Lean names the auxiliary declarations it makes (`isImplDecl`); and the
-  check refuses when the caller gives no name, or one the environment does not declare, since an
-  exclusion of nothing would accept every record. A record whose cone reaches a declaration of
-  the implementation is refused (`checkRecord_ne_ok_of_reaches`). `requireIndependent` runs the
-  check in `CoreM`.
+  one of them, which is how Lean names the auxiliary declarations it makes (`isImplDecl`); the
+  only axioms accepted are Lean's three, `propext`, `Classical.choice` and `Quot.sound`
+  (`leanAxioms`), so a record that depends on any other axiom is refused; the fuel is `2 ^ 64`,
+  more than the declarations that fit in a 64-bit address space; and the check refuses when the
+  caller gives no name, or one the environment does not declare, since an exclusion of nothing
+  would accept every record. A record whose cone reaches a declaration of the implementation is
+  refused (`checkRecord_ne_ok_of_reaches`). `requireIndependent` runs the check in `CoreM`.
 
 Every name is reached through declarations of any kind, so a dependency reached only through an
 auxiliary declaration Lean generates, such as a `match` compiler or a recursion helper, or through
@@ -45,11 +52,14 @@ What the theorems do not reach, and what is trusted:
   trusted with Lean.
 * In a module of Lean's module system, Lean shows an imported theorem, and an imported definition
   whose body is not exposed, as an axiom, so its body cannot be read. The check refuses every
-  axiom outside `axioms`, Lean's three by default, so such an environment is refused rather than
-  accepted on a body it cannot see; the check is meant to run where every module is imported in
-  full, such as in a file outside the module system.
+  axiom but Lean's three, so such an environment is refused rather than accepted on a body it
+  cannot see; the check is meant to run where every module is imported in full, such as in a file
+  outside the module system.
 * That the implementation's declarations are all named under the names the caller gives, beyond
-  those Lean generates.
+  those Lean generates. The mutual block of a definition is not followed, and Lean may compile a
+  block of mutually recursive definitions into one helper, named under only one member, that holds
+  every member's body (well-founded mutual `f` and `g` each name only `f._mutual`), so the caller
+  names every member of such a block as the implementation's.
 * A property that restates the implementation's body without naming it passes; its plain-word
   consequence, "the output is computed exactly as this expression", is left to the owner's
   confirmation. That the record was written before its implementation was read is not decided
@@ -456,40 +466,46 @@ end Decides
 /-! ## The names a declaration refers to -/
 
 /-- `RefersTo ci c`: the declaration `ci` refers to the constant `c`. Its type names `c`
-(`Mentions`); or it is a definition whose value names `c`; or a definition, theorem or opaque
-constant of a mutual block that holds `c`; or an inductive type whose mutual block or
-constructors hold `c`; or a constructor of the inductive type `c`; or a recursor whose mutual
-block holds `c`, or one of whose rules is for the constructor `c` or names `c` on its right-hand
-side. A theorem's proof and an opaque constant's value are not followed: Lean's kernel never
-unfolds an opaque constant, and with definitional proof irrelevance any two proofs of a
-proposition are equal, so neither changes what a term that names the constant means. -/
+(`Mentions`); or it is a definition whose value names `c`; or an inductive type whose mutual block
+or constructors hold `c`, or whose recursor is `c`; or a constructor of the inductive type `c`; or
+a recursor whose mutual block holds `c`, or one of whose rules is for the constructor `c` or names
+`c` on its right-hand side. An inductive type `I`'s recursor is `I.rec` (`mkRecName`), and, when
+its mutual block `b :: _` has `n` auxiliary types from nested occurrences, also each of `b.rec_1`
+to `b.rec_n`, which is how Lean names them. A theorem's proof and an opaque constant's value are
+not followed: Lean's kernel never unfolds an opaque constant, and with definitional proof
+irrelevance any two proofs of a proposition are equal, so neither changes what a term that names
+the constant means. Nor is the mutual block of a definition, theorem or opaque constant, which
+Lean's kernel does not read. -/
 def RefersTo : ConstantInfo → Name → Prop
   | .axiomInfo v, c => Mentions c v.type
-  | .defnInfo v, c => Mentions c v.type ∨ Mentions c v.value ∨ c ∈ v.all
-  | .thmInfo v, c => Mentions c v.type ∨ c ∈ v.all
-  | .opaqueInfo v, c => Mentions c v.type ∨ c ∈ v.all
+  | .defnInfo v, c => Mentions c v.type ∨ Mentions c v.value
+  | .thmInfo v, c => Mentions c v.type
+  | .opaqueInfo v, c => Mentions c v.type
   | .quotInfo v, c => Mentions c v.type
-  | .inductInfo v, c => Mentions c v.type ∨ c ∈ v.all ∨ c ∈ v.ctors
+  | .inductInfo v, c => Mentions c v.type ∨ c ∈ v.all ∨ c ∈ v.ctors ∨ c = mkRecName v.name ∨
+      ∃ b ∈ v.all.head?, ∃ i < v.numNested, c = (mkRecName b).appendIndexAfter (i + 1)
   | .ctorInfo v, c => Mentions c v.type ∨ c = v.induct
   | .recInfo v, c => Mentions c v.type ∨ c ∈ v.all ∨ ∃ r ∈ v.rules, c = r.ctor ∨ Mentions c r.rhs
 
 /-- The names the declaration `ci` refers to (`RefersTo`), each as often as it occurs. -/
 def declRefs : ConstantInfo → List Name
   | .axiomInfo v => exprRefs v.type []
-  | .defnInfo v => exprRefs v.type (exprRefs v.value v.all)
-  | .thmInfo v => exprRefs v.type v.all
-  | .opaqueInfo v => exprRefs v.type v.all
+  | .defnInfo v => exprRefs v.type (exprRefs v.value [])
+  | .thmInfo v => exprRefs v.type []
+  | .opaqueInfo v => exprRefs v.type []
   | .quotInfo v => exprRefs v.type []
-  | .inductInfo v => exprRefs v.type (v.all ++ v.ctors)
+  | .inductInfo v => exprRefs v.type (v.all ++ v.ctors ++ mkRecName v.name ::
+      v.all.head?.toList.flatMap fun b =>
+        (List.range v.numNested).map fun i => (mkRecName b).appendIndexAfter (i + 1))
   | .ctorInfo v => exprRefs v.type [v.induct]
   | .recInfo v => exprRefs v.type (v.all ++ v.rules.flatMap fun r => r.ctor :: exprRefs r.rhs [])
 
 theorem mem_declRefs (ci : ConstantInfo) (c : Name) : c ∈ declRefs ci ↔ RefersTo ci c := by
-  cases ci <;> simp [declRefs, RefersTo, mem_exprRefs]
+  cases ci <;> simp [declRefs, RefersTo, mem_exprRefs, eq_comm (a := c)]
 
 /-! ## The check in a Lean environment -/
 
-/-- The axioms the check accepts unless told otherwise: Lean's own. -/
+/-- The axioms the check accepts, and the only ones: Lean's own. -/
 def leanAxioms : List Name := [``propext, ``Classical.choice, ``Quot.sound]
 
 /-- `c` is a declaration of the implementation whose declarations `impl` names: some name of
@@ -521,15 +537,15 @@ def firstUnknown (env : Environment) : List Name → Option Name
 /-- The check of the intent record declared as `record` against the implementation whose
 declarations `impl` names, in `env`: `.ok ()` when it accepts. It refuses when `impl` is empty or
 names an undeclared name, since an exclusion of nothing would accept every record, and otherwise
-when `exclude` refuses from `record`. The default fuel, `2 ^ 64`, exceeds the number of
-declarations that fit in a 64-bit address space. -/
-def checkRecord (env : Environment) (record : Name) (impl : List Name)
-    (axioms : List Name := leanAxioms) (fuel : Nat := 2 ^ 64) : Except (Unchecked ⊕ Refusal) Unit :=
+when `exclude` refuses from `record`, accepting no axiom but Lean's three (`leanAxioms`), with fuel
+`2 ^ 64`, more than the number of declarations that fit in a 64-bit address space. -/
+def checkRecord (env : Environment) (record : Name) (impl : List Name) :
+    Except (Unchecked ⊕ Refusal) Unit :=
   if impl.isEmpty then .error (.inl .noImpl) else
     match firstUnknown env impl with
     | some i => .error (.inl (.implUnknown i))
     | none =>
-      match exclude (lookupIn env) declRefs (isImplDecl impl) axioms fuel [record] with
+      match exclude (lookupIn env) declRefs (isImplDecl impl) leanAxioms (2 ^ 64) [record] with
       | some r => .error (.inr r)
       | none => .ok ()
 
@@ -543,14 +559,13 @@ theorem firstUnknown_eq_none {env : Environment} :
 /-- **What the check decides.** It accepts exactly when the implementation names a declaration and
 every name it gives is declared, and every name reached from `record` through the declarations of
 `env` and `RefersTo` is no declaration of the implementation (`isImplDecl`), is declared, and is
-no axiom outside `axioms`, with at most `fuel` names reached. -/
-theorem checkRecord_eq_ok_iff (env : Environment) (record : Name) (impl axioms : List Name)
-    (fuel : Nat) :
-    checkRecord env record impl axioms fuel = .ok () ↔
+no axiom but Lean's three (`leanAxioms`), with at most `2 ^ 64` names reached. -/
+theorem checkRecord_eq_ok_iff (env : Environment) (record : Name) (impl : List Name) :
+    checkRecord env record impl = .ok () ↔
       impl ≠ [] ∧ (∀ i ∈ impl, (lookupIn env i).isSome) ∧
       (∀ c, Reaches (lookupIn env) RefersTo [record] c →
-        Admitted (lookupIn env) (isImplDecl impl) axioms c) ∧
-      Within (lookupIn env) RefersTo [record] fuel := by
+        Admitted (lookupIn env) (isImplDecl impl) leanAxioms c) ∧
+      Within (lookupIn env) RefersTo [record] (2 ^ 64) := by
   rw [← exclude_eq_none_iff (deps := declRefs) mem_declRefs, ← firstUnknown_eq_none]
   unfold checkRecord
   cases impl with
@@ -562,12 +577,12 @@ theorem checkRecord_eq_ok_iff (env : Environment) (record : Name) (impl axioms :
     split <;> simp_all
 
 /-- **An intent record defined from its implementation is refused.** If a declaration of the
-implementation is reached from `record`, the check refuses, whatever the axioms and fuel. -/
-theorem checkRecord_ne_ok_of_reaches {env : Environment} {record c : Name}
-    {impl axioms : List Name} {fuel : Nat} (hc : Reaches (lookupIn env) RefersTo [record] c)
-    (hi : isImplDecl impl c = true) : checkRecord env record impl axioms fuel ≠ .ok () := by
+implementation is reached from `record`, the check refuses. -/
+theorem checkRecord_ne_ok_of_reaches {env : Environment} {record c : Name} {impl : List Name}
+    (hc : Reaches (lookupIn env) RefersTo [record] c) (hi : isImplDecl impl c = true) :
+    checkRecord env record impl ≠ .ok () := by
   intro h
-  have := (((checkRecord_eq_ok_iff env record impl axioms fuel).mp h).2.2.1 c hc).1
+  have := (((checkRecord_eq_ok_iff env record impl).mp h).2.2.1 c hc).1
   simp_all
 
 /-- What a refusal of `checkRecord` says, for the record `record`. -/
@@ -576,16 +591,17 @@ def describe (record : Name) : Unchecked ⊕ Refusal → String
   | .inl (.implUnknown i) => s!"the implementation's name {i} has no declaration here"
   | .inr (.impl c) => s!"{record} depends on {c}, a declaration of the implementation"
   | .inr (.unknown c) => s!"{record} depends on {c}, which has no declaration here"
-  | .inr (.axiom c) => s!"{record} depends on the axiom {c}, which is not among the axioms \
-      accepted; in a module of Lean's module system an imported theorem, or an imported \
-      definition whose body is not exposed, is shown as an axiom"
-  | .inr .fuel => s!"{record} depends on more declarations than the check was given fuel for"
+  | .inr (.axiom c) => s!"{record} depends on the axiom {c}, which is not one of Lean's three \
+      (propext, Classical.choice, Quot.sound); in a module of Lean's module system an imported \
+      theorem, or an imported definition whose body is not exposed, is shown as an axiom"
+  | .inr .fuel => s!"{record} depends on more than 2 ^ 64 declarations"
 
 /-- Throws an error, saying why, unless `checkRecord` accepts the intent record `record` against
-the implementation whose declarations `impl` names, in the current environment. -/
-def requireIndependent (record : Name) (impl : List Name) (axioms : List Name := leanAxioms) :
-    CoreM Unit := do
-  match checkRecord (← getEnv) record impl axioms with
+the implementation whose declarations `impl` names, in the current environment: it refuses a
+record whose cone reaches a declaration of the implementation, a name with no declaration, or an
+axiom other than Lean's three. -/
+def requireIndependent (record : Name) (impl : List Name) : CoreM Unit := do
+  match checkRecord (← getEnv) record impl with
   | .ok () => pure ()
   | .error e => throwError "intent record refused: {describe record e}"
 
