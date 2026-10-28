@@ -63,9 +63,9 @@ no_ci: true
 # cannot start (`admit` exits 126 or 127) or is killed. Each also fails rather than passing when
 # it finds nothing to check: the checks refuse a library with no Lean file or no declaration, and
 # the listing a project with no Lean file. Measured on 2026-10-28 from a clean clone, with nothing
-# to reuse: the whole command took 28 seconds, and the resident memory of its processes summed to
-# at most 4.7 GiB, below the listing's 6 GiB bound by more than the 15% the paragraph on memory
-# above asks for.
+# to reuse, after LeanIntent.Render brought all of Lean into the library: the whole command took
+# under a minute, and the resident memory of its processes summed to at most 4.8 GiB, below the
+# listing's 6 GiB bound by more than the 15% the paragraph on memory above asks for.
 #
 # What a change re-checks is Lake's decision: Lake reuses an earlier output only where its own
 # record of the module's inputs matches, the trace in .lake/build or the input hash that finds an
