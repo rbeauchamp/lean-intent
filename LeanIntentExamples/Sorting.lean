@@ -3,14 +3,13 @@ import LeanIntent
 /-!
 # A sorting function whose rearrangement property is forgotten
 
-Loam's record 0026 section 2.7 works this case. An owner asks for a function that sorts lists of
-integers into ascending order. The intent record first written, `sortedOnly`, has one property, that
-every output is sorted, and forgets that the output must be a rearrangement of the input. Before any
-code exists the obligations expose the omission: the function returning the empty list meets
-`sortedOnly` beside a real sort, so `sortedOnly` fails O5 with equality (`sortedOnly_not_o5_eq`),
-and any freedom that meets O5 relates the sort to the empty-list function (`sortedOnly_o5_rel`),
-which is the freedom the owner would be shown and decline. Only the widest freedom meets it
-(`sortedOnly_o5_widest`).
+An owner asks for a function that sorts lists of integers into ascending order. The intent record
+first written, `sortedOnly`, has one property, that every output is sorted, and forgets that the
+output must be a rearrangement of the input. Before any code exists the obligations expose the
+omission: the function returning the empty list meets `sortedOnly` beside a real sort, so
+`sortedOnly` fails O5 with equality (`sortedOnly_not_o5_eq`), and any freedom that meets O5 relates
+the sort to the empty-list function (`sortedOnly_o5_rel`), which is the freedom the owner would be
+shown and decline. Only the widest freedom meets it (`sortedOnly_o5_widest`).
 
 The corrected record, `sorting`, adds the rearrangement property. It meets O1 to O5, O5 with
 equality since a sorted rearrangement of a list is unique, and it refutes the empty-list function

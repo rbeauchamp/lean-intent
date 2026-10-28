@@ -3,7 +3,7 @@
 
 An intent record is the first formal statement of what an owner wants from one deliverable, written
 before any implementation exists: named properties of a subject, over a vocabulary of predicates,
-under named domain hypotheses (loam's record 0026, sections 2.1 and 2.2).
+under named domain hypotheses.
 
 * The *subject* is what the intent is about, a value of a type `W : Type u`: a function, a step of
   a system with state, or any other value. Its `Shape` says which, and so fixes what doing nothing

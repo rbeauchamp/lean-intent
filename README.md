@@ -15,7 +15,7 @@ A proof shows that code meets its specification, never that the specification sa
 
 ## Using it
 
-The library depends on nothing beyond Lean's own libraries, and builds on the Lean release `lean-toolchain` names (`v4.34.1`). Add it to a Lake project's `lakefile.toml`:
+The library depends on nothing beyond Lean's own libraries, and builds on the Lean release `lean-toolchain` names (`v4.35.0`). Add it to a Lake project's `lakefile.toml`:
 
 ```toml
 [[require]]
@@ -93,6 +93,6 @@ Each correctness theorem equates the former's output with an intended propositio
 
 `tools/check.lean` is the repository's one check program. `lean --run tools/check.lean` builds the library with warnings as errors (a `sorry` is a warning), refuses a `lakefile.toml` that requires another package, and audits every declaration's axioms; `lean --run tools/check.lean --tests` lists the repository's tests, which must be none. Its module comment states what each rule decides and what it does not. lean-intent has no CI: the local no-mistakes validation is its merge gate, and its Test step runs both, failing when the listing prints anything (`commands.test` in `.no-mistakes.yaml`).
 
-## Origin
+## Design
 
-This library ports the intent-and-specification layer that loam designed in its record 0026 and built in part (loam #241 and #242). Loam states the obligations about terms of its own kernel, read in a set model; here they are Lean propositions, and the store of statements is Lean's environment.
+The obligations are Lean propositions about the record, and the store of statements is Lean's environment, in which a record, once declared, has a fixed value.
