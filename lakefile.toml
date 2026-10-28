@@ -1,0 +1,14 @@
+name = "lean-intent"
+defaultTargets = ["LeanIntent", "LeanIntentExamples"]
+
+[leanOptions]
+autoImplicit = false
+relaxedAutoImplicit = false
+
+# The library a project depends on.
+[[lean_lib]]
+name = "LeanIntent"
+
+# The worked examples, which no dependent project needs to build.
+[[lean_lib]]
+name = "LeanIntentExamples"
