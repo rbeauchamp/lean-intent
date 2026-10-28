@@ -23,13 +23,29 @@ test:
     3. Report each claim by how it was established: machine-checked (a Lean proof that the check above built; cite the theorem and the command's exit status), argued (by derivation or by reading; cite the file and lines), observed (executed in this run for this claim), assumed (a hypothesis the change relies on; say why it is trusted) or open (not established; say what would establish it and which issue tracks it).
   # lean-intent has no running product; proof, its check and reading settle its claims.
   no_surface: proceed
-  # lean-intent adds no tests, and this makes the pipeline hold every change to that. The listing
-  # is tools/check.lean run with --tests, which prints one line for each command whose verdict comes
-  # from running code on chosen inputs, read through Lean's frontend, and fails rather than printing
-  # nothing when it cannot read a file. Its module comment says what it lists and what it does not.
+  # lean-intent adds no tests, and this makes the pipeline hold every change to that. no-mistakes
+  # runs the listing in a fresh checkout of a change's head and of its base, whose Git index holds
+  # exactly that commit's files. Where the index lists no Lean file, the checkout holds no test,
+  # since lean-intent's tests can only be commands in Lean files or a Lake test driver, which needs
+  # a Lean module: there the listing prints nothing and exits 0. That is the case of a base that
+  # predates tools/check.lean, such as main's first commits, and without it no change could be
+  # compared with such a base. Everywhere else the listing runs exactly the command it ran before,
+  # tools/check.lean with --tests, and fails as before when that file is missing or cannot run.
+  # That program prints one line for each command whose verdict comes from running code on chosen
+  # inputs, read through Lean's frontend, and fails rather than printing nothing when it cannot
+  # read a file; its module comment says what it lists and what it does not. The guard asks Git the
+  # question that program asks for its own list of files, `git ls-files -- '*.lean'`, so it skips
+  # the listing only where that list is empty, which the program refuses; and `set -e` ends the
+  # command with a status other than 0, never an empty listing, when Git cannot answer. A head with
+  # no Lean file still fails the Test command below, which runs tools/check.lean first.
   tests_as_evidence:
     policy: forbid
-    list_command: no-mistakes admit --memory 5GiB --limit "none; measured peak 4.8 GiB" -- lean --run tools/check.lean --tests
+    list_command: |
+      set -e
+      lean_files=$(git ls-files -- '*.lean')
+      if [ -n "$lean_files" ]; then
+        no-mistakes admit --memory 5GiB --limit "none; measured peak 4.8 GiB" -- lean --run tools/check.lean --tests
+      fi
 
 # The merge gate. lean-intent has no CI: on 2026-10-28 the owner made the validation no-mistakes
 # runs before a pull request opens the repository's merge gate, in place of GitHub Actions, so the
