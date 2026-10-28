@@ -3,9 +3,10 @@ import LeanIntent.Print.Term
 /-!
 # The printer's output parses back to the term it printed
 
-`psTerm_pr` proves that `psTerm` reads back, from the tokens `pr` writes for a term at the lowest
-precedence, exactly that term, for every term, every scope and every choice of `bare`. The proof
-is by induction on the term, with one claim per precedence (`Claims`).
+`claims` proves that `psTerm` reads back, from the tokens `pr` writes for a term at the lowest
+precedence, exactly that term, for every term, every scope and every choice of `bare` (`ClaimT`).
+The proof is by induction on the term, with one claim per precedence (`ClaimA`, `ClaimH`,
+`ClaimS` and `ClaimT`).
 -/
 
 namespace LeanIntent.Print
