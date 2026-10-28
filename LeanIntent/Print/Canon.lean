@@ -5,11 +5,13 @@ import LeanIntent.Print.Term
 
 Lean names the binders it makes itself with macro scopes (`a✝`), which no identifier can write, and
 a term may shadow one binder by another of the same name. `canon` renames the binders of a term so
-that the printer can write every bound variable: a `∀` whose body does not use its variable and
-whose annotation is the default loses its name, and is printed as an arrow; every other binder
-keeps its name without macro scopes when that is one component that can be written and no
-enclosing binder or constant's first component has it, and otherwise takes the first of `x`,
-`x_1`, `x_2`, ... that none has.
+that the printer can write every bound variable, and renames only those it must: a binder keeps
+its name when that is one component that can be written and neither an enclosing binder nor the
+first component of a constant in the term has it, so that neither the printer's parser nor Lean
+can read the variable as another. A binder that cannot keep its name loses it when it is a `∀`
+whose body does not use its variable and whose annotation is the default, and is printed as an
+arrow; otherwise it takes its name without macro scopes when that can be kept, and else the first
+of `x`, `x_1`, `x_2`, ... that can.
 
 A binder's name is not part of what a term means: Lean's kernel compares terms with binder names
 ignored. `eraseNames_canon` proves that `canon` changes nothing else: with every binder name
@@ -38,10 +40,14 @@ def constRoots : Expr → List Name
   | .mdata _ e | .proj _ _ e => constRoots e
   | _ => []
 
+/-- Whether a binder can keep the name `n`: one component that can be written, which `avoid` does
+not hold. -/
+def keeps (avoid : List Name) (n : Name) : Bool := atomOk n && !avoid.contains n
+
 /-- A name for a binder named `n` that `avoid` does not hold. -/
 def pick (avoid : List Name) (n : Name) : Name :=
   let base := n.eraseMacroScopes
-  if atomOk base && !avoid.contains base then base
+  if keeps avoid base then base
   else
     let cands := (List.range (avoid.length + 1)).map fun k =>
       if k = 0 then Name.mkSimple "x" else Name.mkSimple ("x_" ++ toString k)
@@ -57,10 +63,13 @@ def isDefault : BinderInfo → Bool
 def canon (avoid : List Name) : List Name → Expr → Expr
   | sc, .app f a => .app (canon avoid sc f) (canon avoid sc a)
   | sc, .lam n t b bi =>
-    let n' := pick (avoid ++ sc) n
+    let n' := if keeps (avoid ++ sc) n then n else pick (avoid ++ sc) n
     .lam n' (canon avoid sc t) (canon avoid (n' :: sc) b) bi
   | sc, .forallE n t b bi =>
-    let n' := if isDefault bi && !usesBVar b 0 then .anonymous else pick (avoid ++ sc) n
+    let n' :=
+      if keeps (avoid ++ sc) n then n
+      else if isDefault bi && !usesBVar b 0 then .anonymous
+      else pick (avoid ++ sc) n
     .forallE n' (canon avoid sc t) (canon avoid (n' :: sc) b) bi
   | sc, .letE n t v b nd =>
     .letE n (canon avoid sc t) (canon avoid sc v) (canon avoid (n :: sc) b) nd
