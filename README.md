@@ -47,6 +47,7 @@ The owner reads each statement of a record, and each consequence they are asked 
 
 ```lean
 import LeanIntent.Render
+import LeanIntentExamples.Sorting
 
 #render_intent LeanIntentExamples.Sorting.sortingExplained
 ```
