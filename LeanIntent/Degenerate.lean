@@ -1,6 +1,5 @@
 import LeanIntent.Codes
-import LeanIntent.Consequence
-import LeanIntent.Obligations
+import LeanIntent.Answers
 
 /-!
 # The degenerate subjects of a subject's type
@@ -46,8 +45,11 @@ meets `r`: `true` that it does, `false` that it does not, as goals the agent pro
 each verdict is a theorem Lean's kernel checks, never the result of running code. The verdicts are
 part of the theorem's statement, and a list of the wrong length is refused (`verdicts_correct`).
 `metBy W bs` lists the degenerate subjects the verdicts say meet the record, which are exactly those
-that do (`mem_metBy`), and `possibilities` reports each as a possibility for the owner to confirm or
-decline.
+that do (`mem_metBy`). `possibilities W bs` reports each as a `Consequence` of kind possibility,
+the predicate that the subject is that degenerate subject (`Degenerate.consequence`), shown with a
+model of the record that satisfies it (`possibilities_model`), so the owner's answer to it can be
+stored and kept by every later revision (`LeanIntent.Answers`). A declined one is kept by exactly the
+revisions that the degenerate subject does not meet (`Degenerate.declined_keptBy_iff`).
 -/
 
 namespace LeanIntent
@@ -437,17 +439,43 @@ theorem metBy_eq_nil_iff {r : IntentRecord W} {bs : List Bool} (h : Verdicts r b
   rw [List.eq_nil_iff_forall_not_mem]
   exact forall_congr' fun d => by rw [mem_metBy h]; exact not_and
 
-/-- Each degenerate subject that meets the record, reported as the possibility that the subject is
-that degenerate subject, for the owner to confirm or decline. -/
-def possibilities {r : IntentRecord W} {bs : List Bool} (h : Verdicts r bs) :
-    List (Possibility r) :=
-  (metBy W bs).attach.map fun d => .ofModel d.1.subject ((mem_metBy h d.1).mp d.2).2
+/-- The name the owner reads a degenerate subject's consequence by: what kind of member it is. -/
+def Degenerate.name {σ : Sig} : Degenerate σ → String
+  | .const _ => "the record allows a subject that returns one value whatever its arguments"
+  | .proj _ => "the record allows a subject that returns one of its arguments, or a part of one"
 
-/-- The possibilities are, in order, that the subject is each degenerate subject the verdicts
-report. -/
-theorem possibilities_holds {r : IntentRecord W} {bs : List Bool} (h : Verdicts r bs) :
-    (possibilities h).map Possibility.holds = (metBy W bs).map fun d w => w = d.subject := by
-  simp [possibilities, Possibility.ofModel]
+/-- The consequence shown to the owner for a degenerate subject: the possibility that the subject is
+that degenerate subject. -/
+def Degenerate.consequence (d : Degenerate c.sig) : Consequence W :=
+  ⟨d.name, .possibility, fun w => w = d.subject⟩
+
+/-- The owner's declining a degenerate subject's consequence is kept by exactly the revisions that
+subject does not meet. -/
+theorem Degenerate.declined_keptBy_iff (d : Degenerate c.sig) (r : IntentRecord W) :
+    (Answer.mk d.consequence .declined).KeptBy r ↔ ¬ r.Meets d.subject := by
+  simp only [Answer.KeptBy, Degenerate.consequence]
+  exact ⟨fun h hm => h _ hm rfl, fun h w hm e => h (e ▸ hm)⟩
+
+/-- The consequences reported to the owner: one for each degenerate subject the verdicts `bs` say
+meets the record, in order. -/
+def possibilities (W : Type) [c : Covered W] (bs : List Bool) : List (Consequence W) :=
+  (metBy W bs).map Degenerate.consequence
+
+/-- Under proved verdicts, the reported consequences are exactly those of the degenerate subjects
+that meet the record. -/
+theorem mem_possibilities {r : IntentRecord W} {bs : List Bool} (h : Verdicts r bs)
+    (x : Consequence W) :
+    x ∈ possibilities W bs ↔ ∃ d ∈ degenerate W, r.Meets d.subject ∧ x = d.consequence := by
+  simp only [possibilities, List.mem_map, mem_metBy h]
+  exact ⟨fun ⟨d, ⟨hd, hm⟩, e⟩ => ⟨d, hd, hm, e.symm⟩, fun ⟨d, hd, hm, e⟩ => ⟨d, ⟨hd, hm⟩, e.symm⟩⟩
+
+/-- Each reported consequence is a possibility shown with a model of the record that satisfies
+it. -/
+theorem possibilities_model {r : IntentRecord W} {bs : List Bool} (h : Verdicts r bs)
+    (x : Consequence W) (hx : x ∈ possibilities W bs) :
+    x.kind = .possibility ∧ ∃ w, r.Meets w ∧ x.holds w := by
+  obtain ⟨d, _, hm, rfl⟩ := (mem_possibilities h x).mp hx
+  exact ⟨rfl, d.subject, hm, rfl⟩
 
 end Verdicts
 

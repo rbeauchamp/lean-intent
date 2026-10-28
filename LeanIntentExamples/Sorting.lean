@@ -21,7 +21,8 @@ The degenerate check finds the same omission from the subject's type alone: the 
 of `List Int → List Int` are the function returning the empty list and the identity
 (`degenerate_subjects`), the first meets `sortedOnly` and is reported as a possibility for the owner
 (`sortedOnly_verdicts`, `sortedOnly_possibilities`), and neither meets `sorting`
-(`sorting_verdicts`).
+(`sorting_verdicts`), which therefore keeps the owner's declining that possibility
+(`sorting_keeps_declined`).
 
 The obligations also refuse in the other direction: a record under a contradictory domain
 hypothesis fails O2 (`contraDom_not_o2`), and a record whose property nothing fails fails O3
@@ -195,8 +196,16 @@ theorem sortedOnly_metBy : (metBy (List Int → List Int) [true, false]).map Deg
     [nilSort] := rfl
 
 theorem sortedOnly_possibilities :
-    (possibilities sortedOnly_verdicts).map Possibility.holds = [fun f => f = nilSort] :=
-  possibilities_holds sortedOnly_verdicts
+    (possibilities (List Int → List Int) [true, false]).map Consequence.holds =
+      [fun f => f = nilSort] := rfl
+
+/-- The owner declines it, and the corrected record keeps that answer, since the function returning
+the empty list does not meet it. -/
+theorem sorting_keeps_declined :
+    ∀ x ∈ possibilities (List Int → List Int) [true, false], (Answer.mk x .declined).KeptBy sorting := by
+  intro x hx
+  rcases List.mem_singleton.mp hx with rfl
+  exact (Degenerate.declined_keptBy_iff _ _).mpr sorting_refutes_nilSort
 
 /-- The corrected record is met by neither, so the check reports nothing. -/
 theorem sorting_verdicts : Verdicts sorting [false, false] := by
