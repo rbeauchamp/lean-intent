@@ -5,8 +5,8 @@ import LeanIntent.Record
 
 A specification can be met by code and still miss what its owner meant: it can contradict itself,
 say nothing, allow a subject that does nothing, or leave the result open where the owner wanted it
-fixed. Loam's record 0026 section 2.4 makes each such check a proposition about the intent record,
-and this module states each one for a Lean intent record:
+fixed. Each such check is a proposition about the intent record, and this module states each one
+for a Lean intent record:
 
 * **O1, well formed**: every statement of the record is a well-typed proposition.
 * **O2, satisfiable**: the domain hypotheses have a joint model and each predicate of the

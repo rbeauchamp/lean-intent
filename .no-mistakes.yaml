@@ -10,15 +10,15 @@
 #
 # Memory. Lean work runs through `no-mistakes admit` with a bound above its peak, so that it waits
 # until the bound fits the machine's memory budget beside all other admitted work. Measured on
-# 2026-10-27 as the largest sum of resident memory over the processes each ran, which counts the
-# .olean files every Lean process maps and so bounds their footprint from above: the check, from a
-# clean checkout, 1.7 GiB; the listing, which elaborates tools/check.lean against Lean and Lake,
-# 4.8 GiB per side. Measure again when the library grows, and raise a bound before a peak comes
-# within 15% of it.
+# 2026-10-28 under Lean v4.35.0 as the largest sum of resident memory over the processes each ran,
+# sampled every 0.1 seconds, which counts the .olean files every Lean process maps and so bounds
+# their footprint from above: the check, from a clean checkout, 2.4 GiB; the listing, which
+# elaborates tools/check.lean against Lean and Lake, 4.5 GiB per side. Measure again when the
+# library grows or the toolchain changes, and raise a bound before a peak comes within 15% of it.
 test:
   instructions: |
     On lean-intent this step is verification. A change's claims are established by machine-checked proof, by derivation and by reading; lean-intent has no running product to drive.
-    1. Run the repository's checks from the worktree root and cite the command and its exit status: no-mistakes admit --memory 3GiB --limit "none; measured peak 1.7 GiB" -- lean --run tools/check.lean. It exits 0 only when lakefile.toml requires no other package, Lake builds every library module with no error and no warning (a sorry is a warning), and every declaration of the library rests only on Lean's axioms propext, Classical.choice and Quot.sound. tools/check.lean's module comment says what each rule decides; claim no more than that.
+    1. Run the repository's checks from the worktree root and cite the command and its exit status: no-mistakes admit --memory 3GiB --limit "none; measured peak 2.4 GiB" -- lean --run tools/check.lean. It exits 0 only when lakefile.toml requires no other package, Lake builds every library module with no error and no warning (a sorry is a warning), and every declaration of the library rests only on Lean's axioms propext, Classical.choice and Quot.sound. tools/check.lean's module comment says what each rule decides; claim no more than that.
     2. Do not write, request or suggest a test, and do not improvise disposable break-it runs as evidence: lean-intent establishes its claims by theorems. A claim about what a theorem states is settled by reading its statement, binders and hypotheses included, never its docstring or name alone.
     3. Report each claim by how it was established: machine-checked (a Lean proof that the check above built; cite the theorem and the command's exit status), argued (by derivation or by reading; cite the file and lines), observed (executed in this run for this claim), assumed (a hypothesis the change relies on; say why it is trusted) or open (not established; say what would establish it and which issue tracks it).
   # lean-intent has no running product; proof, its check and reading settle its claims.
@@ -44,7 +44,7 @@ test:
       set -e
       lean_files=$(git ls-files -- '*.lean')
       if [ -n "$lean_files" ]; then
-        no-mistakes admit --memory 5GiB --limit "none; measured peak 4.8 GiB" -- lean --run tools/check.lean --tests
+        no-mistakes admit --memory 6GiB --limit "none; measured peak 4.5 GiB" -- lean --run tools/check.lean --tests
       fi
 
 # The merge gate. lean-intent has no CI: on 2026-10-28 the owner made the validation no-mistakes
@@ -61,10 +61,10 @@ no_ci: true
 # must print nothing. `set -e` ends the command with a status other than 0 as soon as either fails,
 # cannot start (`admit` exits 126 or 127) or is killed. Each also fails rather than passing when
 # it finds nothing to check: the checks refuse a library with no Lean file or no declaration, and
-# the listing a project with no Lean file. Measured on 2026-10-28 from a clean clone, with nothing
-# to reuse: the whole command took 28 seconds, and the resident memory of its processes summed to
-# at most 4.7 GiB, below the listing's 6 GiB bound by more than the 15% the paragraph on memory
-# above asks for.
+# the listing a project with no Lean file. Measured on 2026-10-28 under Lean v4.35.0 from a clean
+# clone, with nothing to reuse: the whole command took 22 seconds, and the resident memory of its
+# processes summed to at most 3.9 GiB, and to 4.5 GiB in a run of the listing alone, below the
+# listing's 6 GiB bound by more than the 15% the paragraph on memory above asks for.
 #
 # What a change re-checks is Lake's decision: Lake reuses an earlier output only where its own
 # record of the module's inputs matches, the trace in .lake/build or the input hash that finds an
@@ -81,9 +81,9 @@ commands:
     set -eu
     export LAKE_CACHE_DIR="$PWD/.lake/cache"
     unset LAKE_ARTIFACT_CACHE
-    no-mistakes admit --memory 3GiB --limit "none; measured peak 1.7 GiB" -- lean --run tools/check.lean
+    no-mistakes admit --memory 3GiB --limit "none; measured peak 2.4 GiB" -- lean --run tools/check.lean
     mkdir -p .lake
-    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.8 GiB" -- lean --run tools/check.lean --tests > .lake/tests-listing
+    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.5 GiB" -- lean --run tools/check.lean --tests > .lake/tests-listing
     if [ -s .lake/tests-listing ]; then
       echo "The listing of tests is not empty; lean-intent establishes its claims by proof:"
       cat .lake/tests-listing
@@ -102,7 +102,7 @@ commands:
 # Test command needs no such setting, because Lake restores every output it takes from a cache it
 # only reads.
 build_outputs:
-  command: no-mistakes admit --memory 3GiB --limit "none; measured peak 1.7 GiB" -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true lean --run tools/check.lean
+  command: no-mistakes admit --memory 3GiB --limit "none; measured peak 2.4 GiB" -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true lean --run tools/check.lean
   directories:
     - .lake/cache
   toolchain_files:
