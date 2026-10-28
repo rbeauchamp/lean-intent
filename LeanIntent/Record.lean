@@ -17,9 +17,9 @@ under named domain hypotheses.
 
 A record is frozen in the sense Lean gives every declaration: once declared, its value is fixed in
 the environment that holds it, and Lean's kernel has checked that each statement has the type the
-record declares for it. That a record does not depend on its own implementation, and that its
-meaning stays fixed across revisions, are separate issues of this repository (lean-intent #2 and
-#3).
+record declares for it. That a record does not depend on its own implementation is a separate
+issue of this repository (lean-intent #2). A later revision may change what a record says, but must
+keep every consequence the owner confirmed or declined (`LeanIntent.Answers`).
 -/
 
 namespace LeanIntent

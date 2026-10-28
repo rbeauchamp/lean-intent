@@ -2,15 +2,16 @@
 
 A Lean library for writing what an owner wants as formal properties, and for checking that those properties are adequate, before any code is written.
 
-A proof shows that code meets its specification, never that the specification says what its owner meant. A specification that misses the owner's intent is a bug of the same standing as code that misses its specification. This library gives a Lean project, and the coding assistant working in it, three things:
+A proof shows that code meets its specification, never that the specification says what its owner meant. A specification that misses the owner's intent is a bug of the same standing as code that misses its specification. This library gives a Lean project, and the coding assistant working in it, four things:
 
 - **An intent record** (`LeanIntent.IntentRecord`): named properties of one deliverable's subject, over a vocabulary of predicates, under named domain hypotheses, written before the implementation exists.
 - **The adequacy obligations O1 to O5**, each computed from the record by a goal former whose correctness theorem is proved, so an assistant obtains each obligation from the library instead of writing a weaker one by hand: the record is well formed (O1), its hypotheses and then the whole record have a model (O2), each property can fail (O3), a subject that does nothing fails it (O4), and any two subjects that meet it are equal or differ only in a freedom the owner confirms (O5).
 - **A refinement link** (`LeanIntent.Refines`, `LeanIntent.fulfils`): a proof that the code meets its specification, and a proof that the specification refines the intent record, compose into a proof that the code fulfils the intent.
+- **The owner's answers** (`LeanIntent.Answer`, `LeanIntent.Accepted`): each consequence of a record the owner confirms or declines stays a requirement of every later revision, and a revision that breaks one is refused, by the answer it breaks.
 
-**Complete in this version:** the intent record, the five obligations with their goal formers and correctness theorems, the progress theorem (the obligations refuse no record with content), the refinement link with its transfer theorems, and worked examples. Every claim the library makes about itself is a theorem Lean's kernel checks, resting only on Lean's own axioms; the repository has no tests.
+**Complete in this version:** the intent record, the five obligations with their goal formers and correctness theorems, the progress theorem (the obligations refuse no record with content), the refinement link with its transfer theorems, the owner's answers with the type of the revisions that keep them, and worked examples. Every claim the library makes about itself is a theorem Lean's kernel checks, resting only on Lean's own axioms; the repository has no tests.
 
-**Not yet built**, each a separate issue of this repository: refusing a record that depends on its own implementation (#2), keeping every confirmed and declined consequence across revisions (#3), rendering records and their consequences for the owner (#4), recording the owner's confirmations so that only the owner can make them (#5), and checking every specification against the degenerate implementations of its type (#6). Until #5 lands, nothing in the library records that the owner confirmed a record or a freedom.
+**Not yet built**, each a separate issue of this repository: refusing a record that depends on its own implementation (#2), rendering records and their consequences for the owner (#4), recording the owner's confirmations so that only the owner can make them (#5), and checking every specification against the degenerate implementations of its type (#6). Until #5 lands, nothing in the library establishes that the owner made a stored answer, or confirmed a record or a freedom.
 
 ## Using it
 
@@ -52,18 +53,45 @@ and prove its obligations: `O2 sorting`, `O2Run sorting`, `O3 sorting`, `O4 sort
 
 Each correctness theorem equates the former's output with an intended proposition written by a direct match on the record, sharing no definition with the former or its helpers, for every record, so a former that stated `True`, a weaker proposition, or the obligation for one example only would fail it.
 
+## The owner's answers
+
+The owner validates a record by answering its consequences in plain words. A consequence (`Consequence`) is a named predicate on the record's subject, shown as an entailment, which every model of the record satisfies, or as a possibility, which some model satisfies, and the owner confirms or declines it (`Answer`). Every later revision `r` must keep each stored answer (`Answer.KeptBy`): the answer's unchanged predicate is applied to the subjects that meet `r`, under `r`'s domain hypotheses, never carried over as a fact proved about an earlier revision.
+
+| Consequence | Confirmed: every later revision keeps | Declined: every later revision keeps |
+|---|---|---|
+| entailment `c` | a theorem: every model satisfies `c` | a countermodel: some model fails `c` |
+| possibility `c` | a model that satisfies `c` | a refutation: no model satisfies `c` |
+
+`kept r answers` computes one goal per stored answer, and `keeps_correct` fixes what they state, as the obligations' correctness theorems do. `Accepted answers` is the type of the revisions accepted under the stored answers: no value of it holds a revision that breaks one, and every revision that keeps them all is accepted (`accepted_iff`). A revision fails to keep the stored answers exactly when it keeps the opposite of one of them (`not_keeps_iff`), so every refusal names the answer it breaks and the witness that breaks it; answers that confirm and decline the same consequence refuse every revision until the owner retracts one (`not_keeps_of_conflict`). Whether a revision keeps them depends only on its models (`keeps_congr`): renaming its clauses or its vocabulary, or restating its properties with the same models, loses none, and a revision whose subject has another type cannot be accepted. A revision with no model at all keeps every confirmed entailment and declined possibility; `O2Run`, asked before a deliverable runs, refuses it.
+
+A project keeps its answers by stating them over the record's subject type and declaring a value of `Accepted answers` for its current revision, as [`LeanIntentExamples/Answers.lean`](LeanIntentExamples/Answers.lean) does:
+
+```lean
+def answers : List (Answer (List Int → List Int)) :=
+  [⟨⟨"returning the empty list for every input", .possibility, fun f => f = fun _ => []⟩, .declined⟩,
+   ⟨⟨"returning [1, 2] for input [2, 1, 1] is ruled out", .entailment, fun f => f [2, 1, 1] ≠ [1, 2]⟩,
+    .confirmed⟩]
+
+def sortingAccepted : Accepted answers := ⟨sorting, sorting_keeps⟩
+```
+
+where `sorting_keeps : Keeps sorting answers` proves each answer of the current revision. A revision that breaks one leaves `sortingAccepted` without a proof of that answer's goal.
+
 ## Worked examples
 
 - [`LeanIntentExamples/Sorting.lean`](LeanIntentExamples/Sorting.lean): a sorting record that forgets that the output is a rearrangement of the input fails O5, because the function returning the empty list meets it (`sortedOnly_not_o5_eq`); the corrected record meets O1 to O5, refutes that function, and is fulfilled by `List.mergeSort` through the refinement link. A contradictory domain hypothesis fails O2, and a property nothing fails fails O3.
 - [`LeanIntentExamples/Counter.lean`](LeanIntentExamples/Counter.lean): a counter's step that may do nothing fails O4; one that must add one meets it.
 - [`LeanIntentExamples/Transfer.lean`](LeanIntentExamples/Transfer.lean): a refinement link carries the record's guarantees to the mapping's image, not to the implementations themselves.
+- [`LeanIntentExamples/Answers.lean`](LeanIntentExamples/Answers.lean): the owner has declined the possibility of returning the empty list for every input and confirmed that returning `[1, 2]` for `[2, 1, 1]` is ruled out; the corrected sorting record keeps both and is accepted, so every accepted revision excludes the empty-list function; a revision that drops the rearrangement property is refused, breaking each answer by a witness; and a revision that renames the vocabulary and restates the two properties as one keeps both.
 
 ## What is trusted
 
 - Lean, its kernel and its three axioms (`propext`, `Classical.choice`, `Quot.sound`).
 - That a record's properties, domain hypotheses, vocabulary and shape say what the owner meant. This is the one link no proof reaches; the owner validates it by confirming the record's consequences in plain words (#4, #5).
 - That a record's shape is the one its subject has: a subject with state declared as a plain value is asked nothing by O4. The degenerate-implementation check (#6), whose subjects are fixed by the subject's type, is to close this.
-- That the domain hypotheses are true of the world, which the owner confirms; a hypothesis that excludes the subject that does nothing, or all but one model, would make O4 or O5 hold vacuously.
+- That the domain hypotheses are true of the world, which the owner confirms; a hypothesis that excludes the subject that does nothing, or all but one model, would make O4 or O5 hold vacuously, and one that excludes the subject of a declined possibility keeps that answer vacuously.
+- That a stored answer's predicate still means what the owner confirmed. It is a Lean term, so a revision that changes the body of a definition it uses changes what it says without removing it; a predicate that uses only Lean's own library keeps its meaning while the Lean release does. That the owner made each stored answer, and the revision each applies to, is #5's.
+- That a project checks its current revision against its stored answers, by declaring a value of `Accepted` for it under all of them; a project that declares none checks nothing.
 - That a record was written before its implementation was read, and does not depend on it (#2).
 
 ## Checks
