@@ -9,8 +9,9 @@ sorting record that asks only for an ascending output is met by the function tha
 list for every input. The degenerate check closes this gap with a closed class of
 *degenerate subjects*, fixed by the subject's type and never chosen per record: each constant
 function, the identity, the empty output and each projection. Each degenerate subject that meets
-the record is shown to the owner as a possibility, "your specification allows this", which the owner
-confirms or declines.
+the record is reported as a possibility, "your specification allows this", to be confirmed or
+declined: by the owner when it is a fork their intent does not settle that changes what they get,
+and otherwise as a decision made on the owner's behalf.
 
 ## The class
 
@@ -54,7 +55,7 @@ part of the theorem's statement, and a list of the wrong length is refused (`ver
 that do (`mem_metBy`). `possibilities h`, from a proof `h : Verdicts r bs`, reports each as a
 `Consequence` of kind possibility, the predicate that the subject is that degenerate subject
 (`Degenerate.consequence`), which holds of the record as it is shown (`possibilities_holdsOf`), so
-it can be shown to the owner (`LeanIntent.Shown`) and the owner's answer to it stored and kept by
+it can be shown to the owner (`LeanIntent.Shown`) and an answer to it stored and kept by
 every later revision (`LeanIntent.Answers`). A report exists only for proved verdicts. A declined
 one is kept by exactly the revisions that the degenerate subject does not meet
 (`Degenerate.declined_keptBy_iff`).
@@ -588,7 +589,7 @@ that degenerate subject. -/
 def Degenerate.consequence (d : Degenerate c.sig) : Consequence W :=
   ⟨d.name, .possibility, fun w => w = d.subject⟩
 
-/-- The owner's declining a degenerate subject's consequence is kept by exactly the revisions that
+/-- Declining a degenerate subject's consequence is kept by exactly the revisions that
 subject does not meet. -/
 theorem Degenerate.declined_keptBy_iff (d : Degenerate c.sig) (r : IntentRecord W) :
     (Answer.mk d.consequence .declined).KeptBy r ↔ ¬ r.Meets d.subject := by

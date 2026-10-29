@@ -11,15 +11,17 @@ under named domain hypotheses.
 * Each *property* is a named Lean proposition about the subject, `W → Prop`.
 * Each *domain hypothesis* is a named fact about the world that the properties rely on, also a
   `W → Prop`; a hypothesis that does not mention the subject is a constant one. Domain hypotheses
-  are listed in the record so that the owner confirms them as true of the world, rather than having
-  them hidden below the record.
+  are listed in the record rather than hidden below it, so that those the owner states are confirmed
+  with the restatement of their intent, and one an agent adds is visible as a decision made on the
+  owner's behalf, recorded with its reason.
 * The *vocabulary* is the predicates the properties are written in, each over its own type.
 
 A record is frozen in the sense Lean gives every declaration: once declared, its value is fixed in
 the environment that holds it, and Lean's kernel has checked that each statement has the type the
 record declares for it. That a record does not depend on its own implementation is decided by
 cone exclusion (`LeanIntent.Cone`). A later revision may change what a record says, but must keep
-every consequence the owner confirmed or declined (`LeanIntent.Answers`).
+every consequence confirmed or declined, by the owner or on the owner's behalf
+(`LeanIntent.Answers`).
 -/
 
 namespace LeanIntent
@@ -86,7 +88,7 @@ def Meets (r : IntentRecord W) (w : W) : Prop := r.Dom w ∧ r.Props w
 
 /-- `w` fulfils `r`: wherever the domain hypotheses hold of it, so does every property. This is what
 an implementation proves of its subject, since the domain hypotheses are facts about the world that
-the owner confirms and no implementation can establish. -/
+no implementation can establish. -/
 def Fulfilled (r : IntentRecord W) (w : W) : Prop := r.Dom w → r.Props w
 
 theorem meets_of_fulfilled {r : IntentRecord W} {w : W} (h : r.Fulfilled w) (hd : r.Dom w) :

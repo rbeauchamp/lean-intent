@@ -17,7 +17,7 @@ proof that it meets the intent.
 
 What the link carries, and what it does not:
 
-* the freedom O5 confirms holds of the subjects of any two implementations meeting the
+* the freedom O5 states holds of the subjects of any two implementations meeting the
   specification, not of the implementations themselves (`Refines.determinate`), so concrete
   equality needs a mapping that reflects it;
 * a specification is refuted only by a counterexample to the record in the mapping's image
@@ -27,7 +27,8 @@ What the link carries, and what it does not:
   joint model required before it runs (`Refines.o2Run`).
 
 The domain hypotheses are read only from the record, never from a link, so a fact a link relies on
-is one the owner confirmed.
+is one the record states, where the owner confirms it with the restatement of their intent or sees
+it recorded as a decision made on their behalf.
 -/
 
 namespace LeanIntent
@@ -69,7 +70,7 @@ theorem refines_id_iff {r : IntentRecord W} {S : W → Prop} :
 theorem refines_self (r : IntentRecord W) : Refines r (fun w => w) r.Props :=
   fun _ h _ => h
 
-/-- The freedom O5 confirms transfers to the subjects of implementations meeting a refining
+/-- The freedom O5 states transfers to the subjects of implementations meeting a refining
 specification, under the domain hypotheses. -/
 theorem Refines.determinate {r : IntentRecord W} {m : A → W} {S : A → Prop} (hR : Refines r m S)
     {R : Freedom W} (h5 : O5 r R) {a b : A} (ha : S a) (hb : S b) (hda : r.Dom (m a))

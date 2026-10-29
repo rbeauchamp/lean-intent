@@ -110,8 +110,7 @@ theorem atLeastX_verdicts : Verdicts atLeastX [false, true, false] := by
     exact fun p => Nat.le_refl p.x
   · exact absurd (h.2 _ (List.mem_singleton.mpr rfl) ⟨1, 0⟩) (by decide)
 
-/-- The check reports the projection onto the first coordinate, for the owner to confirm or
-decline. -/
+/-- The check reports the projection onto the first coordinate, to be confirmed or declined. -/
 theorem atLeastX_possibilities :
     (possibilities atLeastX_verdicts).map Consequence.holds = [fun f => f = fun p => p.x] := rfl
 
