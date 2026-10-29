@@ -4,3 +4,4 @@ import LeanIntentExamples.Transfer
 import LeanIntentExamples.Answers
 import LeanIntentExamples.Decision
 import LeanIntentExamples.Cone
+import LeanIntentExamples.Declared

@@ -23,8 +23,9 @@ code is a `Sig`. Its degenerate subjects (`Sig.degenerate`) are:
   functions are infinitely many too (`Sig.constants_infinite`), the values the rule `Ty.Small` fixes.
   Among them is the empty output, the constant at `b`'s empty value (`Sig.empty_output_mem`);
 * each projection, the function that returns a component of type `b` of one of its arguments: the
-  argument itself, or a component of a pair inside it (`ArgProj`, `Sig.proj_mem`). The identity is the
-  projection of a function of one argument onto that argument (`Sig.identity_mem`).
+  argument itself, a component of a pair inside it, or a component of a field of a declared type
+  with one constructor inside it, such as a structure (`ArgProj`, `Sig.proj_mem`). The identity is
+  the projection of a function of one argument onto that argument (`Sig.identity_mem`).
 
 `Sig.mem_degenerate_iff` states the membership of the class apart from the list that computes it,
 and `Degenerate.apply_fn` what each member returns, apart from how it is built. No class is empty
@@ -34,9 +35,14 @@ and `Degenerate.apply_fn` what each member returns, apart from how it is built. 
 
 A subject's code is computed from its type by Lean's instance resolution (`Covered`, built from
 `HasCode`): `degenerate W` is the class of the type `W`, and has no record among its arguments, so
-it is the same for every record about `W`. A type with no code is not covered: no `Covered W`
-instance exists, so Lean reports that it cannot synthesize one, and no verdict about the class of
-`W` can be stated.
+it is the same for every record about `W`. Each code carries the isomorphism through which it stands
+for its type and the proof that both are those the library fixes (`Ty.Stands`, `Sig.Stands`): the
+identity for a type built only from those `Ty` builds in, and for a type the project declares, the
+code and isomorphism its deriving handler writes from the declaration (`LeanIntent.Declared`). Each
+degenerate subject is a value of `W`, its member carried back through that isomorphism
+(`Degenerate.subject`, `Degenerate.iso_subject`). A type with no code is not covered: no
+`Covered W` instance exists, so Lean reports that it cannot synthesize one, and no verdict about the
+class of `W` can be stated.
 
 ## Verdicts
 
@@ -99,8 +105,10 @@ end Sig
 
 open Sig
 
-/-- A component of type `c` inside a value of type `t`: the value itself, or a component of one side
-of a pair. -/
+mutual
+
+/-- A component of type `c` inside a value of type `t`: the value itself, a component of one side of
+a pair, or a component of a field of a declared type with one constructor. -/
 inductive Ty.Proj : Ty → Ty → Type
   /-- The value itself. -/
   | self (t : Ty) : Ty.Proj t t
@@ -108,12 +116,36 @@ inductive Ty.Proj : Ty → Ty → Type
   | fst {a c : Ty} (b : Ty) : Ty.Proj a c → Ty.Proj (.prod a b) c
   /-- A component of the right side of a pair. -/
   | snd {b c : Ty} (a : Ty) : Ty.Proj b c → Ty.Proj (.prod a b) c
+  /-- A component of a field of a declared type whose representation is the chain of fields `r`. -/
+  | field {r c : Ty} (n : Lean.Name) (ps : Ty) : Ty.FieldProj r c → Ty.Proj (.decl n ps r) c
+
+/-- A component of type `c` inside one field of a chain of fields `r`, the representation of a
+declared type with one constructor: the fields, in order, each paired with the chain of the fields
+after it, and the last with the unit type. The chain itself, or the rest of it after a field, is not
+a component. -/
+inductive Ty.FieldProj : Ty → Ty → Type
+  /-- A component of the first field. -/
+  | head {a c : Ty} (rest : Ty) : Ty.Proj a c → Ty.FieldProj (.prod a rest) c
+  /-- A component of a later field. -/
+  | tail {rest c : Ty} (a : Ty) : Ty.FieldProj rest c → Ty.FieldProj (.prod a rest) c
+
+end
+
+mutual
 
 /-- The component a path selects. -/
 def Ty.Proj.get : {t c : Ty} → Ty.Proj t c → t.denote → c.denote
   | _, _, .self _, x => x
   | _, _, .fst _ p, x => p.get x.1
   | _, _, .snd _ p, x => p.get x.2
+  | _, _, .field _ _ q, x => q.get x
+
+/-- The component a path into a field selects. -/
+def Ty.FieldProj.get : {r c : Ty} → Ty.FieldProj r c → r.denote → c.denote
+  | _, _, .head _ p, x => p.get x.1
+  | _, _, .tail _ q, x => q.get x.2
+
+end
 
 /-- The path to the value itself, between two equal codes. -/
 def Ty.Proj.ofEq : {t c : Ty} → t = c → Ty.Proj t c
@@ -122,26 +154,55 @@ def Ty.Proj.ofEq : {t c : Ty} → t = c → Ty.Proj t c
 /-- The paths to the value itself when `t` is `c`: one, or none. -/
 def Ty.selfProjs (c t : Ty) : List (Ty.Proj t c) := if h : t = c then [.ofEq h] else []
 
+mutual
+
 /-- Every path to a component of type `c` inside a value of type `t`. -/
 def Ty.projs (c : Ty) : (t : Ty) → List (Ty.Proj t c)
   | .prod a b =>
     Ty.selfProjs c (.prod a b) ++ (Ty.projs c a).map (.fst b) ++ (Ty.projs c b).map (.snd a)
+  | .decl n ps r => Ty.selfProjs c (.decl n ps r) ++ (Ty.fieldProjs c r).map (.field n ps)
   | t => Ty.selfProjs c t
+
+/-- Every path to a component of type `c` inside a field of the chain of fields `r`. -/
+def Ty.fieldProjs (c : Ty) : (r : Ty) → List (Ty.FieldProj r c)
+  | .prod a rest => (Ty.projs c a).map (.head rest) ++ (Ty.fieldProjs c rest).map (.tail a)
+  | _ => []
+
+end
 
 theorem Ty.self_mem_selfProjs (t : Ty) : Ty.Proj.self t ∈ Ty.selfProjs t t := by
   simp [Ty.selfProjs, Ty.Proj.ofEq]
+
+mutual
 
 /-- `projs` lists every path. -/
 theorem Ty.mem_projs {c : Ty} : {t : Ty} → (p : Ty.Proj t c) → p ∈ Ty.projs c t
   | _, .self t => by
       cases t <;> simp only [Ty.projs, List.mem_append] <;>
-        first | exact Ty.self_mem_selfProjs _ | exact .inl (.inl (Ty.self_mem_selfProjs _))
+        first
+        | exact Ty.self_mem_selfProjs _
+        | exact .inl (.inl (Ty.self_mem_selfProjs _))
+        | exact .inl (Ty.self_mem_selfProjs _)
   | _, .fst b p => by
       simp only [Ty.projs, List.mem_append, List.mem_map]
       exact .inl (.inr ⟨p, Ty.mem_projs p, rfl⟩)
   | _, .snd a p => by
       simp only [Ty.projs, List.mem_append, List.mem_map]
       exact .inr ⟨p, Ty.mem_projs p, rfl⟩
+  | _, .field n ps q => by
+      simp only [Ty.projs, List.mem_append, List.mem_map]
+      exact .inr ⟨q, Ty.mem_fieldProjs q, rfl⟩
+
+/-- `fieldProjs` lists every path into a field. -/
+theorem Ty.mem_fieldProjs {c : Ty} : {r : Ty} → (q : Ty.FieldProj r c) → q ∈ Ty.fieldProjs c r
+  | _, .head rest p => by
+      simp only [Ty.fieldProjs, List.mem_append, List.mem_map]
+      exact .inl ⟨p, Ty.mem_projs p, rfl⟩
+  | _, .tail a q => by
+      simp only [Ty.fieldProjs, List.mem_append, List.mem_map]
+      exact .inr ⟨q, Ty.mem_fieldProjs q, rfl⟩
+
+end
 
 /-- A projection of functions of the arguments `as` to values of `c`: a component of type `c` of one
 of the arguments. -/
@@ -267,71 +328,146 @@ end Sig
 
 /-! ## The class of a record's type -/
 
-/-- A code for the type `α`, found by Lean's instance resolution. The library declares one instance
-for each type former `Ty` has; another instance for `α` would have to prove its code's type equal
-to `α`. -/
+/-- `t` is the code of `α`, and `e` the isomorphism through which `t` stands for `α`, as the library
+fixes them. A code built only from the types `Ty` builds in stands for the type it denotes, through
+the cast along their equality (`builtin`), so a type built only from them has one code, and its
+isomorphism maps each value to itself. A code with a declared type inside stands for its type through
+the isomorphisms of its parts, carried through the map of each type former. A type the project
+declares stands for itself through the code and isomorphism its declaration fixes: the last
+constructor, which admits them, is private, and only the deriving handler of `LeanIntent.Declared`,
+which reads them from the declaration, applies it. -/
+inductive Ty.Stands : (α : Type) → (t : Ty) → Iso α t.denote → Prop
+  | builtin {α : Type} (t : Ty) (h : α = t.denote) : t.builtin = true → Ty.Stands α t (Iso.ofEq h)
+  | list {α : Type} {t : Ty} {e : Iso α t.denote} :
+      Ty.Stands α t e → Ty.Stands (List α) (.list t) e.list
+  | array {α : Type} {t : Ty} {e : Iso α t.denote} :
+      Ty.Stands α t e → Ty.Stands (Array α) (.array t) e.array
+  | option {α : Type} {t : Ty} {e : Iso α t.denote} :
+      Ty.Stands α t e → Ty.Stands (Option α) (.option t) e.option
+  | prod {α β : Type} {a b : Ty} {e : Iso α a.denote} {f : Iso β b.denote} :
+      Ty.Stands α a e → Ty.Stands β b f → Ty.Stands (α × β) (.prod a b) (e.prod f)
+  | sum {α β : Type} {a b : Ty} {e : Iso α a.denote} {f : Iso β b.denote} :
+      Ty.Stands α a e → Ty.Stands β b f → Ty.Stands (α ⊕ β) (.sum a b) (e.sum f)
+  | private decl {α : Type} (n : Lean.Name) (ps r : Ty) (e : Iso α (Ty.decl n ps r).denote) :
+      Ty.Stands α (.decl n ps r) e
+
+/-- A code that denotes `α` itself, for a type built only from those `Ty` builds in, found by Lean's
+instance resolution: one instance for each type former `Ty` has. Another instance for `α` would have
+to prove its code's type equal to `α`. -/
+class ExactCode (α : Type) where
+  /-- The code. -/
+  code : Ty
+  /-- The code denotes `α`. -/
+  denote_eq : α = code.denote
+  /-- No declared type is inside the code. -/
+  builtin : code.builtin = true
+
+instance : ExactCode Unit := ⟨.unit, rfl, rfl⟩
+instance : ExactCode Bool := ⟨.bool, rfl, rfl⟩
+instance : ExactCode Nat := ⟨.nat, rfl, rfl⟩
+instance : ExactCode Int := ⟨.int, rfl, rfl⟩
+instance : ExactCode String := ⟨.string, rfl, rfl⟩
+
+instance {α : Type} [h : ExactCode α] : ExactCode (List α) :=
+  ⟨.list h.code, congrArg List h.denote_eq, h.builtin⟩
+
+instance {α : Type} [h : ExactCode α] : ExactCode (Array α) :=
+  ⟨.array h.code, congrArg Array h.denote_eq, h.builtin⟩
+
+instance {α : Type} [h : ExactCode α] : ExactCode (Option α) :=
+  ⟨.option h.code, congrArg Option h.denote_eq, h.builtin⟩
+
+instance {α β : Type} [ha : ExactCode α] [hb : ExactCode β] : ExactCode (α × β) :=
+  ⟨.prod ha.code hb.code, by
+    show (α × β) = (ha.code.denote × hb.code.denote)
+    rw [← ha.denote_eq, ← hb.denote_eq], by
+    show (ha.code.builtin && hb.code.builtin) = true
+    rw [ha.builtin, hb.builtin]; rfl⟩
+
+instance {α β : Type} [ha : ExactCode α] [hb : ExactCode β] : ExactCode (α ⊕ β) :=
+  ⟨.sum ha.code hb.code, by
+    show (α ⊕ β) = (ha.code.denote ⊕ hb.code.denote)
+    rw [← ha.denote_eq, ← hb.denote_eq], by
+    show (ha.code.builtin && hb.code.builtin) = true
+    rw [ha.builtin, hb.builtin]; rfl⟩
+
+/-- A code for the type `α`, found by Lean's instance resolution, with the isomorphism through which
+it stands for `α` and the proof that both are those the library fixes (`Ty.Stands`): the exact code
+of a type built only from those `Ty` builds in, through the cast along their equality; the code of a
+type former applied to types with a declared type inside, through the former's map; and the code of
+a type the project declares, which its deriving handler (`LeanIntent.Declared`) writes. -/
 class HasCode (α : Type) where
   /-- The code. -/
   code : Ty
-  /-- The code stands for `α`. -/
-  denote_eq : code.denote = α
+  /-- The isomorphism through which the code stands for `α`. -/
+  iso : Iso α code.denote
+  /-- The code and the isomorphism are those the library fixes. -/
+  stands : Ty.Stands α code iso
 
-instance : HasCode Unit := ⟨.unit, rfl⟩
-instance : HasCode Bool := ⟨.bool, rfl⟩
-instance : HasCode Nat := ⟨.nat, rfl⟩
-instance : HasCode Int := ⟨.int, rfl⟩
-instance : HasCode String := ⟨.string, rfl⟩
+/-- A type built only from those `Ty` builds in, through its exact code. Tried first, so that such a
+type's isomorphism maps each value to itself by definition. -/
+instance (priority := high) {α : Type} [h : ExactCode α] : HasCode α :=
+  ⟨h.code, Iso.ofEq h.denote_eq, .builtin h.code h.denote_eq h.builtin⟩
 
-instance {α : Type} [h : HasCode α] : HasCode (List α) := ⟨.list h.code, congrArg List h.denote_eq⟩
+instance {α : Type} [h : HasCode α] : HasCode (List α) := ⟨.list h.code, h.iso.list, .list h.stands⟩
 
 instance {α : Type} [h : HasCode α] : HasCode (Array α) :=
-  ⟨.array h.code, congrArg Array h.denote_eq⟩
+  ⟨.array h.code, h.iso.array, .array h.stands⟩
 
 instance {α : Type} [h : HasCode α] : HasCode (Option α) :=
-  ⟨.option h.code, congrArg Option h.denote_eq⟩
+  ⟨.option h.code, h.iso.option, .option h.stands⟩
 
 instance {α β : Type} [ha : HasCode α] [hb : HasCode β] : HasCode (α × β) :=
-  ⟨.prod ha.code hb.code, by
-    show (ha.code.denote × hb.code.denote) = (α × β)
-    rw [ha.denote_eq, hb.denote_eq]⟩
+  ⟨.prod ha.code hb.code, ha.iso.prod hb.iso, .prod ha.stands hb.stands⟩
 
 instance {α β : Type} [ha : HasCode α] [hb : HasCode β] : HasCode (α ⊕ β) :=
-  ⟨.sum ha.code hb.code, by
-    show (ha.code.denote ⊕ hb.code.denote) = (α ⊕ β)
-    rw [ha.denote_eq, hb.denote_eq]⟩
+  ⟨.sum ha.code hb.code, ha.iso.sum hb.iso, .sum ha.stands hb.stands⟩
+
+/-- `σ` is the code of `W`, and `e` the isomorphism through which `σ` stands for `W`, as the library
+fixes them: a plain value's through its type's code (`Ty.Stands`), and a function's through its
+argument type's and its result type's, the function carried by mapping its argument back and its
+result forth (`Iso.arrow`). -/
+inductive Sig.Stands : (W : Type) → (σ : Sig) → Iso W σ.denote → Prop
+  | value {α : Type} {t : Ty} {e : Iso α t.denote} : Ty.Stands α t e → Sig.Stands α ⟨[], t⟩ e
+  | arrow {α β : Type} {t : Ty} {σ : Sig} {e : Iso α t.denote} {f : Iso β σ.denote} :
+      Ty.Stands α t e → Sig.Stands β σ f → Sig.Stands (α → β) ⟨t :: σ.args, σ.out⟩ (e.arrow f)
 
 /-- The type `W` is covered by the degenerate class: the code of a function of coded argument types
 to a coded output type, or of a plain value of a coded type, found by Lean's instance resolution
-from `W` alone. A type with no such code has no instance, so Lean reports that it cannot synthesize
-`Covered W` and the class of `W` cannot be named. -/
+from `W` alone, with the isomorphism through which it stands for `W`. A type with no such code has
+no instance, so Lean reports that it cannot synthesize `Covered W` and the class of `W` cannot be
+named. -/
 class Covered (W : Type) where
   /-- The code of `W`. -/
   sig : Sig
-  /-- The code stands for `W`. -/
-  denote_eq : sig.denote = W
+  /-- The isomorphism through which the code stands for `W`. -/
+  iso : Iso W sig.denote
+  /-- The code and the isomorphism are those the library fixes. -/
+  stands : Sig.Stands W sig iso
 
 /-- A plain value of a coded type. -/
-instance (priority := low) {α : Type} [h : HasCode α] : Covered α := ⟨⟨[], h.code⟩, h.denote_eq⟩
+instance (priority := low) {α : Type} [h : HasCode α] : Covered α :=
+  ⟨⟨[], h.code⟩, h.iso, .value h.stands⟩
 
 /-- A function of a coded argument type to a covered type. -/
 instance {α β : Type} [h : HasCode α] [c : Covered β] : Covered (α → β) :=
-  ⟨⟨h.code :: c.sig.args, c.sig.out⟩, by
-    show (h.code.denote → c.sig.denote) = (α → β)
-    rw [h.denote_eq, c.denote_eq]⟩
+  ⟨⟨h.code :: c.sig.args, c.sig.out⟩, h.iso.arrow c.iso, .arrow h.stands c.stands⟩
 
 /-- The degenerate subjects of the type `W`, by their descriptions: the class of `W`'s code. It
 takes no record, so it is the same for every record about `W`. -/
 def degenerate (W : Type) [c : Covered W] : List (Degenerate c.sig) := c.sig.degenerate
 
-/-- The subject of type `W` a description stands for. -/
-def Degenerate.subject {W : Type} [c : Covered W] (d : Degenerate c.sig) : W := cast c.denote_eq d.fn
+/-- The subject of type `W` a description stands for: the member, carried back to `W` through the
+isomorphism by which `W`'s code stands for `W`. -/
+def Degenerate.subject {W : Type} [c : Covered W] (d : Degenerate c.sig) : W := c.iso.inv d.fn
 
-/-- The subject is the member itself, carried to `W` along the proof that `W`'s code stands for
-`W`; so no code can mis-encode its type, and the constants and projections of the class are those
-of `W`. -/
-theorem Degenerate.subject_heq {W : Type} [c : Covered W] (d : Degenerate c.sig) :
-    HEq d.subject d.fn :=
-  cast_heq _ _
+/-- The subject is the member itself, carried to `W` through the isomorphism that `Sig.Stands` fixes:
+for a type built only from those `Ty` builds in, the identity, so that no code can mis-encode such a
+type; and for a type the project declares, the isomorphism its deriving handler writes from the
+declaration (`LeanIntent.Declared`, which states what that rests on). -/
+theorem Degenerate.iso_subject {W : Type} [c : Covered W] (d : Degenerate c.sig) :
+    c.iso.to d.subject = d.fn :=
+  c.iso.to_inv d.fn
 
 /-- No covered type's class is empty, so no record is checked against nothing. -/
 theorem degenerate_ne_nil (W : Type) [Covered W] : degenerate W ≠ [] := Sig.degenerate_ne_nil _
