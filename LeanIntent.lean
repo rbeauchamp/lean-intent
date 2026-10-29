@@ -8,3 +8,6 @@ import LeanIntent.Codes
 import LeanIntent.Degenerate
 import LeanIntent.Cone
 import LeanIntent.Declared
+import LeanIntent.Codec
+import LeanIntent.Codec.Text
+import LeanIntent.Statement

@@ -51,8 +51,8 @@ declaration.
 
 What this module does not establish:
 
-* that the owner made a stored answer, that no one else removed or changed one, and how the owner
-  retracts one (lean-intent #5);
+* that a stored answer's authority traces back to a declared owner, that no one else removed or
+  changed one, and how one is retracted (lean-intent #5);
 * that an answer's predicate still means what the owner confirmed. It is a Lean term, read in the
   environment that elaborates it, so a revision that changes the body of a definition the predicate
   uses, the subject type's among them, changes the stored answer's meaning without removing it, and
