@@ -26,7 +26,9 @@ not depend on its implementation follows, as that check defines it (`LeanIntent.
 listed by `LeanIntent.Cone.declRefs`): the names each declaration's type mentions, a definition's
 value, an inductive type's block, constructors and recursors, a constructor's inductive type, and a
 recursor's block and rules, but not a theorem's proof or an opaque constant's value, which no term
-that uses them depends on; for the rendering, also lean-intent's `IntentRecord.Meets`, which says
+that uses them depends on; except that a definition by structural or well-founded recursion is
+followed through its type and the equation it is shown by, below, in place of its value
+(`LeanIntent.Print.refsVia`); for the rendering, also lean-intent's `IntentRecord.Meets`, which says
 what it is for a subject to meet the record, and, when it shows consequences, `Consequence.HoldsOf`,
 which says what it is for one to hold as shown; for an answer, those of the record it answers and
 `Answer.KeptBy`, which says what it asks of every later revision. `LeanIntent.Print.meaning_ok`
@@ -38,8 +40,11 @@ answer to it, it also stops at the record's own constant, whose meaning is shown
 statement.
 
 Each declaration collected is printed in full, or the text is refused (`declSection`): a
-definition's type and value; a theorem's, an opaque constant's and an axiom of a proposition's
-type, which is all a term that uses one depends on; an inductive type's type, its number of
+definition's type and value; a definition by structural or well-founded recursion, which Lean
+compiles into a value its syntax cannot write, by its type and the equation Lean proves for it,
+`c.eq_def`, which states its value at every argument and determines it; a theorem's, an opaque
+constant's and an axiom of a proposition's type, which is all a term that uses one depends on; an
+inductive type's type, its number of
 parameters and each constructor's type, which for a structure lists its fields; a function that
 reads a field of a structure, whose value is checked to be the projection Lean makes, by its type,
 the number of `fun`s of its value, its structure and its field's index, which determine its value
@@ -49,10 +54,24 @@ argued, not proved. A constructor is printed with its inductive type and a recur
 Lean's kernel from its inductive types, so neither has a section of its own once those are
 printed. An axiom whose type is not a proposition is refused, since in a module of Lean's module
 system Lean shows an imported definition whose body is not exposed that way, as is a name with no
-declaration and every type or value the printer cannot print or Lean does not read back. So no
-text prints a meaning in part. The printer writes no `let` and no projection, and Lean compiles a
-definition by structural or well-founded recursion into a value with projections, so a meaning that
-reaches one is refused for now (lean-intent #22).
+declaration and every type, value or equation the printer cannot print or Lean does not read
+back. So no text prints a meaning in part.
+
+A definition is shown by its equation exactly when Lean's own record of the definitions it compiled
+by structural or by well-founded recursion holds it (`recursionKind`), and its equation is the one
+Lean states for it (`Lean.Meta.getUnfoldEqnFor?`), of the form `∀ x₁ … xₙ, c x₁ … xₙ = r`
+(`unfoldsTo`), resting with `c` on no axiom but Lean's own (`unfoldEqn`); otherwise it is refused,
+naming it. The equation determines the definition: Lean accepts such a definition only when `r`
+uses the values of `c`, and of any function defined together with it, only at arguments below
+`x₁ … xₙ`, structural subterms or arguments below them by a well-founded relation its termination
+proof shows, for `c` or any function in its place, so `r` computes each value from values below
+it, and any two functions, or families of functions defined together, that satisfy such equations
+are equal (`eq_of_recursion_eqn`, proved for one function of one argument). That Lean's equation has that form is argued
+from how Lean compiles these definitions, not proved; that the termination proof is a proof rests
+on the axiom check. A definition by `partial_fixpoint`, whose equation need not determine it (for
+instance `f n = f (n + 1)`), and every other definition are printed by their value, and refused
+when it cannot be printed, such as one that holds a projection. The printer writes a `let` as
+`let` and one that does not depend on its value as `have`, as Lean reads them.
 
 Every term is printed by `LeanIntent.Print.print`, whose output `LeanIntent.Print.parse` reads back
 as the very term printed, for every term (`LeanIntent.Print.parse_print`), after
@@ -72,10 +91,12 @@ has free or meta variables, when the printer refuses it (`LeanIntent.Print.Print
 terms it prints), when a part of its gloss is empty, or when Lean does not elaborate its printed
 form back to it.
 
-What is not proved: that the sections `declSection` writes print every part of a declaration, and
-that the document as a whole, headings and prose included, determines what it prints, are argued
-from this module's code, not stated as theorems; that a release's own libraries, named with its
-version and commit, mean the same wherever that release runs is trusted with Lean.
+What is not proved: that the sections `declSection` writes print every part of a declaration, that
+the equation a definition by recursion is shown by determines it, and that the document as a
+whole, headings and prose included, determines what it prints, are argued from this module's code
+and from how Lean compiles definitions, not stated as theorems; that a release's own libraries,
+named with its version and commit, mean the same wherever that release runs is trusted with
+Lean.
 -/
 
 namespace LeanIntent.Render
@@ -127,8 +148,8 @@ def printExact (e : Expr) : MetaM String := do
   for bare in [bareConsts env, fun _ => false] do
     match print bare esc ec with
     | none =>
-      throwError "cannot print{indentExpr e}\nthe printer refuses it: it holds a `let`, \
-        a projection, a universe metavariable, or a name it cannot write"
+      throwError "cannot print{indentExpr e}\nthe printer refuses it: it holds a projection, \
+        a universe metavariable, or a name it cannot write"
     | some text =>
       if ← elaboratesTo text ec then return text
   throwError "cannot print{indentExpr e}\nLean does not elaborate its printed form back to it"
@@ -286,6 +307,66 @@ def projectionOf (lookup : Name → Option ConstantInfo) (v : DefinitionVal) :
     | _ => none
   | none => none
 
+section Recursion
+
+universe u v
+
+/-- **The equation of a well-founded recursion determines its solution.** When `r` is well-founded
+and `F` computes a value at `x` from values at the arguments `r`-below `x`, any two functions that
+both satisfy `f x = F x (fun y _ => f y)` at every `x` are equal. The equation Lean proves for a
+definition by structural or well-founded recursion, read as a property of the function it names,
+has this form, which is argued in `declSection`, not proved. -/
+theorem eq_of_recursion_eqn {α : Sort u} {β : α → Sort v} {r : α → α → Prop} (hr : WellFounded r)
+    (F : (x : α) → ((y : α) → r y x → β y) → β x) {f g : (x : α) → β x}
+    (hf : ∀ x, f x = F x fun y _ => f y) (hg : ∀ x, g x = F x fun y _ => g y) : f = g :=
+  funext fun x => hr.induction (C := fun x => f x = g x) x fun x ih => by
+    rw [hf x, hg x]
+    congr 1
+    funext y h
+    exact ih y h
+
+end Recursion
+
+/-- How Lean compiled the definition `c`: `some true` when its own record of the definitions it
+compiled by structural recursion (`Lean.Elab.Structural.eqnInfoExt`) holds `c`, `some false` when its
+record of those it compiled by well-founded recursion (`Lean.Elab.WF.eqnInfoExt`) does, each read as
+Lean reads it to state `c`'s unfolding equation, and `none` otherwise. A definition by
+`partial_fixpoint`, whose equation need not determine it, is in neither, and is printed by its
+value. -/
+def recursionKind (env : Environment) (c : Name) : Option Bool :=
+  if (Elab.Structural.eqnInfoExt.find? env c).isSome then some true
+  else if (Elab.WF.eqnInfoExt.find? env c).isSome then some false
+  else none
+
+/-- Whether `t` is `∀ x₁ … xₙ, c x₁ … xₙ = r`, after the `k` binders already passed, for some `n`
+and `r`, where `c` is the constant `c` at the universe levels `us`: an equation that states the value
+of `c` at every argument. -/
+def unfoldsTo (c : Name) (us : List Level) : Nat → Expr → Bool
+  | k, .forallE _ _ b _ => unfoldsTo c us (k + 1) b
+  | k, e => e.isAppOfArity ``Eq 3 &&
+      e.appFn!.appArg! == mkAppN (.const c us) ((List.range k).reverse.map Expr.bvar).toArray
+
+/-- The equation Lean proves for the definition `c` by recursion (`Lean.Meta.getUnfoldEqnFor?`),
+`c.eq_def`, and its statement, `∀ x₁ … xₙ, c x₁ … xₙ = r`, with the universe parameters `levels`
+of `c`. An error, naming `c`, when Lean gives none, when its statement or universe parameters are
+not those, or when it rests on an axiom other than Lean's own (`LeanIntent.Cone.leanAxioms`): since
+its statement names `c`, the axioms of `c`, its termination proof among them, are among its own
+(`Lean.collectAxioms` follows each constant's type and value). -/
+def unfoldEqn (c : Name) (levels : List Name) : MetaM (Name × Expr) := do
+  let eq? ← try getUnfoldEqnFor? c (nonRec := false)
+    catch err => throwError "cannot print {c}: Lean cannot state its equation: {err.toMessageData}"
+  let some eq := eq?
+    | throwError "cannot print {c}: Lean gives no equation that unfolds it"
+  let some eci := ((← getEnv).setExporting false).find? eq
+    | throwError "cannot print {c}: its equation {eq} has no declaration here"
+  unless eci.levelParams == levels && unfoldsTo c (levels.map .param) 0 eci.type do
+    throwError "cannot print {c}: its equation {eq} does not state its value at every argument"
+  let axs ← collectAxioms eq
+  unless axs.all LeanIntent.Cone.leanAxioms.contains do
+    throwError "cannot print {c}: it or its equation {eq} rests on the axioms {axs.toList}, not \
+      only on Lean's own, so its termination proof, if any, may not be one"
+  return (eq, eci.type)
+
 /-- The section that prints the declaration `ci`, named `c`, in full, from the declarations `out`
 that `LeanIntent.Print.meaning` collected; `none` for a constructor, printed with its inductive
 type, and for a recursor, which Lean's kernel derives from its inductive types, when `out` holds
@@ -293,9 +374,20 @@ those; an error, naming what cannot be printed, otherwise. A function that reads
 structure is printed by its type and its description by `projectionOf`, which determines its value
 up to the names, types and annotations of its leading `fun`s (`projShape_determines`); for a
 well-typed definition, its printed type fixes those types up to definitional equality, which is
-argued, not proved. -/
+argued, not proved.
+
+A definition by structural or well-founded recursion, which `eqns` gives an equation for
+(`unfoldEqn`), is printed by its type and that equation, `∀ x₁ … xₙ, c x₁ … xₙ = r`, in place of its
+value. The equation determines `c`, which is argued, not proved: Lean accepts such a definition only
+when `r` uses the values of `c`, and of any function defined together with it, only at arguments
+below `x₁ … xₙ` by a well-founded relation, structural subterms or a measure its termination proof
+shows decreases, for `c` or any function in its place, so `r` computes the value at `x₁ … xₙ` from
+values below them; and two functions, or families of functions defined together, that both satisfy
+such equations are equal (`eq_of_recursion_eqn`, for one function of one argument). The relation is
+well-founded because the termination proof rests on no axiom but Lean's own, which `unfoldEqn`
+checks. -/
 def declSection (lookup : Name → Option ConstantInfo) (out : List (Name × ConstantInfo))
-    (c : Name) (ci : ConstantInfo) : MetaM (Option String) := do
+    (eqns : NameMap (Name × Expr)) (c : Name) (ci : ConstantInfo) : MetaM (Option String) := do
   let has (n : Name) : Bool := out.any (·.1 == n)
   match ci with
   | .ctorInfo v =>
@@ -311,6 +403,19 @@ def declSection (lookup : Name → Option ConstantInfo) (out : List (Name × Con
   match ci with
   | .ctorInfo _ | .recInfo _ => return none
   | .defnInfo v =>
+    if let some (eq, t) := eqns.find? c then
+      let (kind, shows, below) := if recursionKind (← getEnv) c == some true then
+          ("structural recursion", "", "at structural subterms of the arguments it recurses on")
+        else ("well-founded recursion", "its termination proof shows that ",
+          "at arguments below those on the left by a well-founded relation")
+      return some (head s!"A definition by {kind}" ++ s!"Its value is not printed: Lean \
+        compiles a definition by recursion into a term its syntax cannot write. In its place is \
+        the equation Lean proves for it, `{eq}`, which Lean's kernel checked, stating its value at \
+        every argument:\n\n{code (← printPart c "equation" t)}\nThe equation determines {c}: Lean \
+        accepts a definition by {kind} only when {shows}the right of the equation uses the values \
+        of {c}, and of any function defined together with it, only {below}, so only one \
+        function, or family of functions defined together, satisfies their equations. {c} and \
+        its equation rest on no axiom but Lean's own.\n\n")
     match projectionOf lookup v with
     | some (n, s, i) =>
       return some (head s!"A function that reads a field of a structure: its value is `fun` over \
@@ -362,18 +467,41 @@ def toolchain : String :=
 
 /-- Every declaration the constants `roots` reach (`LeanIntent.Print.meaning`), outside Lean's own
 libraries and `shown`, printed in full by `declSection`, in the order they are reached; an error,
-naming what cannot be printed, when one cannot be, so nothing is printed in part. -/
+naming what cannot be printed, when one cannot be, so nothing is printed in part. A definition by
+recursion (`recursionKind`) reaches what its type and its equation (`unfoldEqn`) mention, in place
+of what its value does: each pass collects the meaning with the equations found so far, following
+nothing from a definition by recursion whose equation is not yet found, and then finds those; the
+pass that finds none to add is the one printed, so every definition by recursion it reaches is
+followed through its equation. Each pass but the last adds the equation of a declaration of the
+environment, so there are finitely many. -/
 def definitions (roots : List Name) (shown : NameSet) : MetaM String := do
-  let env ← getEnv
-  let lookup := fun c => (env.setExporting false).find? c
-  let out ← match meaning lookup (stopAt env (← leanOwnModules) shown) roots with
-    | .ok out => pure out
-    | .error (.unknown c) => throwError "cannot print {c}: it has no declaration here"
-    | .error .fuel => throwError "cannot print the definitions: there are too many"
-  let mut text := ""
-  for (c, ci) in out do
-    if let some s ← declSection lookup out c ci then text := text ++ s
-  return text
+  let own ← leanOwnModules
+  let mut eqns : NameMap (Name × Expr) := {}
+  repeat
+    -- Finding an equation may add declarations, so each pass reads the environment anew.
+    let env ← getEnv
+    let lookup := fun c => (env.setExporting false).find? c
+    let stop := stopAt env own shown
+    let found := eqns
+    -- `Prop` mentions no name: a definition by recursion whose equation is not yet found is
+    -- followed through its type alone in this pass.
+    let eqn := fun c => match found.find? c with
+      | some (_, t) => some t
+      | none => if (recursionKind env c).isSome then some (.sort .zero) else none
+    let out ← match meaning lookup eqn stop roots with
+      | .ok out => pure out
+      | .error (.unknown c) => throwError "cannot print {c}: it has no declaration here"
+      | .error .fuel => throwError "cannot print the definitions: there are too many"
+    let todo := out.filter fun (c, ci) =>
+      ci matches .defnInfo _ && (recursionKind env c).isSome && !found.contains c
+    if todo.isEmpty then
+      let mut text := ""
+      for (c, ci) in out do
+        if let some s ← declSection lookup out found c ci then text := text ++ s
+      return text
+    for (c, ci) in todo do
+      eqns := eqns.insert c (← unfoldEqn c ci.levelParams)
+  throwError "unreachable: the loop returns when no equation is left to find"
 
 /-- The kind of a consequence, `e` reduced to its constructor, and what it is shown as. -/
 def kindWords (e : Expr) : MetaM (Expr × String) := do

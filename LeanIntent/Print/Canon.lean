@@ -11,7 +11,7 @@ first component of a constant in the term has it, so that neither the printer's 
 can read the variable as another. A binder that cannot keep its name loses it when it is a `∀`
 whose body does not use its variable and whose annotation is the default, and is printed as an
 arrow; otherwise it takes its name without macro scopes when that can be kept, and else the first
-of `x`, `x_1`, `x_2`, ... that can.
+of `x`, `x_1`, `x_2`, ... that can. The binders renamed are those of `fun`, `∀` and `let`.
 
 A binder's name is not part of what a term means: Lean's kernel compares terms with binder names
 ignored. `eraseNames_canon` proves that `canon` changes nothing else: with every binder name
@@ -72,7 +72,8 @@ def canon (avoid : List Name) : List Name → Expr → Expr
       else pick (avoid ++ sc) n
     .forallE n' (canon avoid sc t) (canon avoid (n' :: sc) b) bi
   | sc, .letE n t v b nd =>
-    .letE n (canon avoid sc t) (canon avoid sc v) (canon avoid (n :: sc) b) nd
+    let n' := if keeps (avoid ++ sc) n then n else pick (avoid ++ sc) n
+    .letE n' (canon avoid sc t) (canon avoid sc v) (canon avoid (n' :: sc) b) nd
   | sc, .mdata m e => .mdata m (canon avoid sc e)
   | sc, .proj s i e => .proj s i (canon avoid sc e)
   | _, e => e

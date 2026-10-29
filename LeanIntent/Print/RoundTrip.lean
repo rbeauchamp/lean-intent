@@ -258,7 +258,7 @@ def needsParen : Expr → Prec → Bool
   | .app .., p => p.isArg
   | .sort l, p => !isZero l && p.tight
   | .lit (.natVal _), p => p.tight
-  | .lam .., p | .forallE .., p => !p.isTerm
+  | .lam .., p | .forallE .., p | .letE .., p => !p.isTerm
   | _, _ => false
 
 /-- A term printed at any precedence is the term printed at the lowest, in parentheses where
@@ -267,7 +267,7 @@ theorem pr_prec (bare : Name → Bool) (sc : List Name) (e : Expr) (p : Prec) :
     pr bare sc e p = (pr bare sc e .term).map (paren (needsParen e p)) := by
   cases e with
   | bvar i => simp only [pr, needsParen]; split <;> (try split) <;> simp [paren_false]
-  | fvar | mvar | letE | mdata | proj => simp [pr]
+  | fvar | mvar | mdata | proj => simp [pr]
   | const c us =>
     simp only [pr, needsParen]
     split
@@ -298,14 +298,22 @@ theorem pr_prec (bare : Name → Bool) (sc : List Name) (e : Expr) (p : Prec) :
       · cases pr bare sc t .term <;> cases pr bare (n :: sc) b .term <;>
           simp [Prec.isTerm, paren_false]
       · simp
+  | letE n t v b nd =>
+    simp only [pr, needsParen, Option.bind_eq_bind]
+    split
+    · cases pr bare sc t .term <;> cases pr bare sc v .term <;> cases pr bare (n :: sc) b .term <;>
+        simp [Prec.isTerm, paren_false]
+    · simp
 
-/-- What may follow a term: nothing, or a closing bracket. -/
+/-- What may follow a term: nothing, a closing bracket, or the `:=` or `;` of a `let`. -/
 def FollowsTerm (rest : List Tok) : Prop :=
-  ∀ t, rest.head? = some t → t = .rparen ∨ t = .rbrace ∨ t = .rbrack ∨ t = .rstrict
+  ∀ t, rest.head? = some t →
+    t = .rparen ∨ t = .rbrace ∨ t = .rbrack ∨ t = .rstrict ∨ t = .colonEq ∨ t = .semicolon
 
 /-- What may follow a term before `→`: what may follow a term, or `→`. -/
 def FollowsSimple (rest : List Tok) : Prop :=
-  ∀ t, rest.head? = some t → t = .rparen ∨ t = .rbrace ∨ t = .rbrack ∨ t = .rstrict ∨ t = .arrow
+  ∀ t, rest.head? = some t → t = .rparen ∨ t = .rbrace ∨ t = .rbrack ∨ t = .rstrict ∨
+    t = .colonEq ∨ t = .semicolon ∨ t = .arrow
 
 /-- The application of `h` to the arguments `as`, in order. -/
 def mkApps (h : Expr) (as : List Expr) : Expr := as.foldl .app h
@@ -355,16 +363,29 @@ theorem atomStart_false_of_follows {rest : List Tok} (h : FollowsSimple rest) :
   cases rest with
   | nil => rfl
   | cons t r =>
-    rcases h t rfl with h | h | h | h | h <;> subst h <;> rfl
+    rcases h t rfl with h | h | h | h | h | h | h <;> subst h <;> rfl
 
 theorem noUniv_of_follows {rest : List Tok} (h : FollowsSimple rest) :
     rest.head? ≠ some .dotBrace := by
   cases rest with
   | nil => simp
-  | cons t r => rcases h t rfl with h | h | h | h | h <;> subst h <;> simp
+  | cons t r => rcases h t rfl with h | h | h | h | h | h | h <;> subst h <;> simp
 
 theorem followsSimple_of_term {rest : List Tok} (h : FollowsTerm rest) : FollowsSimple rest :=
-  fun t ht => by rcases h t ht with h | h | h | h <;> simp [h]
+  fun t ht => by rcases h t ht with h | h | h | h | h | h <;> simp [h]
+
+/-- Whether a token starts a binder form: `fun`, `∀`, `let` or `have`. -/
+def bindStart : Tok → Bool
+  | .kwFun | .pi | .kwLet | .kwHave => true
+  | _ => false
+
+/-- Text that starts with `t`, which starts no binder form, starts no binder form. -/
+theorem bindStart_append {t : Tok} (h : bindStart t = false) (ts rest : List Tok) :
+    ∀ u r, (t :: ts) ++ rest = u :: r → bindStart u = false := by
+  intro u r he
+  simp only [List.cons_append, List.cons.injEq] at he
+  rw [← he.1]
+  exact h
 
 theorem psTerm_kwFun (f : Nat) (sc : List Name) (ts : List Tok) :
     psTerm (f + 1) sc (.kwFun :: ts) = (psBinder f sc ts).bind fun (bi, n, t, ts) =>
@@ -393,8 +414,8 @@ theorem psAtom_lparen (f : Nat) (sc : List Name) (ts : List Tok) :
       | .rparen :: ts => some (e, ts)
       | _ => none := rfl
 
-theorem psTerm_default {f : Nat} {sc : List Name} {ts : List Tok} (h1 : ∀ r, ts ≠ .kwFun :: r)
-    (h2 : ∀ r, ts ≠ .pi :: r) :
+theorem psTerm_default {f : Nat} {sc : List Name} {ts : List Tok}
+    (h : ∀ t r, ts = t :: r → bindStart t = false) :
     psTerm (f + 1) sc ts = (psSimple f sc ts).bind fun (a, ts) =>
       match ts with
       | .arrow :: ts => (psTerm f (.anonymous :: sc) ts).bind fun (b, ts) =>
@@ -402,7 +423,9 @@ theorem psTerm_default {f : Nat} {sc : List Name} {ts : List Tok} (h1 : ∀ r, t
       | ts => some (a, ts) := by
   cases ts with
   | nil => rfl
-  | cons t ts => cases t <;> first | rfl | simp_all
+  | cons t ts =>
+    have := h t ts rfl
+    cases t <;> first | rfl | simp [bindStart] at this
 
 theorem psSimple_default {f : Nat} {sc : List Name} {ts : List Tok} (h : atomStart ts = true) :
     psSimple (f + 1) sc ts = (psAtom f sc ts).bind fun (h, ts) => psArgs f sc h ts := by
@@ -475,17 +498,17 @@ theorem claimS_of_H (hpe : pr bare sc e .simple = pr bare sc e .head) (hH : Clai
   simpa [mkApps] using this
 
 theorem claimT_of_S (hpe : pr bare sc e .term = pr bare sc e .simple)
-    (hhead : ∀ ts, pr bare sc e .term = some ts → ∃ t ts', ts = t :: ts' ∧ t ≠ .kwFun ∧ t ≠ .pi)
+    (hhead : ∀ ts, pr bare sc e .term = some ts → ∃ t ts', ts = t :: ts' ∧ bindStart t = false)
     (hS : ClaimS bare sc e) : ClaimT bare sc e := by
   intro ts hts rest hr f hf
-  obtain ⟨t, ts', rfl, h1, h2⟩ := hhead _ hts
+  obtain ⟨t, ts', rfl, hb⟩ := hhead _ hts
   rw [hpe] at hts
   obtain ⟨f, rfl⟩ : ∃ f', f = f' + 1 := ⟨f - 1, by omega⟩
-  rw [psTerm_default (by simp [h1]) (by simp [h2]),
+  rw [psTerm_default (bindStart_append hb _ _),
     hS _ hts rest (followsSimple_of_term hr) f (by omega), Option.bind_some]
   cases rest with
   | nil => rfl
-  | cons u r => rcases hr u rfl with h | h | h | h <;> subst h <;> rfl
+  | cons u r => rcases hr u rfl with h | h | h | h | h | h <;> subst h <;> rfl
 
 theorem claimA_of_T (hpe : pr bare sc e .arg = (pr bare sc e .term).map (paren true))
     (hT : ClaimT bare sc e) : ClaimA bare sc e := by
@@ -511,7 +534,7 @@ theorem claims_of_atom (hp : ∀ p, pr bare sc e p = pr bare sc e .arg) (hA : Cl
   have := (hA ts hts).1
   cases ts with
   | nil => simp [atomStart] at this
-  | cons t ts => exact ⟨t, ts, rfl, by cases t <;> simp_all [atomStart]⟩
+  | cons t ts => exact ⟨t, ts, rfl, by cases t <;> simp_all [atomStart, bindStart]⟩
 
 theorem opener_openTok (bi : BinderInfo) : opener (openTok bi) = some bi := by cases bi <;> rfl
 
@@ -519,6 +542,12 @@ theorem followsTerm_closer (bi : BinderInfo) (r : List Tok) : FollowsTerm (close
   intro t ht; cases bi <;> simp_all [closer]
 
 theorem followsTerm_rparen (r : List Tok) : FollowsTerm (.rparen :: r) := by
+  intro t ht; simp_all
+
+theorem followsTerm_colonEq (r : List Tok) : FollowsTerm (.colonEq :: r) := by
+  intro t ht; simp_all
+
+theorem followsTerm_semicolon (r : List Tok) : FollowsTerm (.semicolon :: r) := by
   intro t ht; simp_all
 
 /-- `psTerm` reads back `fun` and `∀` with a named binder, from reading back its type and body. -/
@@ -550,6 +579,40 @@ theorem psTerm_binder {kw sep : Tok} (hkw : kw = .kwFun ∧ sep = .darrow ∨ kw
     simp only [List.append_assoc, List.cons_append] at hbinder ⊢
     rw [hbinder]
     simp [hbody]
+
+theorem psTerm_kwLet (f : Nat) (sc : List Name) (ts : List Tok) :
+    psTerm (f + 1) sc (.kwLet :: ts) = psLet f sc false ts := rfl
+
+theorem psTerm_kwHave (f : Nat) (sc : List Name) (ts : List Tok) :
+    psTerm (f + 1) sc (.kwHave :: ts) = psLet f sc true ts := rfl
+
+/-- `psTerm` reads back a `let` or a `have`, from reading back its type, value and body. -/
+theorem psTerm_letE {n : Name} {t v b : Expr} {nd : Bool} {tt tv tb : List Tok}
+    (hT : ClaimT bare sc t) (htt : pr bare sc t .term = some tt)
+    (hV : ClaimT bare sc v) (htv : pr bare sc v .term = some tv)
+    (hB : ClaimT bare (n :: sc) b) (htb : pr bare (n :: sc) b .term = some tb)
+    (rest : List Tok) (hr : FollowsTerm rest) (f : Nat)
+    (hf : 4 * (letToks nd n tt tv tb).length + 3 ≤ f) :
+    psTerm f sc (letToks nd n tt tv tb ++ rest) = some (.letE n t v b nd, rest) := by
+  obtain ⟨f, rfl⟩ : ∃ f', f = f' + 1 + 1 := ⟨f - 2, by simp [letToks] at hf; omega⟩
+  simp only [letToks, List.length_cons, List.length_append] at hf
+  have hlet : psLet (f + 1) sc nd
+      (.ident n :: .colon :: (tt ++ .colonEq :: (tv ++ .semicolon :: (tb ++ rest)))) =
+      some (.letE n t v b nd, rest) := by
+    simp only [psLet]
+    rw [hT tt htt _ (followsTerm_colonEq _) f (by omega)]
+    simp only [Option.bind_eq_bind, Option.bind_some]
+    rw [hV tv htv _ (followsTerm_semicolon _) f (by omega)]
+    simp only [Option.bind_some]
+    rw [hB tb htb rest hr f (by omega)]
+    rfl
+  cases nd
+  · simp only [letToks, Bool.false_eq_true, ite_false, List.cons_append, List.append_assoc]
+    rw [psTerm_kwLet]
+    exact hlet
+  · simp only [letToks, ite_true, List.cons_append, List.append_assoc]
+    rw [psTerm_kwHave]
+    exact hlet
 
 theorem pr_eq_of_needsParen {p q : Prec} (h : needsParen e p = needsParen e q) :
     pr bare sc e p = pr bare sc e q := by
@@ -598,28 +661,28 @@ theorem atomStart_pr (bare : Name → Bool) (e : Expr) :
     · simp [Prec.tight] at hp
     · exact atomStart_append (ihf sc .head rfl htf) _
     · rfl
-  | lam | forallE =>
+  | lam | forallE | letE =>
     intro sc p ts hp h
     have hpt : (!p.isTerm) = true := by cases p <;> simp_all [Prec.tight, Prec.isTerm]
     rw [pr_prec] at h
     simp only [needsParen, hpt, Option.map_eq_some_iff] at h
     obtain ⟨_, _, rfl⟩ := h
     rfl
-  | fvar | mvar | letE | mdata | proj => intro sc p ts _ h; simp [pr] at h
+  | fvar | mvar | mdata | proj => intro sc p ts _ h; simp [pr] at h
 
 theorem atomStart_pr_head (bare : Name → Bool) (e : Expr) (sc : List Name) {ts : List Tok}
     (h : pr bare sc e .head = some ts) : atomStart ts = true :=
   atomStart_pr bare e sc .head rfl h
 
-/-- Before `→`, a printed term starts with neither `fun` nor `∀`. -/
+/-- Before `→`, a printed term starts no binder form: neither `fun`, `∀`, `let` nor `have`. -/
 theorem head_pr_simple (bare : Name → Bool) (e : Expr) (sc : List Name) {ts : List Tok}
-    (h : pr bare sc e .simple = some ts) : ∃ t ts', ts = t :: ts' ∧ t ≠ .kwFun ∧ t ≠ .pi := by
+    (h : pr bare sc e .simple = some ts) : ∃ t ts', ts = t :: ts' ∧ bindStart t = false := by
   have notStart : ∀ {ts : List Tok}, atomStart ts = true →
-      ∃ t ts', ts = t :: ts' ∧ t ≠ .kwFun ∧ t ≠ .pi := by
+      ∃ t ts', ts = t :: ts' ∧ bindStart t = false := by
     intro ts h
     cases ts with
     | nil => simp [atomStart] at h
-    | cons t ts => exact ⟨t, ts, rfl, by cases t <;> simp_all [atomStart]⟩
+    | cons t ts => exact ⟨t, ts, rfl, by cases t <;> simp_all [atomStart, bindStart]⟩
   cases e with
   | app f a =>
     rw [pr_eq_of_needsParen (q := .head) (by simp [needsParen, Prec.isArg])] at h
@@ -628,20 +691,20 @@ theorem head_pr_simple (bare : Name → Bool) (e : Expr) (sc : List Name) {ts : 
     simp only [pr, Prec.tight, Bool.and_false, paren_false, Option.map_eq_some_iff] at h
     obtain ⟨t, ht, rfl⟩ := h
     cases l with
-    | zero => simp [prSort] at ht; subst ht; exact ⟨_, _, rfl, by simp, by simp⟩
+    | zero => simp [prSort] at ht; subst ht; exact ⟨_, _, rfl, rfl⟩
     | succ l =>
       simp only [prSort] at ht
       split at ht
-      · simp at ht; subst ht; exact ⟨_, _, rfl, by simp, by simp⟩
+      · simp at ht; subst ht; exact ⟨_, _, rfl, rfl⟩
       · simp only [Option.map_eq_some_iff] at ht
-        obtain ⟨_, _, rfl⟩ := ht; exact ⟨_, _, rfl, by simp, by simp⟩
+        obtain ⟨_, _, rfl⟩ := ht; exact ⟨_, _, rfl, rfl⟩
     | max | imax | param | mvar =>
       simp only [prSort, Option.map_eq_some_iff] at ht
-      obtain ⟨_, _, rfl⟩ := ht; exact ⟨_, _, rfl, by simp, by simp⟩
+      obtain ⟨_, _, rfl⟩ := ht; exact ⟨_, _, rfl, rfl⟩
   | lit l =>
     cases l <;> simp [pr, Prec.tight, paren_false] at h <;> subst h <;>
-      exact ⟨_, _, rfl, by simp, by simp⟩
-  | bvar | const | lam | forallE | fvar | mvar | letE | mdata | proj =>
+      exact ⟨_, _, rfl, rfl⟩
+  | bvar | const | lam | forallE | letE | fvar | mvar | mdata | proj =>
     rw [pr_eq_of_needsParen (q := .arg) (by simp [needsParen, Prec.isTerm])] at h
     exact notStart (atomStart_pr bare _ sc .arg rfl h)
 
@@ -748,7 +811,7 @@ theorem claims (bare : Name → Bool) (e : Expr) : ∀ sc : List Name,
         · have : levelStart rest = false := by
             cases rest with
             | nil => rfl
-            | cons t r => rcases hr t rfl with h | h | h | h | h <;> subst h <;> rfl
+            | cons t r => rcases hr t rfl with h | h | h | h | h | h | h <;> subst h <;> rfl
           rw [List.cons_append, List.nil_append, psSimple_kwType]
           simp [this]
         · rw [List.cons_append, psSimple_kwType]
@@ -763,7 +826,7 @@ theorem claims (bare : Name → Bool) (e : Expr) : ∀ sc : List Name,
           rcases prSort_cases hts with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨l', tl, rfl, htl, rfl⟩ |
               ⟨tl, htl, rfl⟩
           · simp [isZero] at hz
-          all_goals exact ⟨_, _, rfl, by simp, by simp⟩) hS
+          all_goals exact ⟨_, _, rfl, rfl⟩) hS
       have hA := claimA_of_T (by rw [pr_prec _ _ _ .arg]; simp [needsParen, hz, Prec.tight]) hT
       exact ⟨hA, claimH_of_A (pr_eq_of_needsParen (by simp [needsParen, hz, Prec.tight])) hA, hS, hT⟩
   | lit l =>
@@ -784,7 +847,7 @@ theorem claims (bare : Name → Bool) (e : Expr) : ∀ sc : List Name,
       have hT := claimT_of_S (pr_eq_of_needsParen (by simp [needsParen, Prec.tight]))
         (fun ts hts => by
           simp only [pr, Prec.tight, paren_false, Option.some.injEq] at hts; subst hts
-          exact ⟨_, _, rfl, by simp, by simp⟩) hS
+          exact ⟨_, _, rfl, rfl⟩) hS
       have hA := claimA_of_T (by rw [pr_prec _ _ _ .arg]; simp [needsParen, Prec.tight]) hT
       exact ⟨hA, claimH_of_A (pr_eq_of_needsParen (by simp [needsParen, Prec.tight])) hA, hS, hT⟩
   | app f a ihf iha =>
@@ -838,8 +901,8 @@ theorem claims (bare : Name → Bool) (e : Expr) : ∀ sc : List Name,
         rename_i tt tb
         obtain ⟨f, rfl⟩ : ∃ f', f = f' + 1 := ⟨f - 1, by omega⟩
         simp only [List.length_append, List.length_cons] at hf
-        obtain ⟨t0, ts0, htt0, h1, h2⟩ := head_pr_simple bare t sc htt
-        rw [List.append_assoc, psTerm_default (by simp [htt0, h1]) (by simp [htt0, h2]),
+        obtain ⟨t0, ts0, htt0, hb0⟩ := head_pr_simple bare t sc htt
+        rw [List.append_assoc, psTerm_default (by rw [htt0]; exact bindStart_append hb0 _ _),
           (iht sc).2.2.1 tt htt _ (fun u hu => by simp at hu; simp [hu]) f (by omega),
           Option.bind_some]
         simp only [List.cons_append]
@@ -855,7 +918,22 @@ theorem claims (bare : Name → Bool) (e : Expr) : ∀ sc : List Name,
           simpa using this
         · simp at hts
     exact claims_of_binder (fun p => by cases p <;> rfl) hT
-  | fvar | mvar | letE | mdata | proj =>
+  | letE n t v b nd iht ihv ihb =>
+    intro sc
+    have hT : ClaimT bare sc (.letE n t v b nd) := by
+      intro ts hts rest hr f hf
+      simp only [pr, Option.bind_eq_bind] at hts
+      split at hts
+      · cases htt : pr bare sc t .term <;> cases htv : pr bare sc v .term <;>
+          cases htb : pr bare (n :: sc) b .term <;>
+          simp [htt, htv, htb, paren_false, Prec.isTerm] at hts
+        subst hts
+        rename_i tt tv tb
+        exact psTerm_letE ((iht sc).2.2.2) htt ((ihv sc).2.2.2) htv ((ihb (n :: sc)).2.2.2) htb
+          rest hr f hf
+      · simp at hts
+    exact claims_of_binder (fun p => by cases p <;> rfl) hT
+  | fvar | mvar | mdata | proj =>
     intro sc
     refine ⟨?_, ?_, ?_, ?_⟩ <;> intro ts hts <;> simp [pr] at hts
 

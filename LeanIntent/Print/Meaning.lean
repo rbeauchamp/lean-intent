@@ -4,10 +4,10 @@ import LeanIntent.Cone
 # The declarations a term's meaning reaches
 
 A term means what the declarations it names mean, and those mean what the declarations they name
-mean in turn. `meaning lookup stop roots` collects the declarations reached from the names `roots`,
-by following from each declaration every name it refers to, and stopping at the names `stop`
-chooses. `LeanIntent.Render` prints every declaration it collects, so that what an owner reads of a
-term reaches everything the term means.
+mean in turn. `meaning lookup eqn stop roots` collects the declarations reached from the names
+`roots`, by following from each declaration every name it refers to, and stopping at the names
+`stop` chooses. `LeanIntent.Render` prints every declaration it collects, so that what an owner
+reads of a term reaches everything the term means.
 
 What a declaration refers to is the relation of the cone that the check that a record does not
 depend on its implementation follows (lean-intent #2), used here as that check defines it and not
@@ -22,12 +22,19 @@ irrelevance any two proofs of a proposition are equal, so neither changes what a
 the constant means. Nor is the mutual block of a definition, theorem or opaque constant, which
 Lean's kernel does not read.
 
-What is proved, for every lookup, every choice of names to stop at, and every list of roots:
+One exception (`refsVia`): a definition that `eqn` gives an equation for refers to the names its
+type and that equation mention, in place of the names its value mentions. `LeanIntent.Render` gives
+one for a definition by structural or well-founded recursion, whose value Lean compiles into a term
+its syntax cannot write, and shows it by that equation, which determines it; so what is collected
+is what the shown form depends on.
+
+What is proved, for every lookup, every choice of equations, every choice of names to stop at, and
+every list of roots:
 
 * `meaning_ok`: when `meaning` returns a list of declarations, each is the one `lookup` finds under
   its name, and a name is in the list exactly when it is reached (`Reach`): a root, or a name a
-  reached declaration refers to, that `stop` does not choose. So every name reached is collected,
-  and nothing else is.
+  reached declaration refers to (`refsVia`), that `stop` does not choose. So every name reached is
+  collected, and nothing else is.
 * `ctor_mem`, `induct_mem`, `block_mem`: in particular, the list holds every constructor of every
   inductive type it holds, the inductive type of every constructor it holds, and the block of every
   recursor it holds, except names `stop` chooses.
@@ -41,30 +48,57 @@ reads them with `Lean.Environment.find?`.
 
 namespace LeanIntent.Print
 
-open Lean (Name ConstantInfo)
-open LeanIntent.Cone (declRefs mem_declRefs)
+open Lean (Name ConstantInfo Expr)
+open LeanIntent.Cone (declRefs mem_declRefs exprRefs mem_exprRefs Mentions RefersTo)
 
-theorem mem_declRefs_ctor {v : Lean.InductiveVal} {k : Name} (h : k ∈ v.ctors) :
-    k ∈ declRefs (.inductInfo v) :=
+/-- What the declaration `ci`, named `c`, refers to in a meaning: the names
+`LeanIntent.Cone.declRefs` lists, except for a definition that `eqn` gives an equation for, which
+refers to the names its type and that equation mention, in place of those its value mentions. -/
+def refsVia (eqn : Name → Option Expr) (c : Name) : ConstantInfo → List Name
+  | .defnInfo v =>
+    match eqn c with
+    | some t => exprRefs v.type (exprRefs t [])
+    | none => declRefs (.defnInfo v)
+  | ci => declRefs ci
+
+/-- What `refsVia` lists for a definition with an equation: the names its type or its equation
+mention (`LeanIntent.Cone.Mentions`). -/
+theorem mem_refsVia_eqn {eqn : Name → Option Expr} {c k : Name} {v : Lean.DefinitionVal} {t : Expr}
+    (h : eqn c = some t) : k ∈ refsVia eqn c (.defnInfo v) ↔ Mentions k v.type ∨ Mentions k t := by
+  simp [refsVia, h, mem_exprRefs]
+
+/-- For every other declaration, `refsVia` lists what `LeanIntent.Cone.declRefs` lists, the names
+it refers to by the cone's relation (`LeanIntent.Cone.RefersTo`). -/
+theorem refsVia_eq_declRefs {eqn : Name → Option Expr} {c : Name} {ci : ConstantInfo}
+    (h : eqn c = none ∨ ∀ v, ci ≠ .defnInfo v) : refsVia eqn c ci = declRefs ci := by
+  cases ci with
+  | defnInfo v =>
+    rcases h with h | h
+    · simp [refsVia, h]
+    · exact absurd rfl (h v)
+  | _ => rfl
+
+theorem mem_declRefs_ctor {eqn : Name → Option Expr} {c : Name} {v : Lean.InductiveVal} {k : Name}
+    (h : k ∈ v.ctors) : k ∈ refsVia eqn c (.inductInfo v) :=
   (mem_declRefs (.inductInfo v) k).mpr (Or.inr (Or.inr (Or.inl h)))
 
-theorem mem_declRefs_induct {v : Lean.ConstructorVal} : v.induct ∈ declRefs (.ctorInfo v) :=
+theorem mem_declRefs_induct {eqn : Name → Option Expr} {c : Name} {v : Lean.ConstructorVal} :
+    v.induct ∈ refsVia eqn c (.ctorInfo v) :=
   (mem_declRefs (.ctorInfo v) v.induct).mpr (Or.inr rfl)
 
-theorem mem_declRefs_block {v : Lean.RecursorVal} {i : Name} (h : i ∈ v.all) :
-    i ∈ declRefs (.recInfo v) :=
+theorem mem_declRefs_block {eqn : Name → Option Expr} {c : Name} {v : Lean.RecursorVal} {i : Name}
+    (h : i ∈ v.all) : i ∈ refsVia eqn c (.recInfo v) :=
   (mem_declRefs (.recInfo v) i).mpr (Or.inr (Or.inl h))
 
 /-! ## The closure -/
 
-/-- `Reach lookup stop roots c`: the name `c`, which `stop` does not choose, is one of `roots`, or
-is referred to (`LeanIntent.Cone.declRefs`) by the declaration `lookup` finds under a name reached
-before. -/
-inductive Reach (lookup : Name → Option ConstantInfo) (stop : Name → Bool) (roots : List Name) :
-    Name → Prop where
-  | root {c : Name} : c ∈ roots → stop c = false → Reach lookup stop roots c
-  | step {d c : Name} {ci : ConstantInfo} : Reach lookup stop roots d → lookup d = some ci →
-      c ∈ declRefs ci → stop c = false → Reach lookup stop roots c
+/-- `Reach lookup eqn stop roots c`: the name `c`, which `stop` does not choose, is one of `roots`,
+or is referred to (`refsVia eqn`) by the declaration `lookup` finds under a name reached before. -/
+inductive Reach (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr)
+    (stop : Name → Bool) (roots : List Name) : Name → Prop where
+  | root {c : Name} : c ∈ roots → stop c = false → Reach lookup eqn stop roots c
+  | step {d c : Name} {ci : ConstantInfo} : Reach lookup eqn stop roots d → lookup d = some ci →
+      c ∈ refsVia eqn d ci → stop c = false → Reach lookup eqn stop roots c
 
 /-- Why `meaning` returns no declarations. -/
 inductive Gap where
@@ -77,38 +111,40 @@ inductive Gap where
 /-- The closure: takes each name of `work` in turn, skips it when `stop` chooses it or `done`
 already holds it, and otherwise adds its declaration to `done` and the names it refers to to
 `work`. -/
-def collect (lookup : Name → Option ConstantInfo) (stop : Name → Bool) :
+def collect (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr) (stop : Name → Bool) :
     Nat → List Name → List (Name × ConstantInfo) → Except Gap (List (Name × ConstantInfo))
   | 0, _, _ => .error .fuel
   | _ + 1, [], done => .ok done
   | f + 1, c :: work, done =>
-    if stop c = true ∨ c ∈ done.map Prod.fst then collect lookup stop f work done
+    if stop c = true ∨ c ∈ done.map Prod.fst then collect lookup eqn stop f work done
     else
       match lookup c with
       | none => .error (.unknown c)
-      | some ci => collect lookup stop f (declRefs ci ++ work) ((c, ci) :: done)
+      | some ci => collect lookup eqn stop f (refsVia eqn c ci ++ work) ((c, ci) :: done)
 
 /-- The declarations reached from `roots`, in the order they are reached, each with its name; or
 why there are none. -/
-def meaning (lookup : Name → Option ConstantInfo) (stop : Name → Bool) (roots : List Name) :
-    Except Gap (List (Name × ConstantInfo)) :=
-  (collect lookup stop (2 ^ 64) roots []).map List.reverse
+def meaning (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr) (stop : Name → Bool)
+    (roots : List Name) : Except Gap (List (Name × ConstantInfo)) :=
+  (collect lookup eqn stop (2 ^ 64) roots []).map List.reverse
 
 section Proofs
 
-variable {lookup : Name → Option ConstantInfo} {stop : Name → Bool} {roots : List Name}
+variable {lookup : Name → Option ConstantInfo} {eqn : Name → Option Expr} {stop : Name → Bool}
+  {roots : List Name}
 
 /-- What `collect` keeps true of the names still to take and the declarations already collected. -/
-structure Inv (lookup : Name → Option ConstantInfo) (stop : Name → Bool) (roots : List Name)
-    (work : List Name) (done : List (Name × ConstantInfo)) : Prop where
+structure Inv (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr) (stop : Name → Bool)
+    (roots : List Name) (work : List Name) (done : List (Name × ConstantInfo)) : Prop where
   found : ∀ p ∈ done, lookup p.1 = some p.2
-  reached : ∀ p ∈ done, Reach lookup stop roots p.1
-  pending : ∀ c ∈ work, stop c = false → Reach lookup stop roots c
-  closed : ∀ p ∈ done, ∀ c ∈ declRefs p.2, stop c = false → c ∈ done.map Prod.fst ∨ c ∈ work
+  reached : ∀ p ∈ done, Reach lookup eqn stop roots p.1
+  pending : ∀ c ∈ work, stop c = false → Reach lookup eqn stop roots c
+  closed : ∀ p ∈ done, ∀ c ∈ refsVia eqn p.1 p.2, stop c = false →
+    c ∈ done.map Prod.fst ∨ c ∈ work
 
 theorem collect_ok : (f : Nat) → {work : List Name} → {done out : List (Name × ConstantInfo)} →
-    collect lookup stop f work done = .ok out → Inv lookup stop roots work done →
-    Inv lookup stop roots [] out ∧ (∀ c ∈ work, stop c = false → c ∈ out.map Prod.fst) ∧
+    collect lookup eqn stop f work done = .ok out → Inv lookup eqn stop roots work done →
+    Inv lookup eqn stop roots [] out ∧ (∀ c ∈ work, stop c = false → c ∈ out.map Prod.fst) ∧
       ∀ p ∈ done, p ∈ out
   | 0, _, _, _, h, _ => by simp [collect] at h
   | _ + 1, [], done, out, h, hi => by
@@ -119,7 +155,7 @@ theorem collect_ok : (f : Nat) → {work : List Name} → {done out : List (Name
     simp only [collect] at h
     split at h
     · next hskip =>
-      have hi' : Inv lookup stop roots work done :=
+      have hi' : Inv lookup eqn stop roots work done :=
         { found := hi.found, reached := hi.reached
           pending := fun x hx => hi.pending x (List.mem_cons_of_mem _ hx)
           closed := fun p hp x hx hs => by
@@ -143,8 +179,8 @@ theorem collect_ok : (f : Nat) → {work : List Name} → {done out : List (Name
       split at h
       · simp at h
       · next ci hci =>
-        have hc : Reach lookup stop roots c := hi.pending c (List.mem_cons_self ..) hs
-        have hi' : Inv lookup stop roots (declRefs ci ++ work) ((c, ci) :: done) :=
+        have hc : Reach lookup eqn stop roots c := hi.pending c (List.mem_cons_self ..) hs
+        have hi' : Inv lookup eqn stop roots (refsVia eqn c ci ++ work) ((c, ci) :: done) :=
           { found := fun p hp => by
               rcases List.mem_cons.mp hp with rfl | hp
               · exact hci
@@ -172,8 +208,8 @@ theorem collect_ok : (f : Nat) → {work : List Name} → {done out : List (Name
         · exact hw x (List.mem_append_right _ hx) hxs
 
 theorem collect_unknown : (f : Nat) → {work : List Name} → {done : List (Name × ConstantInfo)} →
-    {c : Name} → collect lookup stop f work done = .error (.unknown c) →
-    Inv lookup stop roots work done → Reach lookup stop roots c ∧ lookup c = none
+    {c : Name} → collect lookup eqn stop f work done = .error (.unknown c) →
+    Inv lookup eqn stop roots work done → Reach lookup eqn stop roots c ∧ lookup c = none
   | 0, _, _, _, h, _ => by simp [collect] at h
   | _ + 1, [], _, _, h, _ => by simp [collect] at h
   | f + 1, x :: work, done, c, h, hi => by
@@ -193,7 +229,7 @@ theorem collect_unknown : (f : Nat) → {work : List Name} → {done : List (Nam
               · exact .inr h }
     · next hskip =>
       have hs : stop x = false := by simpa using fun h => hskip (.inl h)
-      have hx : Reach lookup stop roots x := hi.pending x (List.mem_cons_self ..) hs
+      have hx : Reach lookup eqn stop roots x := hi.pending x (List.mem_cons_self ..) hs
       split at h
       · next hnone =>
         simp only [Except.error.injEq, Gap.unknown.injEq] at h
@@ -222,7 +258,7 @@ theorem collect_unknown : (f : Nat) → {work : List Name} → {done : List (Nam
                   · exact .inl (List.mem_cons_self ..)
                   · exact .inr (List.mem_append_right _ h) }
 
-theorem inv_init : Inv lookup stop roots roots [] where
+theorem inv_init : Inv lookup eqn stop roots roots [] where
   found := by simp
   reached := by simp
   pending := fun _ hc hs => .root hc hs
@@ -230,11 +266,11 @@ theorem inv_init : Inv lookup stop roots roots [] where
 
 /-- **What `meaning` collects.** Each declaration it returns is the one `lookup` finds under its
 name, and a name is among those it returns exactly when it is reached from `roots`. -/
-theorem meaning_ok {out : List (Name × ConstantInfo)} (h : meaning lookup stop roots = .ok out) :
+theorem meaning_ok {out : List (Name × ConstantInfo)} (h : meaning lookup eqn stop roots = .ok out) :
     (∀ p ∈ out, lookup p.1 = some p.2) ∧
-      ∀ c, c ∈ out.map Prod.fst ↔ Reach lookup stop roots c := by
+      ∀ c, c ∈ out.map Prod.fst ↔ Reach lookup eqn stop roots c := by
   simp only [meaning] at h
-  cases hc : collect lookup stop (2 ^ 64) roots [] with
+  cases hc : collect lookup eqn stop (2 ^ 64) roots [] with
   | error e => simp [hc] at h; cases h
   | ok out' =>
     simp only [hc, Except.map, Except.ok.injEq] at h
@@ -254,24 +290,24 @@ theorem meaning_ok {out : List (Name × ConstantInfo)} (h : meaning lookup stop 
         simpa using ho.closed p hp _ hc hs
 
 /-- A refusal for a name with no declaration names a reached name. -/
-theorem meaning_unknown {c : Name} (h : meaning lookup stop roots = .error (.unknown c)) :
-    Reach lookup stop roots c ∧ lookup c = none := by
+theorem meaning_unknown {c : Name} (h : meaning lookup eqn stop roots = .error (.unknown c)) :
+    Reach lookup eqn stop roots c ∧ lookup c = none := by
   simp only [meaning] at h
-  cases hc : collect lookup stop (2 ^ 64) roots [] with
+  cases hc : collect lookup eqn stop (2 ^ 64) roots [] with
   | error e =>
     simp only [hc, Except.map, Except.error.injEq] at h
     subst h
     exact collect_unknown _ hc inv_init
   | ok _ => simp [hc, Except.map] at h
 
-theorem reach_of_mem {out : List (Name × ConstantInfo)} (h : meaning lookup stop roots = .ok out)
+theorem reach_of_mem {out : List (Name × ConstantInfo)} (h : meaning lookup eqn stop roots = .ok out)
     {c : Name} {ci : ConstantInfo} (hp : (c, ci) ∈ out) :
-    Reach lookup stop roots c ∧ lookup c = some ci :=
+    Reach lookup eqn stop roots c ∧ lookup c = some ci :=
   ⟨((meaning_ok h).2 c).mp (List.mem_map.mpr ⟨_, hp, rfl⟩), (meaning_ok h).1 _ hp⟩
 
 /-- Every constructor of an inductive type `meaning` returns is among the names it returns, unless
 `stop` chooses it. -/
-theorem ctor_mem {out : List (Name × ConstantInfo)} (h : meaning lookup stop roots = .ok out)
+theorem ctor_mem {out : List (Name × ConstantInfo)} (h : meaning lookup eqn stop roots = .ok out)
     {c k : Name} {v : Lean.InductiveVal} (hp : (c, .inductInfo v) ∈ out) (hk : k ∈ v.ctors)
     (hs : stop k = false) : k ∈ out.map Prod.fst :=
   let ⟨hr, hl⟩ := reach_of_mem h hp
@@ -279,7 +315,7 @@ theorem ctor_mem {out : List (Name × ConstantInfo)} (h : meaning lookup stop ro
 
 /-- The inductive type of a constructor `meaning` returns is among the names it returns, unless
 `stop` chooses it. -/
-theorem induct_mem {out : List (Name × ConstantInfo)} (h : meaning lookup stop roots = .ok out)
+theorem induct_mem {out : List (Name × ConstantInfo)} (h : meaning lookup eqn stop roots = .ok out)
     {c : Name} {v : Lean.ConstructorVal} (hp : (c, .ctorInfo v) ∈ out)
     (hs : stop v.induct = false) : v.induct ∈ out.map Prod.fst :=
   let ⟨hr, hl⟩ := reach_of_mem h hp
@@ -287,7 +323,7 @@ theorem induct_mem {out : List (Name × ConstantInfo)} (h : meaning lookup stop 
 
 /-- Every inductive type of the block of a recursor `meaning` returns is among the names it
 returns, unless `stop` chooses it. -/
-theorem block_mem {out : List (Name × ConstantInfo)} (h : meaning lookup stop roots = .ok out)
+theorem block_mem {out : List (Name × ConstantInfo)} (h : meaning lookup eqn stop roots = .ok out)
     {c i : Name} {v : Lean.RecursorVal} (hp : (c, .recInfo v) ∈ out) (hi : i ∈ v.all)
     (hs : stop i = false) : i ∈ out.map Prod.fst :=
   let ⟨hr, hl⟩ := reach_of_mem h hp
