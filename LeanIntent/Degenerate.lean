@@ -39,11 +39,10 @@ it is the same for every record about `W`. Each code carries the isomorphism thr
 for its type and the proof that both are those the library fixes (`Ty.Stands`, `Sig.Stands`): the
 identity for a type built only from those `Ty` builds in, and for a type the project declares, the
 code and isomorphism its deriving handler writes from the declaration, which rests on what
-`LeanIntent.Declared` states. Each
-degenerate subject is a value of `W`, its member carried back through that isomorphism
-(`Degenerate.subject`, `Degenerate.iso_subject`). A type with no code is not covered: no
-`Covered W` instance exists, so Lean reports that it cannot synthesize one, and no verdict about the
-class of `W` can be stated.
+`LeanIntent.Declared` states. Each degenerate subject is a value of `W`, its member carried back
+through that isomorphism (`Degenerate.subject`, `Degenerate.iso_subject`). A type with no code is
+not covered: no `Covered W` instance exists, so Lean reports that it cannot synthesize one, and no
+verdict about the class of `W` can be stated.
 
 ## Verdicts
 
