@@ -20,8 +20,9 @@ without one. It also lists the consequences of `r` shown to the owner, the conse
 answers (`LeanIntent.Consequence`), each with its gloss and a proof that it holds of `r` as shown
 (`Consequence.HoldsOf`): an entailment, that every model of `r` satisfies it; a possibility, that
 some model does. So no consequence is shown to the owner as entailed or as possible unless it is.
-The owner's answers to them are kept across revisions by `LeanIntent.Answers`; deciding whether each
-answer's authority traces back to a declared owner is lean-intent #5.
+The owner's answers to them are kept across revisions by `LeanIntent.Answers`; whether an answer
+recorded in a project's owners' log has authority that traces back to a declared owner is decided
+by `LeanIntent.Trace`, and tying the answers a project keeps to its log is lean-intent #5.
 -/
 
 namespace LeanIntent

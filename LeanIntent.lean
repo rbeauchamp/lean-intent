@@ -11,3 +11,4 @@ import LeanIntent.Declared
 import LeanIntent.Codec
 import LeanIntent.Codec.Text
 import LeanIntent.Statement
+import LeanIntent.Trace
