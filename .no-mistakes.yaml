@@ -108,3 +108,18 @@ build_outputs:
     - .lake/cache
   toolchain_files:
     - lean-toolchain
+
+# Pull request descriptions. A change's reasons live in its pull request description, which
+# becomes its squash commit: its Mission accounting, its decisions, its accepted risks and, for a
+# defect fix, its root cause. This template gives every description those sections as top-level
+# `#` headings, which no-mistakes requires, with their text and order, in each description it
+# drafts from the template; on later runs it keeps the text an author wrote before and after its
+# generated appendix and refreshes only the appendix, so a re-push after a rebase or a conflict
+# repair no longer drops what an author wrote. no-mistakes honours `pr.template` only from the copy
+# of this file on the default branch and reads the template's bytes from the default branch too,
+# so a change to either governs the runs that follow its merge. A pull request whose description
+# still carries evidence no-mistakes generated before this setting has to be reconciled by hand
+# before a run can adopt it ("Author-preserving regeneration" in no-mistakes' repo-config
+# reference).
+pr:
+  template: .github/pull_request_template.md
