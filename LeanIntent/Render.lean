@@ -568,7 +568,8 @@ def renderExplanation (decl : Name) : MetaM String := do
   return doc ++ s!"## Definitions the record's meaning reaches\n\nThese are not statements of the \
     record: each is a declaration that a statement above depends on, or that says what it is for \
     a subject to meet the record and for a consequence to hold of it as shown, with everything \
-    those depend on in turn. Each is printed in full: its type, a definition's value, and an \
+    those depend on in turn. Each is printed in full: its type, a definition's value, or for a \
+    definition by structural or well-founded recursion the equation that determines it, and an \
     inductive type's constructors, which for a structure are its fields; a theorem's proof and an \
     opaque constant's value are not, since no term that uses them depends on more than their \
     types. Their plain words are those of the statements that use them.\n\n\
