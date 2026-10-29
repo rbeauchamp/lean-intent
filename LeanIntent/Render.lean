@@ -44,18 +44,17 @@ definition's type and value; a definition by structural or well-founded recursio
 compiles into a value its syntax cannot write, by its type and the equation Lean proves for it,
 `c.eq_def`, which states its value at every argument and determines it; a theorem's, an opaque
 constant's and an axiom of a proposition's type, which is all a term that uses one depends on; an
-inductive type's type, its number of
-parameters and each constructor's type, which for a structure lists its fields; a function that
-reads a field of a structure, whose value is checked to be the projection Lean makes, by its type,
-the number of `fun`s of its value, its structure and its field's index, which determine its value
-up to the names, types and annotations of those `fun`s (`projShape_determines`), while for a
-well-typed definition its printed type fixes those types up to definitional equality, which is
-argued, not proved. A constructor is printed with its inductive type and a recursor is derived by
-Lean's kernel from its inductive types, so neither has a section of its own once those are
-printed. An axiom whose type is not a proposition is refused, since in a module of Lean's module
-system Lean shows an imported definition whose body is not exposed that way, as is a name with no
-declaration and every type, value or equation the printer cannot print or Lean does not read
-back. So no text prints a meaning in part.
+inductive type's type, its number of parameters and each constructor's type, which for a structure
+lists its fields; a function that reads a field of a structure, whose value is checked to be the
+projection Lean makes, by its type, the number of `fun`s of its value, its structure and its
+field's index, which determine its value up to the names, types and annotations of those `fun`s
+(`projShape_determines`), while for a well-typed definition its printed type fixes those types up
+to definitional equality, which is argued, not proved. A constructor is printed with its inductive
+type and a recursor is derived by Lean's kernel from its inductive types, so neither has a section
+of its own once those are printed. An axiom whose type is not a proposition is refused, since in a
+module of Lean's module system Lean shows an imported definition whose body is not exposed that
+way, as is a name with no declaration and every type, value or equation the printer cannot print
+or Lean does not read back. So no text prints a meaning in part.
 
 A definition is shown by its equation exactly when Lean's own record of the definitions it compiled
 by structural or by well-founded recursion holds it (`recursionKind`), and its equation is the one
@@ -66,12 +65,12 @@ uses the values of `c`, and of any function defined together with it, only at ar
 `x₁ … xₙ`, structural subterms or arguments below them by a well-founded relation its termination
 proof shows, for `c` or any function in its place, so `r` computes each value from values below
 it, and any two functions, or families of functions defined together, that satisfy such equations
-are equal (`eq_of_recursion_eqn`, proved for one function of one argument). That Lean's equation has that form is argued
-from how Lean compiles these definitions, not proved; that the termination proof is a proof rests
-on the axiom check. A definition by `partial_fixpoint`, whose equation need not determine it (for
-instance `f n = f (n + 1)`), and every other definition are printed by their value, and refused
-when it cannot be printed, such as one that holds a projection. The printer writes a `let` as
-`let` and one that does not depend on its value as `have`, as Lean reads them.
+are equal (`eq_of_recursion_eqn`, proved for one function of one argument). That Lean's equation
+has that form is argued from how Lean compiles these definitions, not proved; that the termination
+proof is a proof rests on the axiom check. A definition by `partial_fixpoint`, whose equation need
+not determine it (for instance `f n = f (n + 1)`), and every other definition are printed by their
+value, and refused when it cannot be printed, such as one that holds a projection. The printer
+writes a `let` as `let` and one that does not depend on its value as `have`, as Lean reads them.
 
 Every term is printed by `LeanIntent.Print.print`, whose output `LeanIntent.Print.parse` reads back
 as the very term printed, for every term (`LeanIntent.Print.parse_print`), after
