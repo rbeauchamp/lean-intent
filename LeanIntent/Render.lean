@@ -238,14 +238,20 @@ theorem eraseLams_of_projShape {e : Expr} {n : Nat} {s : Name} {i : Nat}
   | lam x t b bi _ ih =>
     unfold projShape at h
     split at h
-    · cases h; rfl
-    · cases hb : projShape b with
+    · rename_i heq
+      obtain ⟨rfl, rfl, rfl, rfl⟩ := Expr.lam.inj heq
+      cases h
+      rfl
+    · rename_i heq
+      obtain ⟨rfl, rfl, rfl, rfl⟩ := Expr.lam.inj heq
+      cases hb : projShape b with
       | none => simp [hb] at h
       | some d =>
         obtain ⟨m, s', i'⟩ := d
         simp only [hb, Option.map_some, Option.some.injEq, Prod.mk.injEq] at h
         obtain ⟨rfl, rfl, rfl⟩ := h
         simp only [eraseLams, lamSkel, ih hb]
+    · contradiction
   | _ => simp [projShape] at h
 
 /-- Two terms with the same description by `projShape` are equal once the names, types and
