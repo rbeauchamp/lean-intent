@@ -38,7 +38,8 @@ A subject's code is computed from its type by Lean's instance resolution (`Cover
 it is the same for every record about `W`. Each code carries the isomorphism through which it stands
 for its type and the proof that both are those the library fixes (`Ty.Stands`, `Sig.Stands`): the
 identity for a type built only from those `Ty` builds in, and for a type the project declares, the
-code and isomorphism its deriving handler writes from the declaration (`LeanIntent.Declared`). Each
+code and isomorphism its deriving handler writes from the declaration, which rests on what
+`LeanIntent.Declared` states. Each
 degenerate subject is a value of `W`, its member carried back through that isomorphism
 (`Degenerate.subject`, `Degenerate.iso_subject`). A type with no code is not covered: no
 `Covered W` instance exists, so Lean reports that it cannot synthesize one, and no verdict about the
@@ -334,8 +335,9 @@ the cast along their equality (`builtin`), so a type built only from them has on
 isomorphism maps each value to itself. A code with a declared type inside stands for its type through
 the isomorphisms of its parts, carried through the map of each type former. A type the project
 declares stands for itself through the code and isomorphism its declaration fixes: the last
-constructor, which admits them, is private, and only the deriving handler of `LeanIntent.Declared`,
-which reads them from the declaration, applies it. -/
+constructor, which admits them, is private, and the deriving handler of `LeanIntent.Declared`, which
+reads them from the declaration, is the only code of the library that applies it. Lean's privacy
+binds names only, so that nothing else applies it is trusted (`LeanIntent.Declared`). -/
 inductive Ty.Stands : (α : Type) → (t : Ty) → Iso α t.denote → Prop
   | builtin {α : Type} (t : Ty) (h : α = t.denote) : t.builtin = true → Ty.Stands α t (Iso.ofEq h)
   | list {α : Type} {t : Ty} {e : Iso α t.denote} :
