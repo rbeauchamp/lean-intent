@@ -185,15 +185,16 @@ Whether an answer's authority traces back to a declared owner within the scope o
 
 - the one statement of the project with the link's id is a delegation, and its delegate is the principal acting under it;
 - no revocation of the project revokes it, made by the principal who granted it or by a declared owner acting as owner;
-- its scope covers the answer's record, by its exact name, and lets its delegate do what the answer does, confirm or decline;
+- its scope covers the answer's record, as every record or by its exact name, and lets its delegate do what the answer does, confirm or decline;
 - it may be passed on, unless it is the delegation the answer itself acts under;
 - and the chain ends at a declared owner acting as owner.
 
-The answer must also be the one statement of the project with its id, and no retraction may withdraw it whose own authority traces back by the same rules, for retracting an answer on the answer's record.
+The answer must also be the one statement of the project with its id, and no retraction may withdraw it whose own authority traces back by the same rules, for retracting an answer on the answer's record. `LeanIntent.Trace.checkLog project owners log` gives the decision on every answer of the project in the log, in the log's order.
 
 | Theorem | What it establishes |
 |---|---|
 | `check_eq_ok_iff` | for every project, owners declaration, log and statement, `check` accepts exactly the accepted answers (`Accepted`), whose authority is defined by the inductive `Chain`: it accepts only those (soundness) and every one of them (completeness) |
+| `mem_checkLog` | `checkLog` pairs each answer of the project in the log with `check`'s decision on it, and holds nothing else |
 | `chain_iff_leads` | an authority traces back exactly when links that all hold lead from it to a declared owner acting as owner |
 | `check_eq_error` | every refusal names the answer, and its reason holds: the statement is not the one of the project with its id, or not an answer; or the first link of its chain that breaks, every link before it holding, and the test that link fails; or a retraction that withdraws it with authority that traces back |
 | `Fails.not_chain`, `Leads.not_chain` | a link that breaks breaks every chain through it |
