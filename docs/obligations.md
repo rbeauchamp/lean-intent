@@ -1,6 +1,6 @@
 # The adequacy obligations
 
-**The adequacy obligations O1 to O5**, each computed from the record by a goal former whose correctness theorem is proved, so an assistant obtains each obligation from the library instead of writing a weaker one by hand: the record is well formed (O1), its hypotheses and then the whole record have a model (O2), each property can fail (O3), a subject that does nothing fails it (O4), and any two subjects that meet it are equal or differ only in a freedom the owner confirms (O5).
+**The adequacy obligations O1 to O5**, each computed from the record by a goal former whose correctness theorem is proved, so an assistant obtains each obligation from the library instead of writing a weaker one by hand: the record is well formed (O1), its hypotheses and then the whole record have a model (O2), each property can fail (O3), a subject that does nothing fails it (O4), and any two subjects that meet it are equal or differ only in a stated freedom (O5), which is part of the restatement the owner confirms, a fork they decide when it changes what they get, or else a decision made on the owner's behalf.
 
 Modules: `LeanIntent/Obligations.lean`, and `LeanIntent/Progress.lean` for the progress theorem.
 
@@ -12,7 +12,7 @@ Modules: `LeanIntent/Obligations.lean`, and `LeanIntent/Progress.lean` for the p
 | O2, satisfiable | At confirmation: a subject of which every domain hypothesis holds, and an instance of each vocabulary predicate. Before a deliverable runs: a subject that meets the whole record, which the deliverable supplies. | `o2`, `o2_correct`; `o2Run`, `o2Run_correct` |
 | O3, refutable | Each property has a subject that fails it. | `o3`, `o3_correct` |
 | O4, progress | By the subject's `Shape`: nothing of a plain value; totality of a function, which every Lean function has; and for a step of a system with state, that every step leaving the state unchanged fails the record. | `o4`, `o4_correct` |
-| O5, determinate or confirmed freedom | Any two subjects that meet the record are equal (`.eq`), related by a relation the owner confirms (`.rel R`), or only both models (`.widest`), which every record meets, so O5 never refuses on its own: it makes the freedom a question for the owner. | `o5`, `o5_correct` |
+| O5, determinate or confirmed freedom | Any two subjects that meet the record are equal (`.eq`), related by a stated relation (`.rel R`), or only both models (`.widest`), which every record meets, so O5 never refuses on its own: it makes the freedom explicit, to be confirmed with the restatement, decided by the owner where it is a fork that changes what they get, or otherwise decided on the owner's behalf. | `o5`, `o5_correct` |
 
 Each correctness theorem equates the former's output with an intended proposition written by a direct match on the record, sharing no definition with the former or its helpers, for every record, so a former that stated `True`, a weaker proposition, or the obligation for one example only would fail it.
 

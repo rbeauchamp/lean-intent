@@ -3,10 +3,15 @@ import LeanIntent.Obligations
 /-!
 # The owner's answers, kept by every later revision
 
-The owner validates an intent record by reading its consequences in plain words and answering each
-one. A consequence is a named predicate on the subject, of one of two kinds: an *entailment*,
+The owner validates an intent record by confirming its plain restatement and deciding the forks it
+leaves open, not by answering each of its consequences. An answer confirms or declines one
+consequence: the owner gives it where the consequence is such a fork, and otherwise the agents give
+it, as a decision made on the owner's behalf with its reason tied to the owner's intent. Which it is
+shows in the project's owners' log, whose answer statement names who gave it, a principal acting as
+owner or one acting under the delegation it names (`LeanIntent.Statement`); an `Answer` here names
+no author. A consequence is a named predicate on the subject, of one of two kinds: an *entailment*,
 which every model of the record satisfies (what the record requires or rules out), or a
-*possibility*, which some model satisfies (what the record still allows). The owner confirms it or
+*possibility*, which some model satisfies (what the record still allows). An answer confirms it or
 declines it, and each of the four answers is a requirement of every later revision of the record
 (`Answer.KeptBy`), whose models are its subjects that meet it (`IntentRecord.Meets`):
 
@@ -16,7 +21,7 @@ declines it, and each of the four answers is a requirement of every later revisi
 | possibility `c` | a model that satisfies `c` | a refutation: no model satisfies `c` |
 
 A declined possibility is kept as a theorem, not as a model: when the owner is shown "the record
-allows returning the empty list for every input" and declines, what must stay true is that every
+allows returning the empty list for every input" and declines it, what must stay true is that every
 later revision excludes that subject. A declined entailment is kept as a countermodel, since a
 witness is what shows that a revision no longer requires it.
 
@@ -55,14 +60,15 @@ What this module does not establish:
   one, and that no one else removed or changed one. `LeanIntent.Trace` decides, from a project's
   owners' log, whether each answer recorded there has such authority and is not retracted; tying
   the answers a project keeps here to the statements of its log is lean-intent #5's;
-* that an answer's predicate still means what the owner confirmed. It is a Lean term, read in the
-  environment that elaborates it, so a revision that changes the body of a definition the predicate
-  uses, the subject type's among them, changes the stored answer's meaning without removing it, and
-  a confirmed entailment stated through the record it answers, such as `fun f => sorting.Props f`,
-  is kept by every revision of that record. A predicate that uses only Lean's own library, as both
-  answers of `LeanIntentExamples.Answers` do, keeps its meaning while the Lean release does; that
-  every other stored answer still says what the owner confirmed is left to the record of the
-  owner's answers, which names the revision each answer applies to (lean-intent #5);
+* that an answer's predicate still means what was confirmed or declined. It is a Lean term, read in
+  the environment that elaborates it, so a revision that changes the body of a definition the
+  predicate uses, the subject type's among them, changes the stored answer's meaning without
+  removing it, and a confirmed entailment stated through the record it answers, such as
+  `fun f => sorting.Props f`, is kept by every revision of that record. A predicate that uses only
+  Lean's own library, as both answers of `LeanIntentExamples.Answers` do, keeps its meaning while
+  the Lean release does; that every other stored answer still says what was confirmed or declined is
+  left to the record of the answers, which names the revision each answer applies to (lean-intent
+  #5);
 * that a project checks its current revision against its stored answers: it does so by declaring a
   value of `Accepted answers` for that revision, and a project that declares none checks nothing.
 -/
@@ -96,7 +102,7 @@ inductive Verdict where
   /-- The consequence is not what the owner means. -/
   | declined
 
-/-- An answer of the owner: a verdict on one consequence. -/
+/-- An answer: a verdict on one consequence, the owner's own or one made on the owner's behalf. -/
 structure Answer (W : Type u) where
   /-- The consequence answered. -/
   consequence : Consequence W
@@ -177,8 +183,8 @@ theorem not_keeps_of_opposite {r : IntentRecord W} {answers : List (Answer W)} {
     (ha : a ∈ answers) (h : a.opposite.KeptBy r) : ¬ Keeps r answers :=
   fun hk => (a.keptBy_opposite r).mp h ((keeps_iff r answers).mp hk a ha)
 
-/-- Stored answers that confirm and decline the same consequence refuse every revision: the owner
-resolves the conflict by retracting one. -/
+/-- Stored answers that confirm and decline the same consequence refuse every revision, until a
+retraction of one resolves the conflict. -/
 theorem not_keeps_of_conflict {r : IntentRecord W} {answers : List (Answer W)} {a : Answer W}
     (ha : a ∈ answers) (hb : a.opposite ∈ answers) : ¬ Keeps r answers :=
   fun hk => not_keeps_of_opposite ha ((keeps_iff r answers).mp hk _ hb) hk
@@ -220,14 +226,13 @@ theorem accepted_iff (answers : List (Answer W)) (r : IntentRecord W) :
     (∃ x : Accepted answers, x.record = r) ↔ ∀ a ∈ answers, a.KeptBy r :=
   ⟨fun ⟨x, hx⟩ => hx ▸ fun _ ha => x.keptBy ha, fun h => ⟨⟨r, (keeps_iff r answers).mpr h⟩, rfl⟩⟩
 
-/-- Every model of an accepted revision satisfies each consequence the owner confirmed as entailed.
--/
+/-- Every model of an accepted revision satisfies each consequence confirmed as entailed. -/
 theorem Accepted.entailed {answers : List (Answer W)} (x : Accepted answers) {n : String}
     {c : W → Prop} (ha : ⟨⟨n, .entailment, c⟩, .confirmed⟩ ∈ answers) {w : W}
     (hw : x.record.Meets w) : c w :=
   x.keptBy ha w hw
 
-/-- No model of an accepted revision satisfies a consequence the owner declined as possible. -/
+/-- No model of an accepted revision satisfies a consequence declined as possible. -/
 theorem Accepted.excluded {answers : List (Answer W)} (x : Accepted answers) {n : String}
     {c : W → Prop} (ha : ⟨⟨n, .possibility, c⟩, .declined⟩ ∈ answers) {w : W}
     (hw : x.record.Meets w) : ¬ c w :=

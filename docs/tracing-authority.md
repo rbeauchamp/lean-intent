@@ -6,7 +6,7 @@ Module: `LeanIntent/Trace.lean`.
 
 **Complete in this version:** the decision whether each answer's authority traces back to a declared owner with the theorems stating what it decides, what each refusal says and where it is monotone.
 
-`LeanIntent.Trace.check project owners log s` decides whether the statement `s` is an answer that counts, given the project, the owners declaration in force and the statements of the project's log. Every statement records who made it: a principal acting as an owner, or acting under the delegation it names. So an answer names the one chain its authority rests on, the delegation it acts under, the delegation that one was granted under, and so on, and the decision follows that chain from the answer, testing each link in turn:
+`LeanIntent.Trace.check project owners log s` decides whether the statement `s` is an answer that counts, given the project, the owners declaration in force and the statements of the project's log. Every statement records who made it: a principal acting as an owner, or acting under the delegation it names, which is how an answer of the owner's own is told apart from a decision made on the owner's behalf. So an answer names the one chain its authority rests on, the delegation it acts under, the delegation that one was granted under, and so on, and the decision follows that chain from the answer, testing each link in turn:
 
 - the one statement of the project with the link's id is a delegation, and its delegate is the principal acting under it;
 - no revocation of the project revokes it, made by the principal who granted it or by a declared owner acting as owner;

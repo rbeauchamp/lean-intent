@@ -62,8 +62,8 @@ What the theorems do not reach, and what is trusted:
   names every member of such a block as the implementation's.
 * A property that restates the implementation's body without naming it passes; its plain-word
   consequence, "the output is computed exactly as this expression", is left to the owner's
-  confirmation. That the record was written before its implementation was read is not decided
-  either.
+  confirmation of the record's restatement. That the record was written before its implementation
+  was read is not decided either.
 -/
 
 namespace LeanIntent.Cone

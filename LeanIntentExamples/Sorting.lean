@@ -260,7 +260,7 @@ theorem sort_fulfils : sorting.Fulfilled sort := fulfils implSpec_refines fun _ 
 /-! ## The records explained for their owner
 
 Each explanation glosses every statement of its record in plain words and lists the consequences
-the owner is asked to confirm or decline, each shown as an entailment or as a possibility, with a
+shown to the owner to confirm or decline, each shown as an entailment or as a possibility, with a
 proof that it holds of the record as shown. `LeanIntent.Render` renders them with every statement
 printed exactly. Shown `sortedOnlyExplained`, the owner declines the possibility that a function
 meeting the record returns the empty list for every input, which is how the forgotten

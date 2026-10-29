@@ -1,6 +1,6 @@
 # The degenerate-subject check
 
-**The degenerate-subject check** (`LeanIntent.degenerate`, `LeanIntent.Verdicts`): the degenerate subjects of the record's type (each constant function, the identity, the empty output and each projection), computed from the type alone and never chosen per record (for a type the project declares, this rests on its deriving handler; see [What is trusted](#what-is-trusted)); for each, a proved verdict on whether it meets the record; and each that does reported as a possibility for the owner to confirm or decline.
+**The degenerate-subject check** (`LeanIntent.degenerate`, `LeanIntent.Verdicts`): the degenerate subjects of the record's type (each constant function, the identity, the empty output and each projection), computed from the type alone and never chosen per record (for a type the project declares, this rests on its deriving handler; see [What is trusted](#what-is-trusted)); for each, a proved verdict on whether it meets the record; and each that does reported as a possibility to confirm or decline: by the owner when it is a fork their intent does not settle that changes what they get, and otherwise as a decision made on the owner's behalf.
 
 Modules: `LeanIntent/Codes.lean` (the codes of types), `LeanIntent/Degenerate.lean` (the class and its verdicts) and `LeanIntent/Declared.lean` (the deriving handler for the types a project declares).
 

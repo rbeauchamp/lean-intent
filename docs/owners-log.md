@@ -10,7 +10,7 @@ A project records who may answer for its intent, and each answer, as statements 
 
 - an owners declaration: the principals, each with the public keys it signs with, if any, and optionally how many owners must approve the next declaration;
 - a delegation: who grants it, as an owner or under which delegation; the delegate; the records it covers (all, or those named); whether the delegate may confirm, decline and retract; and whether it may pass the delegation on;
-- an answer: who answers, and under which delegation, if any; the intent record and the revision of it that was shown; the consequence's name, kind and predicate as they were shown; and the verdict;
+- an answer: who answers, and under which delegation, if any, so an answer the owner gave as owner is told apart from a decision made on the owner's behalf under a delegation; the intent record and the revision of it that was shown; the consequence's name, kind and predicate as they were shown; and the verdict;
 - a retraction of an answer, and a revocation of a delegation, each naming the statement it withdraws.
 
 Every statement also names its project, its id, the date, and its source: the owner's words, or a reference to where they are kept. Nothing requires a signature; a project that signs signs the same text.

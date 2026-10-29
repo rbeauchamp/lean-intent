@@ -15,14 +15,20 @@ read either.
 
 An `Explanation r` gives a gloss for every statement of the intent record `r`: its shape, and each
 of its domain hypotheses, properties and vocabulary predicates, in the record's order. Its type
-requires as many glosses of each kind as the record has statements, so no statement is left
-without one. It also lists the consequences of `r` shown to the owner, the consequences the owner
-answers (`LeanIntent.Consequence`), each with its gloss and a proof that it holds of `r` as shown
-(`Consequence.HoldsOf`): an entailment, that every model of `r` satisfies it; a possibility, that
-some model does. So no consequence is shown to the owner as entailed or as possible unless it is.
-The owner's answers to them are kept across revisions by `LeanIntent.Answers`; whether an answer
-recorded in a project's owners' log has authority that traces back to a declared owner is decided
-by `LeanIntent.Trace`, and tying the answers a project keeps to its log is lean-intent #5.
+requires as many glosses of each kind as the record has statements, so no statement is left without
+one. The owner confirms the record as a plain restatement of their intent, and decides the forks it
+leaves open; they are not asked to answer each consequence of it. The explanation also lists the
+consequences of `r` shown to the owner, those an answer confirms or declines
+(`LeanIntent.Consequence`): the forks the owner decides, and any other the explanation shows. Each
+comes with its gloss and a proof that it holds of `r` as shown (`Consequence.HoldsOf`): an
+entailment, that every model of `r` satisfies it; a possibility, that some model does. So no
+consequence is shown to the owner as entailed or as possible unless it is. The answers to them, the
+owner's own and the decisions made on the owner's behalf, are kept across revisions by
+`LeanIntent.Answers`. An answer recorded in a project's owners' log names who gave it, a principal
+acting as owner or one acting under the delegation it names, which tells the owner's own answer
+apart from a decision made on the owner's behalf; whether that authority traces back to a declared
+owner is decided by `LeanIntent.Trace`, and tying the answers a project keeps to its log is
+lean-intent #5.
 -/
 
 namespace LeanIntent
@@ -45,8 +51,8 @@ structure Gloss where
   freedom : String
 
 /-- The consequence `c` holds of the record `r` as it is shown: for an entailment, every model of
-`r` satisfies it; for a possibility, some model of `r` does. This is what the owner's confirming it
-asks of `r` (`Answer.KeptBy`). -/
+`r` satisfies it; for a possibility, some model of `r` does. This is what confirming it asks of
+`r` (`Answer.KeptBy`). -/
 def Consequence.HoldsOf (c : Consequence W) (r : IntentRecord W) : Prop :=
   (Answer.mk c .confirmed).KeptBy r
 

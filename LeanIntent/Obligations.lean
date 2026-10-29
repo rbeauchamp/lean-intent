@@ -17,7 +17,9 @@ for a Lean intent record:
 * **O4, progress**: for a function, totality; for a subject with state, every subject that leaves
   the state unchanged fails the record; a plain value is asked nothing.
 * **O5, determinate or confirmed freedom**: any two models of the record are equal, or related by
-  the relation the owner confirms as what the intent leaves unsaid (`Freedom`).
+  a stated relation, what the intent leaves unsaid (`Freedom`). The freedom is part of the
+  restatement the owner confirms; where it is a fork that changes what they get the owner decides
+  it, and otherwise it is a decision made on the owner's behalf.
 
 Each obligation is computed from the record by a *goal former* (`o1` to `o5`, and `o2Run`): one
 goal per item it asks about, met by proving their conjunction (`Goals`). A defective former that
@@ -217,7 +219,7 @@ theorem not_o4_of_idle {r : IntentRecord W} {w : W} (hIdle : r.shape.Idle w) (hw
 /-! ## O5, determinate or confirmed freedom -/
 
 /-- The relation O5 asks between two models of a record: equality, the widest freedom, which
-relates any two models, or a relation the owner confirms as what the intent leaves unsaid. -/
+relates any two models, or a stated relation, what the intent leaves unsaid. -/
 inductive Freedom (W : Type u) where
   | eq
   | widest
@@ -253,7 +255,8 @@ theorem o5_correct (r : IntentRecord W) (R : Freedom W) : O5 r R ↔ intendedO5 
       IntentRecord.Props, intendedO5]
 
 /-- O5 never refuses on its own: every record meets it with the widest freedom. What O5 adds is
-that the freedom is shown to the owner, who confirms it or declines it. -/
+that the freedom is made explicit, for the owner to decide where it is a fork that changes what they
+get, and otherwise to be decided on the owner's behalf. -/
 theorem o5_widest (r : IntentRecord W) : O5 r .widest :=
   (goals_singleton _).mpr fun _ _ hu hv => ⟨hu, hv⟩
 
