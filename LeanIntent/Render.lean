@@ -45,14 +45,14 @@ reads a field of a structure, whose value is checked to be the projection Lean m
 the number of `fun`s of its value, its structure and its field's index, which determine its value
 up to the names, types and annotations of those `fun`s (`projShape_determines`), while for a
 well-typed definition its printed type fixes those types up to definitional equality, which is
-argued, not proved. A constructor is printed with its inductive type and a
-recursor is derived by Lean's kernel from its inductive types, so neither has a section of its own
-once those are printed. An axiom whose type is not a proposition is refused, since in a module of
-Lean's module system Lean shows an imported definition whose body is not exposed that way, as is a
-name with no declaration and every type or value the printer cannot print or Lean does not read
-back. So no text prints a meaning in part. The printer writes no `let` and no projection, and Lean
-compiles a definition by structural or well-founded recursion into a value with projections, so a
-meaning that reaches one is refused for now (lean-intent #22).
+argued, not proved. A constructor is printed with its inductive type and a recursor is derived by
+Lean's kernel from its inductive types, so neither has a section of its own once those are
+printed. An axiom whose type is not a proposition is refused, since in a module of Lean's module
+system Lean shows an imported definition whose body is not exposed that way, as is a name with no
+declaration and every type or value the printer cannot print or Lean does not read back. So no
+text prints a meaning in part. The printer writes no `let` and no projection, and Lean compiles a
+definition by structural or well-founded recursion into a value with projections, so a meaning that
+reaches one is refused for now (lean-intent #22).
 
 Every term is printed by `LeanIntent.Print.print`, whose output `LeanIntent.Print.parse` reads back
 as the very term printed, for every term (`LeanIntent.Print.parse_print`), after
@@ -62,7 +62,7 @@ written or would be misread, which changes nothing but those names
 (`LeanIntent.Print.eraseNames_canon`). Before a printed term is shown, Lean itself must read it
 back: Lean's parser and elaborator, in the root namespace with nothing opened, must elaborate the
 printed text to the same term, binder names, which Lean's kernel ignores, and metadata aside. When
-they do not, the rendering is refused. So what the owner reads is what Lean
+they do not, the text, a rendering or an answer's, is refused. So what the owner reads is what Lean
 reads, for every term shown, though only as checked for that term and not as a theorem.
 
 The rendering reads the explanation through Lean's own reduction to weak head normal form, so a
