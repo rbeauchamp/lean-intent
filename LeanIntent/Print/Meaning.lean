@@ -1,25 +1,26 @@
-import Lean.Declaration
+import LeanIntent.Cone
 
 /-!
 # The declarations a term's meaning reaches
 
 A term means what the declarations it names mean, and those mean what the declarations they name
 mean in turn. `meaning lookup stop roots` collects the declarations reached from the names `roots`,
-by following from each declaration every name it refers to (`declRefs`), and stopping at the names
-`stop` chooses. `LeanIntent.Render` prints every declaration it collects, so that what an owner
-reads of a term reaches everything the term means.
+by following from each declaration every name it refers to, and stopping at the names `stop`
+chooses. `LeanIntent.Render` prints every declaration it collects, so that what an owner reads of a
+term reaches everything the term means.
 
-What a declaration refers to (`declRefs`) is what can change what a term that names it means: the
-names its type mentions; a definition's value; an inductive type's mutual block, constructors and
-recursors, named as Lean names them (`I.rec`, and `b.rec_1` to `b.rec_n` for the `n` auxiliary
-types of nested occurrences in a block whose first type is `b`); a constructor's inductive type;
-and a recursor's block and rules. An expression mentions a constant as a constant, as the structure
-a projection reads, or as the type Lean's kernel gives a literal (`exprRefs`). A theorem's proof
-and an opaque constant's value are not followed: Lean's kernel never unfolds an opaque constant,
-and by definitional proof irrelevance any two proofs of a proposition are equal, so neither
-changes what a term that names the constant means. Nor is the mutual block of a definition,
-theorem or opaque constant, which Lean's kernel does not read. These are the edges of the cone the
-check that a record does not depend on its implementation follows (lean-intent #2).
+What a declaration refers to is the relation of the cone that the check that a record does not
+depend on its implementation follows (lean-intent #2), used here as that check defines it and not
+restated: `LeanIntent.Cone.RefersTo`, whose names `LeanIntent.Cone.declRefs` lists
+(`LeanIntent.Cone.mem_declRefs`). It is what can change what a term that names the declaration
+means: the names its type mentions (`LeanIntent.Cone.Mentions`: as a constant, as the structure a
+projection reads, or as the type Lean's kernel gives a literal); a definition's value; an inductive
+type's mutual block, constructors and recursors, named as Lean names them; a constructor's
+inductive type; and a recursor's block and rules. A theorem's proof and an opaque constant's value
+are not followed: Lean's kernel never unfolds an opaque constant, and by definitional proof
+irrelevance any two proofs of a proposition are equal, so neither changes what a term that names
+the constant means. Nor is the mutual block of a definition, theorem or opaque constant, which
+Lean's kernel does not read.
 
 What is proved, for every lookup, every choice of names to stop at, and every list of roots:
 
@@ -40,65 +41,25 @@ reads them with `Lean.Environment.find?`.
 
 namespace LeanIntent.Print
 
-open Lean (Name Expr Literal ConstantInfo mkRecName)
-
-/-- The constants `e` names, each as often as it occurs, before `acc`: as a constant, as the
-structure a projection reads, or as the type Lean's kernel gives a literal, `Nat` for a natural
-number and `String` for a string. -/
-def exprRefs : Expr → List Name → List Name
-  | .const c _, acc => c :: acc
-  | .proj s _ e, acc => s :: exprRefs e acc
-  | .lit (.natVal _), acc => ``Nat :: acc
-  | .lit (.strVal _), acc => ``String :: acc
-  | .app f a, acc => exprRefs f (exprRefs a acc)
-  | .lam _ t b _, acc => exprRefs t (exprRefs b acc)
-  | .forallE _ t b _, acc => exprRefs t (exprRefs b acc)
-  | .letE _ t v b _, acc => exprRefs t (exprRefs v (exprRefs b acc))
-  | .mdata _ e, acc => exprRefs e acc
-  | .bvar _, acc | .fvar _, acc | .mvar _, acc | .sort _, acc => acc
-
-/-- The names the declaration `ci` refers to, each as often as it occurs: the names its type
-mentions; a definition's value; an inductive type's mutual block, constructors and recursors; a
-constructor's inductive type; a recursor's block, and the constructor and right-hand side of each
-of its rules. Not a theorem's proof, an opaque constant's value, or the mutual block of a
-definition, theorem or opaque constant. -/
-def declRefs : ConstantInfo → List Name
-  | .axiomInfo v => exprRefs v.type []
-  | .defnInfo v => exprRefs v.type (exprRefs v.value [])
-  | .thmInfo v => exprRefs v.type []
-  | .opaqueInfo v => exprRefs v.type []
-  | .quotInfo v => exprRefs v.type []
-  | .inductInfo v => exprRefs v.type (v.all ++ v.ctors ++ mkRecName v.name ::
-      v.all.head?.toList.flatMap fun b =>
-        (List.range v.numNested).map fun i => (mkRecName b).appendIndexAfter (i + 1))
-  | .ctorInfo v => exprRefs v.type [v.induct]
-  | .recInfo v => exprRefs v.type (v.all ++ v.rules.flatMap fun r => r.ctor :: exprRefs r.rhs [])
+open Lean (Name ConstantInfo)
+open LeanIntent.Cone (declRefs mem_declRefs)
 
 theorem mem_declRefs_ctor {v : Lean.InductiveVal} {k : Name} (h : k ∈ v.ctors) :
-    k ∈ declRefs (.inductInfo v) := by
-  simp [declRefs, exprRefs_mem_acc, h]
-where
-  exprRefs_mem_acc {c : Name} : (e : Expr) → {acc : List Name} → c ∈ acc → c ∈ exprRefs e acc
-    | .const _ _, _, h => List.mem_cons_of_mem _ h
-    | .proj _ _ e, _, h => List.mem_cons_of_mem _ (exprRefs_mem_acc e h)
-    | .lit (.natVal _), _, h | .lit (.strVal _), _, h => List.mem_cons_of_mem _ h
-    | .app f a, _, h => exprRefs_mem_acc f (exprRefs_mem_acc a h)
-    | .lam _ t b _, _, h | .forallE _ t b _, _, h => exprRefs_mem_acc t (exprRefs_mem_acc b h)
-    | .letE _ t v b _, _, h => exprRefs_mem_acc t (exprRefs_mem_acc v (exprRefs_mem_acc b h))
-    | .mdata _ e, _, h => exprRefs_mem_acc e h
-    | .bvar _, _, h | .fvar _, _, h | .mvar _, _, h | .sort _, _, h => h
+    k ∈ declRefs (.inductInfo v) :=
+  (mem_declRefs (.inductInfo v) k).mpr (Or.inr (Or.inr (Or.inl h)))
 
 theorem mem_declRefs_induct {v : Lean.ConstructorVal} : v.induct ∈ declRefs (.ctorInfo v) :=
-  mem_declRefs_ctor.exprRefs_mem_acc _ (List.mem_singleton_self _)
+  (mem_declRefs (.ctorInfo v) v.induct).mpr (Or.inr rfl)
 
 theorem mem_declRefs_block {v : Lean.RecursorVal} {i : Name} (h : i ∈ v.all) :
     i ∈ declRefs (.recInfo v) :=
-  mem_declRefs_ctor.exprRefs_mem_acc _ (List.mem_append_left _ h)
+  (mem_declRefs (.recInfo v) i).mpr (Or.inr (Or.inl h))
 
 /-! ## The closure -/
 
 /-- `Reach lookup stop roots c`: the name `c`, which `stop` does not choose, is one of `roots`, or
-is referred to (`declRefs`) by the declaration `lookup` finds under a name reached before. -/
+is referred to (`LeanIntent.Cone.declRefs`) by the declaration `lookup` finds under a name reached
+before. -/
 inductive Reach (lookup : Name → Option ConstantInfo) (stop : Name → Bool) (roots : List Name) :
     Name → Prop where
   | root {c : Name} : c ∈ roots → stop c = false → Reach lookup stop roots c

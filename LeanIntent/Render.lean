@@ -2,6 +2,7 @@ import Lean
 import LeanIntent.Explain
 import LeanIntent.Print
 import LeanIntent.Print.Meaning
+import LeanIntent.Cone
 
 /-!
 # Rendering an intent record for its owner
@@ -20,8 +21,10 @@ each answer of the list `l` to the explanation `e`, as information. This module 
 Lean, so a project that only writes records and explanations need not import it.
 
 The declarations a meaning reaches are those `LeanIntent.Print.meaning` collects from the constants
-the printed terms name: the names each declaration's type mentions, a definition's value, an
-inductive type's block, constructors and recursors, a constructor's inductive type, and a
+the printed terms name (`LeanIntent.Cone.exprRefs`), by the relation the check that a record does
+not depend on its implementation follows, as that check defines it (`LeanIntent.Cone.RefersTo`,
+listed by `LeanIntent.Cone.declRefs`): the names each declaration's type mentions, a definition's
+value, an inductive type's block, constructors and recursors, a constructor's inductive type, and a
 recursor's block and rules, but not a theorem's proof or an opaque constant's value, which no term
 that uses them depends on; for the rendering, also lean-intent's `IntentRecord.Meets`, which says
 what it is for a subject to meet the record, and, when it shows consequences, `Consequence.HoldsOf`,
@@ -78,6 +81,7 @@ version and commit, mean the same wherever that release runs is trusted with Lea
 namespace LeanIntent.Render
 
 open Lean Meta Elab LeanIntent.Print
+open LeanIntent.Cone (exprRefs)
 
 /-- Whether every binder of the leading `∀`s of `t` has the default annotation. -/
 def explicitOnly : Expr → Bool
