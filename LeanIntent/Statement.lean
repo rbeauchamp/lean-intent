@@ -31,8 +31,11 @@ public key is printed as OpenSSH writes it, its algorithm from a closed list and
 base64.
 
 What this module does not decide: whether a statement's authority traces back to a declared owner
-(lean-intent #18), whether a signature over it is valid (lean-intent #19), and how a predicate's
-meaning is printed into an answer (lean-intent #17). It reads the text of each, and no more.
+(lean-intent #18), whether a signature over it is valid (lean-intent #19), and whether an answer's
+text has changed since it was given. The text an answer is recorded against is
+`LeanIntent.Render.answerText`; recording that text with an answer statement, whose `revision` and
+`predicate` fields hold what was shown, and refusing an answer whose text has since changed, are
+lean-intent #5's. It reads the text of each statement, and no more.
 -/
 
 namespace LeanIntent

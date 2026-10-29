@@ -175,7 +175,7 @@ verdict declined
 
 A checkout that rewrites a statement's bytes, by converting its line endings or adding a byte-order mark, makes the parser refuse it; a project keeps its log out of Git's line-ending conversion, for example with `-text` in `.gitattributes`.
 
-The log is read, not yet judged: whether an answer's authority traces back to a declared owner within the scope of every delegation on the way is #18's decision, how an answer prints its predicate's full meaning is #17's, and checking signatures, for a project that signs, is #19's.
+The log is read, not yet judged: whether an answer's authority traces back to a declared owner within the scope of every delegation on the way is #18's decision; the text an answer is recorded against is `LeanIntent.Render.answerText`, and recording that text with an answer statement, whose `revision` and `predicate` fields hold what was shown, and refusing an answer whose text has since changed, are #5's; and checking signatures, for a project that signs, is #19's.
 
 ## Worked examples
 
