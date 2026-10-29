@@ -24,9 +24,10 @@ inductive LevelOk : Level → Prop
 /-- The terms the printer prints, under the binders `sc`, innermost first: bound variables that
 name their binder, with no binder of the same name between; constants with names whose components
 are strings that can be written, at levels it writes; sorts; string and natural number literals;
-applications; and `fun` and `∀` with binder names of one component that can be written, or a
-`∀` with no binder name and the default annotation, written as an arrow. Free and meta variables,
-`let`, metadata and projections are not among them. -/
+applications; `fun` and `∀` with binder names of one component that can be written, or a
+`∀` with no binder name and the default annotation, written as an arrow; and `let`, dependent or
+not (`have`), with a binder name of one component that can be written. Free and meta variables,
+metadata and projections are not among them. -/
 inductive Printable : List Name → Expr → Prop
   | bvar {sc : List Name} {i : Nat} {n : Name} : sc[i]? = some n → atomOk n = true →
       lookup n sc = some i → Printable sc (.bvar i)
@@ -42,6 +43,8 @@ inductive Printable : List Name → Expr → Prop
       Printable sc (.forallE .anonymous t b .default)
   | pi {sc : List Name} {n : Name} {t b : Expr} {bi : BinderInfo} : atomOk n = true →
       Printable sc t → Printable (n :: sc) b → Printable sc (.forallE n t b bi)
+  | letE {sc : List Name} {n : Name} {t v b : Expr} {nd : Bool} : atomOk n = true →
+      Printable sc t → Printable sc v → Printable (n :: sc) b → Printable sc (.letE n t v b nd)
 
 theorem levelOk_of_natOf : {l : Level} → {k : Nat} → natOf l = some k → LevelOk l
   | .zero, _, _ => .zero
@@ -219,7 +222,26 @@ theorem pr_isSome_iff (bare : Name → Bool) (e : Expr) :
         cases h with
         | arrow => simp [isArrow] at ha
         | pi hok => simp_all
-  | fvar | mvar | letE | mdata | proj =>
+  | letE n t v b nd iht ihv ihb =>
+    intro sc p
+    simp only [pr, Option.bind_eq_bind]
+    split
+    · next hn =>
+      constructor
+      · intro h
+        cases ht : pr bare sc t .term <;> cases hv : pr bare sc v .term <;>
+          cases hb : pr bare (n :: sc) b .term <;> simp [ht, hv, hb] at h
+        exact .letE hn ((iht sc .term).mp (by simp [ht])) ((ihv sc .term).mp (by simp [hv]))
+          ((ihb (n :: sc) .term).mp (by simp [hb]))
+      · intro h
+        cases h
+        next _ h1 h2 h3 =>
+          obtain ⟨tt, ht⟩ := Option.isSome_iff_exists.mp ((iht sc .term).mpr h1)
+          obtain ⟨tv, hv⟩ := Option.isSome_iff_exists.mp ((ihv sc .term).mpr h2)
+          obtain ⟨tb, hb⟩ := Option.isSome_iff_exists.mp ((ihb (n :: sc) .term).mpr h3)
+          simp [ht, hv, hb]
+    · next hn => exact ⟨fun h => by simp at h, fun h => by cases h; simp_all⟩
+  | fvar | mvar | mdata | proj =>
     intro sc p
     exact ⟨fun h => by simp [pr] at h, fun h => by cases h⟩
 

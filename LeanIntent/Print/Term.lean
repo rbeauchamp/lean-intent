@@ -14,9 +14,11 @@ import LeanIntent.Print.Token
 * an application as the function followed by its arguments;
 * `fun (x : T) => b` and `∀ (x : T), b`, with `{x : T}`, `⦃x : T⦄` or `[x : T]` for the other
   binder annotations, and `A → B` for a `∀` whose binder has no name and the default annotation;
+* `let x : T := v; b` for a `let` (`Expr.letE`) that may depend on its value, and
+  `have x : T := v; b` for one that does not (its flag `nonDep` set), which is how Lean reads each;
 * parentheses where a part's precedence requires them.
 
-It refuses, by returning `none`, every other term: a free or meta variable, a `let`, metadata, a
+It refuses, by returning `none`, every other term: a free or meta variable, metadata, a
 projection, a universe metavariable, a name with a numeric component or one that cannot be
 written, a binder name that is not one component, and a bound variable whose binder another binder
 of the same name shadows. `psTerm` parses the tokens back. `LeanIntent.Print.RoundTrip` proves that
@@ -210,6 +212,12 @@ def prSort : Level → Option (List Tok)
   | .succ l => if isZero l then some [.kwType] else (prLevel l true).map (.kwType :: ·)
   | l => (prLevel l true).map (.kwSort :: ·)
 
+/-- A `let`'s tokens: `let`, or `have` when `nonDep`, its name and type, `:=`, its value, `;` and its
+body. -/
+def letToks (nonDep : Bool) (n : Name) (t v b : List Tok) : List Tok :=
+  (if nonDep then .kwHave else .kwLet) :: .ident n :: .colon :: t ++ .colonEq :: v ++
+    .semicolon :: b
+
 /-- Whether a `∀` is written as an arrow: its binder has no name and the default annotation. -/
 def isArrow : Name → BinderInfo → Bool
   | .anonymous, .default => true
@@ -251,6 +259,13 @@ def pr (bare : Name → Bool) : List Name → Expr → Prec → Option (List Tok
       let tb ← pr bare (n :: sc) b .term
       some (paren (!p.isTerm) (.pi :: binderToks bi n tt ++ .comma :: tb))
     else none
+  | sc, .letE n t v b nd, p =>
+    if atomOk n then do
+      let tt ← pr bare sc t .term
+      let tv ← pr bare sc v .term
+      let tb ← pr bare (n :: sc) b .term
+      some (paren (!p.isTerm) (letToks nd n tt tv tb))
+    else none
   | _, _, _ => none
 
 /-- Whether the tokens start an argument of an application. -/
@@ -291,6 +306,8 @@ def psTerm : Nat → List Name → List Tok → Option (Expr × List Tok)
         let (b, ts) ← psTerm f (n :: sc) ts
         some (.forallE n t b bi, ts)
       | _ => none
+    | .kwLet :: ts => psLet f sc false ts
+    | .kwHave :: ts => psLet f sc true ts
     | ts => do
       let (a, ts) ← psSimple f sc ts
       match ts with
@@ -298,6 +315,25 @@ def psTerm : Nat → List Name → List Tok → Option (Expr × List Tok)
         let (b, ts) ← psTerm f (.anonymous :: sc) ts
         some (.forallE .anonymous a b .default, ts)
       | ts => some (a, ts)
+
+/-- A `let` after its keyword, `nonDep` when the keyword is `have`: its name and type, `:=`, its
+value, `;` and its body. -/
+def psLet : Nat → List Name → Bool → List Tok → Option (Expr × List Tok)
+  | 0, _, _, _ => none
+  | f + 1, sc, nd, ts =>
+    match ts with
+    | .ident n :: .colon :: ts => do
+      let (t, ts) ← psTerm f sc ts
+      match ts with
+      | .colonEq :: ts => do
+        let (v, ts) ← psTerm f sc ts
+        match ts with
+        | .semicolon :: ts => do
+          let (b, ts) ← psTerm f (n :: sc) ts
+          some (.letE n t v b nd, ts)
+        | _ => none
+      | _ => none
+    | _ => none
 
 /-- A binder: its annotation, name and type. -/
 def psBinder : Nat → List Name → List Tok → Option (BinderInfo × Name × Expr × List Tok)

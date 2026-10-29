@@ -8,11 +8,11 @@ own surface syntax for terms, restricted to a closed set of forms:
 * identifiers, written as Lean writes them: each component as it is when it is a valid identifier
   that is no keyword of the grammar, and otherwise between `«` and `»`;
 * decimal numerals, and string literals with `\\`, `\"` and `\n` as their only escapes;
-* the keywords `fun`, `Sort`, `Type`, `Prop`, `nat_lit`, `max` and `imax`;
-* the symbols `( ) { } [ ] ⦃ ⦄ @ : , => → ∀ .{ +`.
+* the keywords `fun`, `let`, `have`, `Sort`, `Type`, `Prop`, `nat_lit`, `max` and `imax`;
+* the symbols `( ) { } [ ] ⦃ ⦄ @ : := ; , => → ∀ .{ +`.
 
 Tokens are separated by one space, except after an opening bracket, `@` or `.{`, and before a
-closing bracket, `,` or `.{`, where they are written together, as Lean requires for `.{`.
+closing bracket, `,`, `;` or `.{`, where they are written together, as Lean requires for `.{`.
 
 `lex_render` proves that `lex` reads back every list of well-formed tokens (`Tok.WF`) that
 `render` writes, for every predicate `esc` that chooses further components to write escaped. So
@@ -32,8 +32,8 @@ open Lean (Name isIdFirst isIdRest)
 /-- The tokens of the printed form. -/
 inductive Tok where
   | lparen | rparen | lbrace | rbrace | lbrack | rbrack | lstrict | rstrict
-  | atSign | colon | comma | darrow | arrow | pi | dotBrace | plus
-  | kwFun | kwSort | kwType | kwProp | kwNatLit | kwMax | kwImax
+  | atSign | colon | colonEq | semicolon | comma | darrow | arrow | pi | dotBrace | plus
+  | kwFun | kwLet | kwHave | kwSort | kwType | kwProp | kwNatLit | kwMax | kwImax
   /-- An identifier, given as the name it denotes. -/
   | ident (n : Name)
   /-- A decimal numeral. -/
@@ -45,6 +45,8 @@ inductive Tok where
 /-- The keyword a run of characters is, if it is one. -/
 def keyword : List Char → Option Tok
   | ['f', 'u', 'n'] => some .kwFun
+  | ['l', 'e', 't'] => some .kwLet
+  | ['h', 'a', 'v', 'e'] => some .kwHave
   | ['S', 'o', 'r', 't'] => some .kwSort
   | ['T', 'y', 'p', 'e'] => some .kwType
   | ['P', 'r', 'o', 'p'] => some .kwProp
@@ -102,9 +104,11 @@ def escStr : List Char → List Char
 def Tok.text (esc : String → Bool) : Tok → List Char
   | .lparen => ['('] | .rparen => [')'] | .lbrace => ['{'] | .rbrace => ['}']
   | .lbrack => ['['] | .rbrack => [']'] | .lstrict => ['⦃'] | .rstrict => ['⦄']
-  | .atSign => ['@'] | .colon => [':'] | .comma => [','] | .darrow => ['=', '>']
+  | .atSign => ['@'] | .colon => [':'] | .colonEq => [':', '='] | .semicolon => [';']
+  | .comma => [','] | .darrow => ['=', '>']
   | .arrow => ['→'] | .pi => ['∀'] | .dotBrace => ['.', '{'] | .plus => ['+']
-  | .kwFun => ['f', 'u', 'n'] | .kwSort => ['S', 'o', 'r', 't']
+  | .kwFun => ['f', 'u', 'n'] | .kwLet => ['l', 'e', 't'] | .kwHave => ['h', 'a', 'v', 'e']
+  | .kwSort => ['S', 'o', 'r', 't']
   | .kwType => ['T', 'y', 'p', 'e'] | .kwProp => ['P', 'r', 'o', 'p']
   | .kwNatLit => ['n', 'a', 't', '_', 'l', 'i', 't'] | .kwMax => ['m', 'a', 'x']
   | .kwImax => ['i', 'm', 'a', 'x']
@@ -121,7 +125,8 @@ def Tok.WF : Tok → Prop
 /-- Whether two consecutive tokens are written together, with no space between them. -/
 def glue : Tok → Tok → Bool
   | .lparen, _ | .lbrace, _ | .lbrack, _ | .lstrict, _ | .atSign, _ | .dotBrace, _ => true
-  | _, .rparen | _, .rbrace | _, .rbrack | _, .rstrict | _, .comma | _, .dotBrace => true
+  | _, .rparen | _, .rbrace | _, .rbrack | _, .rstrict | _, .comma | _, .semicolon
+  | _, .dotBrace => true
   | _, _ => false
 
 /-- The text of a list of tokens. -/
@@ -181,7 +186,7 @@ def lexStr : List Char → Option (List Char × List Char)
 def symbol : Char → Option Tok
   | '(' => some .lparen | ')' => some .rparen | '{' => some .lbrace | '}' => some .rbrace
   | '[' => some .lbrack | ']' => some .rbrack | '⦃' => some .lstrict | '⦄' => some .rstrict
-  | '@' => some .atSign | ':' => some .colon | ',' => some .comma | '→' => some .arrow
+  | '@' => some .atSign | ';' => some .semicolon | ',' => some .comma | '→' => some .arrow
   | '∀' => some .pi | '+' => some .plus
   | _ => none
 
@@ -206,6 +211,10 @@ def lexOne : List Char → Option (Tok × List Char)
       match cs with
       | '{' :: r => some (.dotBrace, r)
       | _ => none
+    else if c = ':' then
+      match cs with
+      | '=' :: r => some (.colonEq, r)
+      | _ => some (.colon, cs)
     else (symbol c).map (·, cs)
 
 /-- The tokens of a text, each after the spaces before it. -/
@@ -438,9 +447,10 @@ theorem length_le_identText (esc : String → Bool) :
 
 /-- What may follow a token's text so that the lexer reads the token and nothing more. -/
 def StopTok : Tok → List Char → Prop
-  | .ident _, r | .kwFun, r | .kwSort, r | .kwType, r | .kwProp, r | .kwNatLit, r | .kwMax, r
-  | .kwImax, r => Stop r
+  | .ident _, r | .kwFun, r | .kwLet, r | .kwHave, r | .kwSort, r | .kwType, r | .kwProp, r
+  | .kwNatLit, r | .kwMax, r | .kwImax, r => Stop r
   | .num _, r => ∀ c, r.head? = some c → c.isDigit = false
+  | .colon, r => ∀ c, r.head? = some c → c ≠ '='
   | _, _ => True
 
 theorem lexOne_keyword (c : Char) (cs rest : List Char) (k : Tok) (hc : isIdFirst c = true)
@@ -455,13 +465,15 @@ theorem lexOne_keyword (c : Char) (cs rest : List Char) (k : Tok) (hc : isIdFirs
 
 theorem lexOne_symbol (c : Char) (rest : List Char) (t : Tok) (h : symbol c = some t)
     (h1 : isIdFirst c = false) (h2 : c ≠ '«') (h3 : c.isDigit = false) (h4 : c ≠ '"')
-    (h5 : c ≠ '=') (h6 : c ≠ '.') : lexOne (c :: rest) = some (t, rest) := by
-  simp [lexOne, h1, h2, h3, h4, h5, h6, h]
+    (h5 : c ≠ '=') (h6 : c ≠ '.') (h7 : c ≠ ':') : lexOne (c :: rest) = some (t, rest) := by
+  simp [lexOne, h1, h2, h3, h4, h5, h6, h7, h]
 
 theorem lexOne_text (esc : String → Bool) (t : Tok) (hwf : t.WF) (rest : List Char)
     (hr : StopTok t rest) : lexOne (t.text esc ++ rest) = some (t, rest) := by
   cases t with
   | kwFun => exact lexOne_keyword 'f' _ rest _ (by decide) (by decide) rfl hr
+  | kwLet => exact lexOne_keyword 'l' _ rest _ (by decide) (by decide) rfl hr
+  | kwHave => exact lexOne_keyword 'h' _ rest _ (by decide) (by decide) rfl hr
   | kwSort => exact lexOne_keyword 'S' _ rest _ (by decide) (by decide) rfl hr
   | kwType => exact lexOne_keyword 'T' _ rest _ (by decide) (by decide) rfl hr
   | kwProp => exact lexOne_keyword 'P' _ rest _ (by decide) (by decide) rfl hr
@@ -520,10 +532,21 @@ theorem lexOne_text (esc : String → Bool) (t : Tok) (hwf : t.WF) (rest : List 
   | dotBrace =>
     have h : isIdFirst '.' = false ∧ Char.isDigit '.' = false := by decide
     simp [Tok.text, lexOne, h]
-  | lparen | rparen | lbrace | rbrace | lbrack | rbrack | lstrict | rstrict | atSign | colon | comma
-  | arrow | pi | plus =>
+  | colonEq =>
+    have h : isIdFirst ':' = false ∧ Char.isDigit ':' = false := by decide
+    simp [Tok.text, lexOne, h]
+  | colon =>
+    have h : isIdFirst ':' = false ∧ Char.isDigit ':' = false := by decide
+    simp only [Tok.text, List.cons_append, List.nil_append]
+    cases rest with
+    | nil => simp [lexOne, h]
+    | cons c r =>
+      have hc : c ≠ '=' := hr c rfl
+      simp [lexOne, h, hc]
+  | lparen | rparen | lbrace | rbrace | lbrack | rbrack | lstrict | rstrict | atSign | semicolon
+  | comma | arrow | pi | plus =>
     exact lexOne_symbol _ _ _ rfl (by decide) (by decide) (by decide) (by decide) (by decide)
-      (by decide)
+      (by decide) (by decide)
 
 theorem text_head (esc : String → Bool) (t : Tok) (hwf : t.WF) :
     ∃ c cs, t.text esc = c :: cs ∧ c ≠ ' ' := by
@@ -558,7 +581,8 @@ theorem render_cons (esc : String → Bool) (u : Tok) (ts : List Tok) :
 /-- `glue t u` holds when `t` opens or `u` closes. -/
 theorem glue_cases {t u : Tok} (h : glue t u = true) :
     (t = .lparen ∨ t = .lbrace ∨ t = .lbrack ∨ t = .lstrict ∨ t = .atSign ∨ t = .dotBrace) ∨
-      (u = .rparen ∨ u = .rbrace ∨ u = .rbrack ∨ u = .rstrict ∨ u = .comma ∨ u = .dotBrace) := by
+      (u = .rparen ∨ u = .rbrace ∨ u = .rbrack ∨ u = .rstrict ∨ u = .comma ∨ u = .semicolon ∨
+        u = .dotBrace) := by
   cases t <;> cases u <;> simp_all [glue]
 
 theorem stopTok_sep (esc : String → Bool) (t u : Tok) (ts : List Tok) :
@@ -569,14 +593,17 @@ theorem stopTok_sep (esc : String → Bool) (t u : Tok) (ts : List Tok) :
     rw [List.nil_append, hr]
     rcases glue_cases h with h | h
     · rcases h with h | h | h | h | h | h <;> subst h <;> trivial
-    · have key : Stop (u.text esc ++ r) ∧ ∀ c, (u.text esc ++ r).head? = some c → c.isDigit = false := by
-        rcases h with h | h | h | h | h | h <;> subst h <;>
-          refine ⟨⟨?_, ?_⟩, ?_⟩ <;> simp [Tok.text, continues] <;> decide
-      cases t <;> first | exact key.1 | exact key.2 | trivial
+    · have key : Stop (u.text esc ++ r) ∧
+          (∀ c, (u.text esc ++ r).head? = some c → c.isDigit = false) ∧
+          ∀ c, (u.text esc ++ r).head? = some c → c ≠ '=' := by
+        rcases h with h | h | h | h | h | h | h <;> subst h <;>
+          refine ⟨⟨?_, ?_⟩, ?_, ?_⟩ <;> simp [Tok.text, continues] <;> decide
+      cases t <;> first | exact key.1 | exact key.2.1 | exact key.2.2 | trivial
   · have key : Stop ([' '] ++ render esc (u :: ts)) ∧
-        ∀ c, ([' '] ++ render esc (u :: ts)).head? = some c → c.isDigit = false := by
-      refine ⟨⟨by simp [continues], ?_⟩, ?_⟩ <;> simp <;> decide
-    cases t <;> first | exact key.1 | exact key.2 | trivial
+        (∀ c, ([' '] ++ render esc (u :: ts)).head? = some c → c.isDigit = false) ∧
+        ∀ c, ([' '] ++ render esc (u :: ts)).head? = some c → c ≠ '=' := by
+      refine ⟨⟨by simp [continues], ?_⟩, ?_, ?_⟩ <;> simp <;> decide
+    cases t <;> first | exact key.1 | exact key.2.1 | exact key.2.2 | trivial
 
 theorem dropWhile_space (esc : String → Bool) (t : Tok) (hwf : t.WF) (r : List Char) :
     (t.text esc ++ r).dropWhile (· = ' ') = t.text esc ++ r := by

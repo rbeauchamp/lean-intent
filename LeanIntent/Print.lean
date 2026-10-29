@@ -209,7 +209,21 @@ theorem pr_wf (bare : Name → Bool) (e : Expr) :
         exact wfs_paren _ (wfs_cons trivial (wfs_append (binderToks_wf bi hn (iht sc _ ht))
           (wfs_cons trivial (ihb _ _ hb))))
       · simp at h
-  | fvar | mvar | letE | mdata | proj => intro sc p ts h; simp [pr] at h
+  | letE n t v b nd iht ihv ihb =>
+    intro sc p ts h
+    simp only [pr, Option.bind_eq_bind] at h
+    split at h
+    · next hn =>
+      cases ht : pr bare sc t .term <;> cases hv : pr bare sc v .term <;>
+        cases hb : pr bare (n :: sc) b .term <;> simp [ht, hv, hb] at h
+      subst h
+      refine wfs_paren _ ?_
+      simp only [letToks, List.cons_append, List.append_assoc]
+      exact wfs_cons (by cases nd <;> trivial) (wfs_cons (wf_ident_of_atomOk hn)
+        (wfs_cons trivial (wfs_append (iht sc _ ht) (wfs_cons trivial
+          (wfs_append (ihv sc _ hv) (wfs_cons trivial (ihb _ _ hb)))))))
+    · simp at h
+  | fvar | mvar | mdata | proj => intro sc p ts h; simp [pr] at h
 
 /-! ## The round trip -/
 
