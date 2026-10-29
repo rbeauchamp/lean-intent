@@ -19,8 +19,8 @@ a check reads its text, so each statement has exactly one text and each text at 
   of a printed text (`Statement.parseUTF8_eq_some_iff`), so the bytes a project commits, and those a
   signature covers for a project that signs, are fixed by the statement alone;
 * every printed text is plain (`Statement.plain_print`): its only control character is the line feed
-  that ends each line, and it holds no line separator or bidirectional formatting character, so each
-  line a display shows is a line the parser reads.
+  that ends each line, and it holds no line or paragraph separator or bidirectional formatting
+  character, so each line a display shows is a line the parser reads.
 
 The grammar is closed. Every value has a fixed place: there is no optional whitespace, every list is
 printed in the order the statement holds it, and every number in decimal with no leading zeros
@@ -520,7 +520,7 @@ theorem parseUTF8_eq_some_iff (b : ByteArray) (s : Statement) :
   · rintro rfl; exact ⟨_, rfl, rfl⟩
 
 /-- A statement's text is plain: its only control character is the line feed, and it holds no line
-separator or bidirectional formatting character. -/
+or paragraph separator or bidirectional formatting character. -/
 theorem plain_print (s : Statement) : Plain (print s).toList := by
   rw [print, String.toList_ofList]
   exact codec.plain s
