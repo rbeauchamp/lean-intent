@@ -1,4 +1,4 @@
-import LeanIntent
+import LeanIntent.Refinement
 
 /-!
 # What a refinement link does not carry

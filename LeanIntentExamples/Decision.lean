@@ -1,4 +1,4 @@
-import LeanIntent
+import LeanIntent.Degenerate
 
 /-!
 # A decision procedure that may always answer no

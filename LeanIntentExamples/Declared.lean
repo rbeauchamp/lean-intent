@@ -1,4 +1,4 @@
-import LeanIntent
+import LeanIntent.Declared
 
 /-!
 # Records about types the project declares

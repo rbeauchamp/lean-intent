@@ -1,4 +1,5 @@
-import LeanIntent
+import LeanIntent.Degenerate
+import LeanIntent.Refinement
 
 /-!
 # A sorting function whose rearrangement property is forgotten

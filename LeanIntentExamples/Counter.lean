@@ -1,4 +1,4 @@
-import LeanIntent
+import LeanIntent.Degenerate
 
 /-!
 # A counter: progress refuses a record that a step doing nothing meets

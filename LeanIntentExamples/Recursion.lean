@@ -1,4 +1,4 @@
-import LeanIntent
+import LeanIntent.Explain
 
 /-!
 # A record whose meaning reaches definitions by recursion and a `let`

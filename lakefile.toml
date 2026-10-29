@@ -5,10 +5,16 @@ defaultTargets = ["LeanIntent", "LeanIntentExamples"]
 autoImplicit = false
 relaxedAutoImplicit = false
 
+# Each library is every Lean file under its directory: a submodule glob (`.+`) selects every module
+# whose file lies there, as Lake finds them in the directory, so a feature adds its modules without
+# editing a list of them. There is no root module; a project imports the modules it uses.
+
 # The library a project depends on.
 [[lean_lib]]
 name = "LeanIntent"
+globs = ["LeanIntent.+"]
 
 # The worked examples, which no dependent project needs to build.
 [[lean_lib]]
 name = "LeanIntentExamples"
+globs = ["LeanIntentExamples.+"]
