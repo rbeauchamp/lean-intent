@@ -20,6 +20,8 @@ it, never by reading source text by hand:
   outside `tools/`, which holds this program;
 * the project's configuration, from Lake's own TOML parser (`Lake.Toml.loadToml`) and loader
   (`Lake.loadPackage`, which resolves no dependency);
+* the modules each library target selects, from Lake (`Lake.LeanLib.getModuleArray`, which reads
+  the target's globs over the working tree, as a build of the target does);
 * each file's module name, from Lean (`moduleNameOfFileName`), and its build, from Lake;
 * the axioms each declaration rests on, from Lean (`collectAxioms`) over the environment Lean
   imports from the built modules.
@@ -30,9 +32,13 @@ The rules:
   `autoImplicit` and `relaxedAutoImplicit`) and `lean_lib` tables (with only `name`, `roots` and
   `globs`), and no `lakefile.lean` exists. So the package requires no other package and depends on
   nothing beyond Lean's own libraries, and Lake runs no code of the project to configure it.
-* `LEAN-BUILD`: `lake build --wfail` builds every library file, given as its target, with no
-  error and no warning. Lake rejects a file that is not a module of the workspace as an unknown
-  target, and a `sorry` is a warning.
+* `LEAN-BUILD`: the modules the library targets select are exactly the modules of the library's
+  files, and each target selects at least one; and `lake build --wfail` builds every library file,
+  given as its target, with no error and no warning. So a build of the library targets builds
+  exactly the files these rules build and audit: a library file that no target selects, such as one
+  outside the targets' directories, and a module a target selects that Git's index does not list,
+  such as a file not yet added, are each refused. Lake rejects a file that is not a module of the
+  workspace as an unknown target, and a `sorry` is a warning.
 * `AXIOMS`: no library module declares an axiom, and every constant a library module declares rests
   only on `propext`, `Classical.choice` and `Quot.sound`, Lean's own axioms. So no claim the
   library makes about itself rests on `sorry` (`sorryAx`), on code run to decide it (the axiom
@@ -178,8 +184,29 @@ def checkConfig : IO (Array Rejection) := do
     errs := errs.push (reject s!"lakefile.toml sets {k}, which is not among the keys this rule allows")
   return errs
 
-/-- `LEAN-BUILD`: Lake builds every file of `files`, each given as its target, with warnings as
-errors. -/
+/-- `LEAN-BUILD`'s first part: the modules the library targets of `pkg` select, as Lake reads each
+target's globs over the working tree, are exactly `mods`, the modules Lean gives the library files
+`files`, and each target selects at least one. -/
+def checkModules (pkg : Lake.Package) (files : Array String) (mods : Array Name) :
+    IO (Array Rejection) := do
+  let reject (message : String) : Rejection := { rule := "LEAN-BUILD", message }
+  let mut errs : Array Rejection := #[]
+  let mut selected : Array Name := #[]
+  for lib in pkg.leanLibs do
+    let libMods := (← lib.getModuleArray).map (·.name)
+    if libMods.isEmpty then
+      errs := errs.push (reject s!"the library target {lib.name} selects no module")
+    selected := selected ++ libMods
+  for (f, m) in files.zip mods do
+    unless selected.contains m do
+      errs := errs.push (reject s!"{f}, a library file Git's index lists, is the module {m}, which no library target selects, so a build of the targets does not build it")
+  for m in selected do
+    unless mods.contains m do
+      errs := errs.push (reject s!"a library target selects the module {m}, whose file Git's index does not list, so these rules do not build or audit it")
+  return errs
+
+/-- `LEAN-BUILD`'s second part: Lake builds every file of `files`, each given as its target, with
+warnings as errors. -/
 def build (files : Array String) : IO (Array Rejection) := do
   let (code, out) ← run "lake" (#["build", "--wfail"] ++ files)
   if code == 0 then
@@ -455,11 +482,14 @@ def check : IO (Array Rejection) := do
   let files ← libraryFiles
   if files.isEmpty then
     return #[{ rule := "LEAN-BUILD", message := "Git's index lists no Lean file of the library" }]
+  let pkg ← loadConfig
+  let mods ← moduleNames files
+  let selected ← checkModules pkg files mods
+  unless selected.isEmpty do
+    return selected
   let built ← build files
   unless built.isEmpty do
     return built
-  let pkg ← loadConfig
-  let mods ← moduleNames files
   initSearchPath (← findSysroot) [pkg.leanLibDir]
   let env ← importModules (mods.map fun m => { module := m }) {}
   let idxs := mods.filterMap env.getModuleIdx?

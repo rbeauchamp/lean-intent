@@ -1,4 +1,4 @@
-import LeanIntent
+import LeanIntent.Trace
 
 /-!
 # Tracing answers back to the owner

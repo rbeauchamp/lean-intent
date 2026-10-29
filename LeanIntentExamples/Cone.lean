@@ -1,4 +1,4 @@
-import LeanIntent
+import LeanIntent.Cone
 
 /-!
 # Cone exclusion on a small environment

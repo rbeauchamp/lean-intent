@@ -1,4 +1,4 @@
-import LeanIntent
+import LeanIntent.Statement
 
 /-!
 # A statement of the owners' log, and its text
