@@ -78,7 +78,7 @@ namespace Sig
   | [] => b.denote
   | a :: as => a.denote → Fn b as
 
-/-- The type a subject's code stands for. -/
+/-- The type a subject's code denotes, through which it stands for the subject's type. -/
 @[reducible] def denote (σ : Sig) : Type := Fn σ.out σ.args
 
 /-- A tuple of arguments of the types `as`. -/
@@ -243,7 +243,7 @@ theorem apply_fn : {as : List Ty} → (p : ArgProj c as) → (xs : Args as) → 
 
 end ArgProj
 
-/-- A degenerate subject of the type `σ` stands for, by its description: the constant function at a
+/-- A degenerate subject of the type `σ` denotes, by its description: the constant function at a
 value of the output type, or a projection. -/
 inductive Degenerate (σ : Sig) where
   /-- The function that returns `v` whatever its arguments. -/
@@ -266,7 +266,7 @@ theorem Degenerate.apply_fn {σ : Sig} (d : Degenerate σ) (xs : Args σ.args) :
   | const v => exact Fn.apply_const v σ.args xs
   | proj p => exact ArgProj.apply_fn p xs
 
-/-- The degenerate subjects of the type `σ` stands for: the constant function at each value of the
+/-- The degenerate subjects of the type `σ` denotes: the constant function at each value of the
 output type's part, the empty output among them, then each projection. -/
 def Sig.degenerate (σ : Sig) : List (Degenerate σ) :=
   σ.out.part.map .const ++ (ArgProj.all σ.out σ.args).map .proj

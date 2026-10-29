@@ -32,17 +32,21 @@ fields of a declaration with one constructor (`LeanIntent.Degenerate`). Nothing 
 the record or by the instance's author.
 
 The handler refuses, and so leaves not covered, every type it cannot represent this way: a recursive,
-nested or mutual inductive type, an inductive family with indices, an unsafe type, a type with no
-constructor (which has no empty value), a type that does not live in `Type`, a type with a parameter
-that is not a type of `Type`, a constructor whose field depends on an earlier field, a field whose
-type is not a type of `Type` (a proof field, say) or has no code, and a type that already has a code.
-A type whose fields have no code yet gets one once its fields do.
+nested or mutual inductive type, which needs a code with a fixpoint and a rule for its constants
+(lean-intent #23); a type whose values are constrained by proofs, indices or value parameters (an
+inductive family with indices, a parameter that is not a type of `Type`, a field that depends on an
+earlier field or whose type is not a type of `Type`, such as a proof), from whose fields alone no
+empty value follows; an unsafe type; a type with no constructor, which has no value; a type that does
+not live in `Type`; a field whose type has no code; and a type that already has a code. A type whose
+fields have no code yet gets one once its fields do.
 
 What the handler's output rests on: that it reads the constructors and their fields in declaration
 order, which is its own code below and not checked by Lean's kernel; and that no other code applies
 the private constructor of `Ty.Stands`. Lean's privacy is a rule of name resolution, so the
 `constructor` tactic, which applies a constructor without resolving its name, or a metaprogram that
-builds the term directly, can still apply it.
+builds the term directly, can still apply it; no mechanism inside Lean's logic prevents this, since
+the logic cannot refer to the constructors of an arbitrary type. An audit that re-derives each
+declared type's code from the environment is lean-intent #24.
 -/
 
 namespace LeanIntent.Declared

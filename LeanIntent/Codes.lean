@@ -58,7 +58,8 @@ inductive Ty where
 
 namespace Ty
 
-/-- The type a code stands for. It is reducible, so that Lean's simplifier sees the type through
+/-- The type a code denotes: the type it stands for when it is built only from those `Ty` builds in,
+and otherwise one isomorphic to it. It is reducible, so that Lean's simplifier sees the type through
 the code. -/
 @[reducible] def denote : Ty → Type
   | unit => Unit
