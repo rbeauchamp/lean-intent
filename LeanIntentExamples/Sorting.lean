@@ -259,14 +259,16 @@ theorem sort_fulfils : sorting.Fulfilled sort := fulfils implSpec_refines fun _ 
 
 /-! ## The records explained for their owner
 
-Each explanation glosses every statement of its record in plain words and lists the consequences
-shown to the owner to confirm or decline, each shown as an entailment or as a possibility, with a
-proof that it holds of the record as shown. `LeanIntent.Render` renders them with every statement
-printed exactly. Shown `sortedOnlyExplained`, the owner declines the possibility that a function
-meeting the record returns the empty list for every input, which is how the forgotten
-rearrangement property comes to light in plain words; shown `sortingExplained`, they confirm that
-every function meeting the corrected record is Lean's merge sort, and so not the empty-list
-function. -/
+Each explanation glosses every statement of its record in plain words, records whether an owner
+confirmed its restatement, and lists consequences, each shown as an entailment or as a possibility,
+with a proof that it holds of the record as shown and who settled it. `LeanIntent.Render` renders
+them with every statement printed exactly. Shown `sortedOnlyExplained`, whose restatement no one
+confirmed, the owner declines the possibility that a function meeting the record returns the empty
+list for every input, which is how the forgotten rearrangement property comes to light in plain
+words. The owner then confirms the restatement of `sorting`, and `sortingExplained` records what
+follows: that a function meeting it is not the empty-list function is derived from that
+confirmation, and that it is Lean's merge sort is a decision the assistant made on the owner's
+behalf, since the owner never saw that consequence. -/
 
 /-- The plain words for a function from lists of integers to lists of integers. -/
 def listFunctionShape : Gloss where
@@ -318,6 +320,7 @@ def sortedOnlyExplained : Explanation sortedOnly where
   dom := []
   props := [sortedGloss]
   vocab := [sortedPredGloss]
+  restatement := .unconfirmed
   consequences := [
     { consequence := ⟨"returning the empty list for every input", .possibility,
         fun f => f = nilSort⟩
@@ -330,7 +333,8 @@ def sortedOnlyExplained : Explanation sortedOnly where
           allows := "The function that returns the empty list for every input, beside a real \
             sort."
           freedom := "The record does not fix the output: a sort and the empty-list function \
-            both meet it. An owner who wanted a sort declines this consequence." } }]
+            both meet it. An owner who wanted a sort declines this consequence." }
+      settled := .answered (.owner (.of "richard")) .declined }]
 
 /-- The corrected record, explained. -/
 def sortingExplained : Explanation sorting where
@@ -338,6 +342,7 @@ def sortingExplained : Explanation sorting where
   dom := []
   props := [sortedGloss, permGloss]
   vocab := [sortedPredGloss, permPredGloss]
+  restatement := .confirmed (.of "richard")
   consequences := [
     { consequence := ⟨"is not the function returning the empty list for every input",
         .entailment, fun f => f ≠ nilSort⟩
@@ -349,7 +354,8 @@ def sortingExplained : Explanation sorting where
           rulesOut := "The function returning the empty list, whose output for [0] is not a \
             rearrangement of [0]."
           allows := "Every function that meets the record."
-          freedom := "None that this consequence adds." } },
+          freedom := "None that this consequence adds." }
+      settled := .derived },
     { consequence := ⟨"is Lean's merge sort", .entailment, fun f => f = sort⟩
       holds := show ∀ f, sorting.Meets f → f = sort from
         fun f hf => sorting_o5_eq.relates hf sorting_meets_sort
@@ -360,6 +366,9 @@ def sortingExplained : Explanation sorting where
             input differently or drops an element."
           allows := "Exactly one function, the one returning the ascending rearrangement of its \
             input."
-          freedom := "None: obligation O5 holds with equality." } }]
+          freedom := "None: obligation O5 holds with equality." }
+      settled := .answered (.onBehalf (.of "claude") (.of "assistant")
+        "The owner confirmed that the output is an ascending rearrangement of the input, which \
+          leaves one such function.") .confirmed }]
 
 end LeanIntentExamples.Sorting

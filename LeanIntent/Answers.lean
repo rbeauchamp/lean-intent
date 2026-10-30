@@ -9,7 +9,7 @@ consequence: the owner gives it where the consequence is such a fork, and otherw
 it, as a decision made on the owner's behalf with its reason tied to the owner's intent. Which it is
 shows in the project's owners' log, whose answer statement names who gave it, a principal acting as
 owner or one acting under the delegation it names (`LeanIntent.Statement`); an `Answer` here names
-no author. A consequence is a named predicate on the subject, of one of two kinds: an *entailment*,
+no author, and `LeanIntent.Attributed` pairs it with who gave it. A consequence is a named predicate on the subject, of one of two kinds: an *entailment*,
 which every model of the record satisfies (what the record requires or rules out), or a
 *possibility*, which some model satisfies (what the record still allows). An answer confirms it or
 declines it, and each of the four answers is a requirement of every later revision of the record
@@ -95,7 +95,7 @@ structure Consequence (W : Type u) where
   /-- The predicate on the subject. -/
   holds : W → Prop
 
-/-- The owner's verdict on a consequence. -/
+/-- A verdict on a consequence, the owner's own or one made on the owner's behalf. -/
 inductive Verdict where
   /-- The consequence is what the owner means. -/
   | confirmed
@@ -106,7 +106,7 @@ inductive Verdict where
 structure Answer (W : Type u) where
   /-- The consequence answered. -/
   consequence : Consequence W
-  /-- The owner's verdict on it. -/
+  /-- The verdict on it. -/
   verdict : Verdict
 
 /-- The goal the answer `a` sets the revision `r`: for a confirmed entailment, every model of `r`

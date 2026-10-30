@@ -82,6 +82,7 @@ def checkDigitsExplained : Explanation checkDigits where
       allows := "Exactly one function."
       freedom := "None: obligation O5 holds with equality." }]
   vocab := []
+  restatement := .unconfirmed
   consequences := [
     { consequence := ⟨"returns a single digit", .entailment, fun f => ∀ l, f l < 10⟩
       holds := show ∀ f, checkDigits.Meets f → ∀ l, f l < 10 from checkDigits_lt_ten
@@ -90,6 +91,7 @@ def checkDigitsExplained : Explanation checkDigits where
             every list."
           rulesOut := "Any function that returns ten or more for some list."
           allows := "Every function that meets the record."
-          freedom := "None that this consequence adds." } }]
+          freedom := "None that this consequence adds." }
+      settled := .unsettled }]
 
 end LeanIntentExamples.Recursion

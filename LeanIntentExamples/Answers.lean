@@ -3,12 +3,14 @@ import LeanIntentExamples.Sorting
 /-!
 # The owner's answers about the sorting records, kept across revisions
 
-The owner has answered two consequences of the sorting records of `LeanIntentExamples.Sorting`:
+Two consequences of the sorting records of `LeanIntentExamples.Sorting` have been answered, one by
+the owner and one on the owner's behalf (`attributed`):
 
 * shown for `sortedOnly`, "the record allows returning the empty list for every input", a
   possibility, which the owner declined (`emptyForEvery`);
 * shown for `sorting`, "returning `[1, 2]` for input `[2, 1, 1]` is ruled out", an entailment,
-  which the owner confirmed (`rulesOutShort`).
+  which the assistant `claude` confirmed under its delegation, as a decision on the owner's behalf
+  (`rulesOutShort`).
 
 `sorting` keeps both answers and is accepted (`sortingAccepted`), and so every accepted revision,
 whatever it says, excludes the empty-list function (`accepted_excludes_nilSort`). A revision that
@@ -40,6 +42,15 @@ def rulesOutShort : Answer (List Int → List Int) where
 
 /-- The stored answers about the sorting record. -/
 def answers : List (Answer (List Int → List Int)) := [emptyForEvery, rulesOutShort]
+
+/-- The stored answers with who gave each: the owner's, and a decision on the owner's behalf. Whom
+each names changes nothing a revision must keep. -/
+def attributed : List (Attributed (List Int → List Int)) :=
+  [⟨emptyForEvery, .owner (.of "richard")⟩,
+   ⟨rulesOutShort, .onBehalf (.of "claude") (.of "assistant")
+     "A rearrangement of [2, 1, 1] has three elements, which the owner's restatement requires."⟩]
+
+theorem attributed_answers : attributed.map (·.answer) = answers := rfl
 
 /-! ## The corrected record keeps them -/
 
