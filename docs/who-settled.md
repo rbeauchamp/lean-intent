@@ -32,6 +32,8 @@ A consequence is one of these and no other, and an explanation (`LeanIntent.Expl
 | `Settled.onBehalf_not_owners` | an answer given on the owner's behalf is never printed as the owner's, even with a reason that claims it was |
 | `Settled.says_derived_confirmed` | the words say a consequence is derived only of a record whose restatement stands as confirmed |
 | `Restatement.says_confirmed_iff` | the words say the restatement is confirmed exactly when that is recorded |
+| `Settled.names_owner`, `Settled.names_onBehalf`, `Settled.names_derived`, `Restatement.names_confirmed` | the words hold the names of whom the status or restatement records: the answering owner; the principal, the delegation and the reason as printed on one line; the owner who confirmed the restatement |
+| `Authority.answerer_owner`, `Authority.answerer_onBehalf` | for every authority and reason, an authority with no delegation answers as the owner, and one under a delegation answers on the owner's behalf under that delegation for that reason |
 
 So a record with no answers and no confirmation prints neither, and a record whose answers come from a mix of owner and delegates prints each as the one who gave it.
 
@@ -39,7 +41,6 @@ A fork is the one consequence the rendering puts to the owner, since their atten
 
 ## Worked examples
 
-- [`LeanIntentExamples/Settled.lean`](../LeanIntentExamples/Settled.lean): the words of each status, proved in Lean's kernel, a reason that claims the owner confirmed, and the answerers the owners' log names.
 - [`LeanIntentExamples/Sorting.lean`](../LeanIntentExamples/Sorting.lean): `sortedOnlyExplained`, unconfirmed, with the owner's declined answer; `sortingExplained`, confirmed, with one derived consequence and one decided on the owner's behalf.
 - [`LeanIntentExamples/Answers.lean`](../LeanIntentExamples/Answers.lean): `attributed`, one answer of the owner's and one on the owner's behalf.
 - [`LeanIntentExamples/Recursion.lean`](../LeanIntentExamples/Recursion.lean): `checkDigitsExplained`, unconfirmed, whose one consequence is not settled.

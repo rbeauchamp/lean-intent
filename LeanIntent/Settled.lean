@@ -12,7 +12,8 @@ Three types hold the record:
 
 * `Answerer`: who gave an answer, the owner acting as owner, or another principal under a named
   delegation, deciding on the owner's behalf for a stated reason. `Authority.answerer` reads it from
-  an authority of the owners' log.
+  an authority of the owners' log: the owner when it names no delegation (`Authority.answerer_owner`),
+  and a decision on the owner's behalf under the one it names (`Authority.answerer_onBehalf`).
 * `Restatement`: whether an owner is recorded as having confirmed a record's plain restatement.
 * `Settled s`: who settled one consequence shown with a record whose restatement stands as `s`. It
   was answered, by an `Answerer` with a verdict; it is derived from the restatement the owner
@@ -36,7 +37,10 @@ the printed text starts with a claim's phrase exactly when the status makes that
 * it says a consequence is derived only for a record whose restatement stands as confirmed
   (`says_derived_confirmed`), and `Restatement.words` says the restatement is confirmed exactly when
   that is recorded (`Restatement.says_confirmed_iff`), so a record with no answers and no
-  confirmation prints none.
+  confirmation prints none;
+* it holds the names of whom the status records: the answering owner (`names_owner`), the principal,
+  the delegation and the reason as printed (`names_onBehalf`), and the owner who confirmed the
+  restatement (`names_derived`, `Restatement.names_confirmed`).
 
 What this module does not establish: that what is recorded is true. These are values a project
 writes, so a record can name as owner a principal who is not one, or keep `.confirmed` after a
@@ -66,6 +70,16 @@ def Authority.answerer (a : Authority) (reason : String) : Answerer :=
   match a.delegation with
   | none => .owner a.principal
   | some d => .onBehalf a.principal d reason
+
+/-- An authority with no delegation answers as the owner, whatever reason is given. -/
+theorem Authority.answerer_owner (a : Authority) (why : String) (h : a.delegation = none) :
+    a.answerer why = .owner a.principal := by
+  simp [answerer, h]
+
+/-- An authority under a delegation answers on the owner's behalf, under it and for the reason given. -/
+theorem Authority.answerer_onBehalf (a : Authority) (why : String) {d : Ident}
+    (h : a.delegation = some d) : a.answerer why = .onBehalf a.principal d why := by
+  simp [answerer, h]
 
 /-- An answer with who gave it. -/
 structure Attributed (W : Type u) where
@@ -212,6 +226,30 @@ theorem says_derived_confirmed {s : Restatement} (x : Settled s)
   | derived => exact ⟨_, rfl⟩
   | fork | unsettled => simp [claim] at h
 
+/-- The words of the owner's answer name the owner. -/
+theorem names_owner {s : Restatement} (p : Ident) (v : Verdict) :
+    p.toString.toList <:+: (Settled.answered (s := s) (.owner p) v).words :=
+  ⟨_, chars!".\n", by simp [words, details]; rfl⟩
+
+/-- The words of an answer on the owner's behalf name the principal and the delegation, and hold the
+reason as printed on one line. -/
+theorem names_onBehalf {s : Restatement} (p d : Ident) (why : String) (v : Verdict) :
+    let w := (Settled.answered (s := s) (.onBehalf p d why) v).words
+    p.toString.toList <:+: w ∧ d.toString.toList <:+: w ∧ Codec.line.print why <:+: w := by
+  intro w
+  have hw : w = (Settled.answered (s := s) (.onBehalf p d why) v).claim.phrase ++
+      (p.toString.toList ++ (chars!", under the delegation " ++ (d.toString.toList ++
+        (chars!", for this reason: " ++ Codec.line.print why)))) := by
+    simp [w, words, details]
+  rw [hw]
+  refine ⟨List.infix_append' .., ?_, ?_⟩
+  · exact ⟨_ ++ (_ ++ _), _, by simp⟩
+  · exact ⟨_ ++ (_ ++ (_ ++ (_ ++ _))), [], by simp⟩
+
+/-- The words of a derived consequence name the owner who confirmed the restatement. -/
+theorem names_derived (o : Ident) : o.toString.toList <:+: (Settled.derived (owner := o)).words :=
+  ⟨_, chars!" confirmed the record's restatement; no one answered it.\n", by simp [words, details]; rfl⟩
+
 end Settled
 
 /-- The words that say whether a record's restatement stands as confirmed. -/
@@ -227,6 +265,11 @@ theorem Restatement.says_confirmed_iff (s : Restatement) :
   | confirmed o =>
     simp only [words, List.append_assoc, List.prefix_append, Restatement.confirmed.injEq, true_iff]
     exact ⟨o, rfl⟩
+
+/-- The words of a confirmed restatement name the owner who confirmed it. -/
+theorem Restatement.names_confirmed (o : Ident) :
+    o.toString.toList <:+: (Restatement.confirmed o).words :=
+  List.infix_append ..
 
 /-- How the answerer's answer is titled where it is printed alone: an answer of the owner only when
 the recorded answerer is the owner. -/

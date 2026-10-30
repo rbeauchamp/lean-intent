@@ -50,8 +50,6 @@ def attributed : List (Attributed (List Int → List Int)) :=
    ⟨rulesOutShort, .onBehalf (.of "claude") (.of "assistant")
      "A rearrangement of [2, 1, 1] has three elements, which the owner's restatement requires."⟩]
 
-theorem attributed_answers : attributed.map (·.answer) = answers := rfl
-
 /-! ## The corrected record keeps them -/
 
 theorem sorting_keeps : Keeps sorting answers := by
