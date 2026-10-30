@@ -229,7 +229,7 @@ theorem says_derived_confirmed {s : Restatement} (x : Settled s)
 /-- The words of the owner's answer name the owner. -/
 theorem names_owner {s : Restatement} (p : Ident) (v : Verdict) :
     p.toString.toList <:+: (Settled.answered (s := s) (.owner p) v).words :=
-  ⟨_, chars!".\n", by simp [words, details]; rfl⟩
+  List.infix_append' ..
 
 /-- The words of an answer on the owner's behalf name the principal and the delegation, and hold the
 reason as printed on one line. -/
@@ -243,12 +243,16 @@ theorem names_onBehalf {s : Restatement} (p d : Ident) (why : String) (v : Verdi
     simp [w, words, details]
   rw [hw]
   refine ⟨List.infix_append' .., ?_, ?_⟩
-  · exact ⟨_ ++ (_ ++ _), _, by simp⟩
-  · exact ⟨_ ++ (_ ++ (_ ++ (_ ++ _))), [], by simp⟩
+  · exact List.infix_append_of_infix_right
+      (List.infix_append_of_infix_right (List.infix_append' ..))
+  · exact List.infix_append_of_infix_right
+      (List.infix_append_of_infix_right
+        (List.infix_append_of_infix_right
+          (List.infix_append_of_infix_right (List.infix_append_right ..))))
 
 /-- The words of a derived consequence name the owner who confirmed the restatement. -/
 theorem names_derived (o : Ident) : o.toString.toList <:+: (Settled.derived (owner := o)).words :=
-  ⟨_, chars!" confirmed the record's restatement; no one answered it.\n", by simp [words, details]; rfl⟩
+  List.infix_append_of_infix_right (List.infix_append ..)
 
 end Settled
 
