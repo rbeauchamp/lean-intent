@@ -1,6 +1,6 @@
 # Who settled each thing
 
-**Who settled each thing** (`LeanIntent.Settled`): what a project records about who confirmed or answered something, and the only words the rendering prints about it, each a function of that record, so a reader of a rendered record is never told the owner confirmed what they never saw.
+**Who settled each thing** (`LeanIntent.Settled`): what a project records about who confirmed or answered something, and the only words the rendering prints about it, each a function of that record, so a rendered record says the owner confirmed something only where the record holds that the owner did.
 
 Module: `LeanIntent/Settled.lean`, read and printed by `LeanIntent/Render.lean`.
 
@@ -22,7 +22,7 @@ The owner states and confirms a system's contract, and the agents decide what li
 | `Settled.fork` | `A fork for the owner to decide:` |
 | `Settled.unsettled` | `Not settled:` |
 
-A consequence is one of these and no other, and an explanation (`LeanIntent.Explanation`) must give each of its consequences a status, and itself a `Restatement`: there is no default. `Settled` is indexed by the restatement's standing, and `.derived` exists only at `.confirmed o`, so a consequence of a record with no recorded confirmation cannot be recorded as derived from one: Lean's elaborator refuses it. An answer printed alone is an `Attributed`, an answer with its `Answerer`; `Answerer` has one constructor for the owner and one for a principal under a named delegation, which must give a reason, and `Authority.answerer` reads it from an authority of [the owners' log](owners-log.md).
+A consequence is one of these and no other, and an explanation (`LeanIntent.Explanation`) must give each of its consequences a status, and itself a `Restatement`: there is no default. `Settled` is indexed by the restatement's standing, and `.derived` exists only at `.confirmed o`, so a consequence of a record with no recorded confirmation cannot be recorded as derived from one: Lean's elaborator refuses it. An answer printed alone is an `Attributed`, an answer with its `Answerer`; `Answerer` has one constructor for the owner and one for a principal under a named delegation, which carries a reason that the rendering and an answer's text refuse when it is empty, and `Authority.answerer` reads it from an authority of [the owners' log](owners-log.md).
 
 | Theorem | What it establishes, for every status `x` |
 |---|---|

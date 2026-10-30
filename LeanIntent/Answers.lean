@@ -10,7 +10,8 @@ it, as a decision made on the owner's behalf with its reason tied to the owner's
 shows in the project's owners' log, whose answer statement names who gave it, a principal acting as
 owner or one acting under the delegation it names (`LeanIntent.Statement`); an `Answer` here names
 no author, and `LeanIntent.Attributed` pairs it with who gave it. A consequence is a named predicate
-on the subject, of one of two kinds: an *entailment*, which every model of the record satisfies (what the record requires or rules out), or a
+on the subject, of one of two kinds: an *entailment*, which every model of the record satisfies
+(what the record requires or rules out), or a
 *possibility*, which some model satisfies (what the record still allows). An answer confirms it or
 declines it, and each of the four answers is a requirement of every later revision of the record
 (`Answer.KeptBy`), whose models are its subjects that meet it (`IntentRecord.Meets`):
@@ -22,8 +23,8 @@ declines it, and each of the four answers is a requirement of every later revisi
 
 A declined possibility is kept as a theorem, not as a model: when "the record allows returning the
 empty list for every input" is declined, by the owner or on the owner's behalf, what must stay true
-is that every later revision excludes that subject. A declined entailment is kept as a countermodel, since a
-witness is what shows that a revision no longer requires it.
+is that every later revision excludes that subject. A declined entailment is kept as a
+countermodel, since a witness is what shows that a revision no longer requires it.
 
 Each kept goal applies the answer's unchanged predicate to the subjects that meet the revision being
 checked, under that revision's domain hypotheses. It is never a fact proved about an earlier

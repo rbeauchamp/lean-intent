@@ -7,7 +7,8 @@ import LeanIntent.Cone
 /-!
 # Rendering an intent record for its owner
 
-`renderExplanation` renders an `Explanation r` as a Markdown document: the record `r`'s shape, each
+`renderExplanation` renders an `Explanation r` as a Markdown document: whether an owner confirmed
+the record's restatement; the record `r`'s shape, each
 domain hypothesis, property and vocabulary predicate, and each consequence shown with it, its
 predicate printed exactly under a heading that says whether it is shown as an entailment or as a
 possibility, each followed by who settled it and its gloss in four parts; then every declaration the
@@ -22,7 +23,8 @@ imports all of Lean, so a project that only writes records and explanations need
 
 Everything this module prints about who confirmed or answered something is words of
 `LeanIntent.Settled`: `Restatement.words`, `Settled.words`, `Answerer.says` and `Answerer.title`,
-each a function of the recorded status, whose theorems say what the words claim. The reader's functions below read that
+each a function of the recorded status, whose theorems say what the words claim. The reader's
+functions below read that
 status from the explanation or the attributed answer by its constructors, and refuse any other term,
 such as an `Answer` with no `Attributed` around it. So no path here names an owner or an answerer
 except through the record, but that the record is true is not checked: the rendering says so.

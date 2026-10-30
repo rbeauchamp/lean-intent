@@ -7,7 +7,7 @@ The subject computes a check digit for a list of numbers, of type `List Nat → 
 `checkDigits` asks that it return, for every list, the last decimal digit of the sum of the digit
 sums of its numbers, as `checkDigit` computes it. The record fixes the function completely
 (`checkDigits_o5_eq`), and every function that meets it returns a single digit, the consequence its
-explanation shows the owner (`checkDigitsExplained`).
+explanation shows (`checkDigitsExplained`).
 
 Its meaning reaches three definitions of this file, which its rendering prints in two ways:
 `digitSum`, by well-founded recursion, and `total`, by structural recursion, each by its type and
