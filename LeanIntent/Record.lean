@@ -6,8 +6,8 @@ before any implementation exists: named properties of a subject, over a vocabula
 under named domain hypotheses.
 
 * The *subject* is what the intent is about, a value of a type `W : Type u`: a function, a step of
-  a system with state, or any other value. Its `Shape` says which, and so fixes what doing nothing
-  means for it (obligation O4).
+  a system with state, a description made of functions, or any other value. Its `Shape` says which,
+  and so fixes what doing nothing means for it (obligation O4).
 * Each *property* is a named Lean proposition about the subject, `W → Prop`.
 * Each *domain hypothesis* is a named fact about the world that the properties rely on, also a
   `W → Prop`; a hypothesis that does not mention the subject is a constant one. Domain hypotheses
@@ -44,10 +44,24 @@ structure Pred where
   /-- The predicate. -/
   holds : Arg → Prop
 
-/-- The closed set of subject shapes. A shape fixes, by the subject's type alone, what O4 asks:
-nothing of a plain value, totality of a function, and of a subject with state, that each subject
-that leaves the state unchanged fails the record. A subject with state is a step of a system: from
-a state, optionally with an input, to the next state, optionally with an output. -/
+/-- One function of a description made of functions: its name, and how a subject of type `W` gives
+it, as a function from `In` to `Out`. A function of several arguments takes them together, or
+leaves those after the first in `Out`. -/
+structure Member (W : Type u) where
+  /-- The name the owner reads the function by. -/
+  name : String
+  /-- What the function takes. -/
+  In : Type u
+  /-- What the function returns. -/
+  Out : Type u
+  /-- The function a subject gives. -/
+  get : W → In → Out
+
+/-- The closed set of subject shapes. A shape fixes what O4 asks: nothing of a plain value, totality
+of a function, of a subject with state, that each subject that leaves the state unchanged fails the
+record, and of a description made of functions, that each subject in which one of them ignores its
+input fails it. A subject with state is a step of a system: from a state, optionally with an input,
+to the next state, optionally with an output. -/
 inductive Shape : Type u → Type (u + 1) where
   /-- A value with no behaviour. -/
   | value (W : Type u) : Shape W
@@ -61,6 +75,10 @@ inductive Shape : Type u → Type (u + 1) where
   | action (S O : Type u) : Shape (S → O × S)
   /-- A step from a state and an input to an output and the next state. -/
   | actionOn (S I O : Type u) : Shape (S → I → O × S)
+  /-- A description made of functions, with no state carried from one use to the next, such as a
+  world's rules or a pair of hash functions: at least one function, `first` and `rest`, and the
+  plain values `data` that are the rest of the subject. -/
+  | bundle {W D : Type u} (data : W → D) (first : Member W) (rest : List (Member W)) : Shape W
 
 /-- An intent record for one deliverable whose subject has type `W`. -/
 structure IntentRecord (W : Type u) where

@@ -173,7 +173,7 @@ theorem sorting_progress :
     (∀ g ∈ o1 sorting, Nonempty g.1) ∧ O2 sorting ∧ O3 sorting ∧ O4 sorting ∧
       O5 sorting .widest :=
   progress sorting ((o2_correct _).mp sorting_o2).1 ((o2_correct _).mp sorting_o2).2
-    ((o3_correct _).mp sorting_o3) (fun _ h => nomatch h)
+    ((o3_correct _).mp sorting_o3) trivial (fun _ h => nomatch h)
 
 /-! ## The degenerate subjects -/
 
@@ -262,8 +262,8 @@ theorem sort_fulfils : sorting.Fulfilled sort := fulfils implSpec_refines fun _ 
 Each explanation glosses every statement of its record in plain words, records whether an owner
 confirmed its restatement, and lists consequences, each shown as an entailment or as a possibility,
 with a proof that it holds of the record as shown and who settled it. `LeanIntent.Render` renders
-them with every statement printed exactly. Shown `sortedOnlyExplained`, whose restatement no one
-confirmed, the owner declines the possibility that a function meeting the record returns the empty
+them with every statement printed as Lean reads it back. Shown `sortedOnlyExplained`, whose
+restatement no one confirmed, the owner declines the possibility that a function meeting the record returns the empty
 list for every input, which is how the forgotten rearrangement property comes to light in plain
 words. The owner then confirms the restatement of `sorting`, and `sortingExplained` records what
 follows: that a function meeting it is not the empty-list function is derived from that

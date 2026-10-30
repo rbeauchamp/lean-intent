@@ -4,13 +4,13 @@ import LeanIntent.Settled
 # Plain-word explanations of an intent record
 
 The one human check in the method is the owner confirming that the formal statement of their
-intent says what they meant. They read each statement in two forms side by side: printed exactly,
-as the term Lean's kernel checks (`LeanIntent.Render`), and explained in plain words, by a `Gloss`
-in four parts: what the statement requires, what it rules out, what it still allows, and the
-freedom it leaves, the freedom obligation O5 shows the owner.
+intent says what they meant. They read each statement in two forms side by side: printed so that
+Lean reads it back as the term its kernel checks (`LeanIntent.Render`), and explained in plain
+words, by a `Gloss` in four parts: what the statement requires, what it rules out, what it still
+allows, and the freedom it leaves, the freedom obligation O5 shows the owner.
 
 A gloss is written by a model and is trusted, not proved: nothing checks that it says what the
-statement says. The exact statement beside it is what is proved and checked, and the owner can
+statement says. The printed statement beside it is what is proved and checked, and the owner can
 read either.
 
 An `Explanation r` gives a gloss for every statement of the intent record `r`: its shape, and each
