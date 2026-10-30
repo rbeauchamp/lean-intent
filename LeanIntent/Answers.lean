@@ -9,8 +9,8 @@ consequence: the owner gives it where the consequence is such a fork, and otherw
 it, as a decision made on the owner's behalf with its reason tied to the owner's intent. Which it is
 shows in the project's owners' log, whose answer statement names who gave it, a principal acting as
 owner or one acting under the delegation it names (`LeanIntent.Statement`); an `Answer` here names
-no author, and `LeanIntent.Attributed` pairs it with who gave it. A consequence is a named predicate on the subject, of one of two kinds: an *entailment*,
-which every model of the record satisfies (what the record requires or rules out), or a
+no author, and `LeanIntent.Attributed` pairs it with who gave it. A consequence is a named predicate
+on the subject, of one of two kinds: an *entailment*, which every model of the record satisfies (what the record requires or rules out), or a
 *possibility*, which some model satisfies (what the record still allows). An answer confirms it or
 declines it, and each of the four answers is a requirement of every later revision of the record
 (`Answer.KeptBy`), whose models are its subjects that meet it (`IntentRecord.Meets`):
@@ -20,9 +20,9 @@ declines it, and each of the four answers is a requirement of every later revisi
 | entailment `c` | a theorem: every model satisfies `c` | a countermodel: a model that fails `c` |
 | possibility `c` | a model that satisfies `c` | a refutation: no model satisfies `c` |
 
-A declined possibility is kept as a theorem, not as a model: when the owner is shown "the record
-allows returning the empty list for every input" and declines it, what must stay true is that every
-later revision excludes that subject. A declined entailment is kept as a countermodel, since a
+A declined possibility is kept as a theorem, not as a model: when "the record allows returning the
+empty list for every input" is declined, by the owner or on the owner's behalf, what must stay true
+is that every later revision excludes that subject. A declined entailment is kept as a countermodel, since a
 witness is what shows that a revision no longer requires it.
 
 Each kept goal applies the answer's unchanged predicate to the subjects that meet the revision being
@@ -79,16 +79,16 @@ universe u
 
 variable {W : Type u}
 
-/-- The two kinds of consequence shown to the owner. -/
+/-- The two kinds of consequence shown with a record. -/
 inductive Consequence.Kind where
   /-- What the record requires or rules out: every model of the record satisfies it. -/
   | entailment
   /-- What the record still allows: some model of the record satisfies it. -/
   | possibility
 
-/-- A consequence of an intent record whose subject has type `W`, as shown to the owner. -/
+/-- A consequence of an intent record whose subject has type `W`, as shown with the record. -/
 structure Consequence (W : Type u) where
-  /-- The name the owner reads the consequence by. -/
+  /-- The name the consequence is read by. -/
   name : String
   /-- Whether it was shown as entailed or as possible. -/
   kind : Consequence.Kind

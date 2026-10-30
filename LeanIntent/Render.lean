@@ -21,8 +21,8 @@ text of each attributed answer of the list `l` to the explanation `e`, as inform
 imports all of Lean, so a project that only writes records and explanations need not import it.
 
 Everything this module prints about who confirmed or answered something is words of
-`LeanIntent.Settled`: `Restatement.words`, `Settled.words`, `Answerer.says` and `Answerer.title`, each a function of
-the recorded status, whose theorems say what the words claim. The reader's functions below read that
+`LeanIntent.Settled`: `Restatement.words`, `Settled.words`, `Answerer.says` and `Answerer.title`,
+each a function of the recorded status, whose theorems say what the words claim. The reader's functions below read that
 status from the explanation or the attributed answer by its constructors, and refuse any other term,
 such as an `Answer` with no `Attributed` around it. So no path here names an owner or an answerer
 except through the record, but that the record is true is not checked: the rendering says so.
@@ -646,8 +646,9 @@ def renderExplanation (decl : Name) : MetaM String := do
 /-- The canonical text of the attributed answer `a`, a term of type `LeanIntent.Attributed W`, to
 the explanation `ex`, a constant of type `LeanIntent.Explanation r`: who gave it
 (`Answerer.title`, `Answerer.says`), and the answer printed exactly, with its consequence's name,
-kind and predicate and its verdict, each reduced to its constructor or literal; then the name of `ex` and its record part (`recordPart`), the record's statements and the
-consequences shown, as its rendering prints them; then every declaration the record part and the
+kind and predicate and its verdict, each reduced to its constructor or literal; then the name of
+`ex` and its record part (`recordPart`), the record's statements and the consequences shown, as its
+rendering prints them; then every declaration the record part and the
 answer reach, `LeanIntent.Answer.KeptBy`'s among them, which says what the answer asks of every
 later revision, each printed in full by one call of `definitions`; and the toolchain. An error,
 naming what cannot be printed, when any of it cannot be. -/
