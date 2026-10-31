@@ -5,8 +5,9 @@ import LeanIntent.Codec.Text
 # Statements: the owners' log, one text each
 
 A project records who may answer for its intent, and every answer, as statements committed in the
-project: an owners declaration, a delegation, an answer, a retraction of an answer and a revocation
-of a delegation. Each statement is a record of where it came from: the date, and the owner's words
+project: an owners declaration, a delegation, an answer, a retraction of an answer, a revocation of
+a delegation, the origin of a record's source when the owner adopted it from someone else, and a
+consequence's rest on an external tool. Each statement is a record of where it came from: the date, and the owner's words
 or a reference to where they are kept. A reviewer reads its text, the project commits its text, and
 a check reads its text, so each statement has exactly one text and each text at most one statement:
 
@@ -32,10 +33,9 @@ base64.
 
 What this module does not decide: whether a statement's authority traces back to a declared owner
 (`LeanIntent.Trace` decides it for answers and retractions), whether a signature over it is valid
-(lean-intent #19), and whether an answer's text has changed since it was given. The text an answer
-is recorded against is `LeanIntent.Render.answerText`; recording that text with an answer
-statement, whose `revision` and `predicate` fields hold what was shown, and refusing an answer whose
-text has since changed, are lean-intent #5's. It reads the text of each statement, and no more.
+(lean-intent #19), and whether an answer's text has changed since it was given, which
+`LeanIntent.Confirmation` decides from the `revision` and `predicate` fields, which hold what was
+shown. It reads the text of each statement, and no more.
 -/
 
 namespace LeanIntent
@@ -184,8 +184,10 @@ deriving instance DecidableEq for Verdict
 
 namespace Statement
 
-/-- A declaration of the project's owners. The first in a project's log is its root of trust; the
-threshold, for a project that signs, is how many owners must sign the next declaration. -/
+/-- A declaration of the project's owners, its root of trust. A project's log holds one, and
+`LeanIntent.Confirmation` refuses a log with several, since which of them is in force is what
+signatures would settle (lean-intent #19); the threshold, for a project that signs, is how many
+owners must sign the next declaration. -/
 structure Owners where
   /-- The owners. -/
   principals : List Principal
@@ -240,7 +242,46 @@ structure Revocation where
   delegation : Ident
   deriving DecidableEq
 
-/-- What a statement states, one of the five kinds. -/
+/-- Whose words an intent record's source is, when the owner adopted them from someone else: who
+wrote them, what that writer had read, the words as adopted, and who adopted them. The statement's
+own source and date are the adoption: the adopter's words, and where and when they gave them. -/
+structure Origin where
+  /-- Who adopts the words. -/
+  author : Authority
+  /-- The intent record's name. -/
+  record : String
+  /-- Who wrote the words. -/
+  writer : String
+  /-- What the writer had read of the implementation and of the work that changed it. -/
+  hadRead : String
+  /-- The words, exactly as adopted. -/
+  words : String
+  deriving DecidableEq
+
+/-- What an external tool did for a consequence that rests on it, or what is still open. -/
+inductive ToolOutcome where
+  /-- The tool was run: its version, its configuration, the result and what it cost in time and
+  memory. -/
+  | measured (version configuration result cost : String)
+  /-- What is not measured, and what depends on it. -/
+  | openItem (item dependents : String)
+  deriving DecidableEq
+
+/-- A consequence's rest on an external tool. -/
+structure ToolBasis where
+  /-- Who measured it, or names what is open. -/
+  author : Authority
+  /-- The intent record's name. -/
+  record : String
+  /-- The consequence's name. -/
+  consequence : String
+  /-- The tool's name. -/
+  tool : String
+  /-- What it did, or what is open. -/
+  outcome : ToolOutcome
+  deriving DecidableEq
+
+/-- What a statement states, one of the seven kinds. -/
 inductive Body where
   /-- A declaration of the owners. -/
   | owners (o : Owners)
@@ -252,6 +293,10 @@ inductive Body where
   | retraction (r : Retraction)
   /-- A revocation of a delegation. -/
   | revocation (r : Revocation)
+  /-- Whose words a record's source is. -/
+  | origin (o : Origin)
+  /-- A consequence's rest on an external tool. -/
+  | tool (t : ToolBasis)
   deriving DecidableEq
 
 end Statement
@@ -405,7 +450,37 @@ def revocation : Codec Statement.Revocation :=
   map (authority.seq (keyed chars!"revokes " (by decide) ident))
     (fun r => (r.author, r.delegation)) (fun (a, i) => some ⟨a, i⟩) (fun _ => rfl)
 
-/-- The five kinds of statement. -/
+/-- An origin: who adopts the words, the `record`, who `wrote` them, what they `had read`, and the
+`words`. -/
+def origin : Codec Statement.Origin :=
+  map (authority.seq ((keyed chars!"record " (by decide) line).seq
+      ((keyed chars!"written by " (by decide) line).seq
+      ((keyed chars!"had read " (by decide) text).seq (keyed chars!"adopted " (by decide) text)))))
+    (fun o => (o.author, o.record, o.writer, o.hadRead, o.words))
+    (fun (a, r, w, h, t) => some ⟨a, r, w, h, t⟩) (fun _ => rfl)
+
+/-- What a tool did: `measured` and its version, configuration, result and cost, or `open item` and
+what depends on it. -/
+def toolOutcome : Codec Statement.ToolOutcome :=
+  map (sum chars!"measured\n" chars!"open item " (by decide) (by decide) (by decide)
+      ((keyed chars!"version " (by decide) line).seq
+        ((keyed chars!"configuration " (by decide) text).seq
+        ((keyed chars!"result " (by decide) text).seq (keyed chars!"cost " (by decide) line))))
+      (text.seq (keyed chars!"depended on by " (by decide) text)))
+    (fun | .measured v c r k => .inl (v, c, r, k) | .openItem i d => .inr (i, d))
+    (fun | .inl (v, c, r, k) => some (.measured v c r k) | .inr (i, d) => some (.openItem i d))
+    (fun o => by cases o <;> rfl)
+
+/-- A consequence's rest on a tool: who says so, the `record`, the `consequence`, the `tool`, and what
+it did. -/
+def tool : Codec Statement.ToolBasis :=
+  map (authority.seq ((keyed chars!"record " (by decide) line).seq
+      ((keyed chars!"consequence " (by decide) line).seq
+      ((keyed chars!"tool " (by decide) line).seq toolOutcome))))
+    (fun t => (t.author, t.record, t.consequence, t.tool, t.outcome))
+    (fun (a, r, c, n, o) => some ⟨a, r, c, n, o⟩) (fun _ => rfl)
+
+/-- The seven kinds of statement. -/
 inductive Kind where
   /-- An owners declaration. -/
   | owners
@@ -417,6 +492,10 @@ inductive Kind where
   | retraction
   /-- A revocation. -/
   | revocation
+  /-- An origin. -/
+  | origin
+  /-- A consequence's rest on a tool. -/
+  | tool
   deriving DecidableEq
 
 /-- What a statement of each kind states. -/
@@ -426,13 +505,17 @@ def Kind.Body : Kind → Type
   | .answer => Statement.Answer
   | .retraction => Statement.Retraction
   | .revocation => Statement.Revocation
+  | .origin => Statement.Origin
+  | .tool => Statement.ToolBasis
 
 /-- The line that names a statement's kind. -/
 def kind : Codec Kind :=
   keywords (fun | .owners => chars!"kind owners\n" | .delegation => chars!"kind delegation\n"
                 | .answer => chars!"kind answer\n" | .retraction => chars!"kind retraction\n"
-                | .revocation => chars!"kind revocation\n")
-    [.owners, .delegation, .answer, .retraction, .revocation] (by intro k; cases k <;> decide)
+                | .revocation => chars!"kind revocation\n" | .origin => chars!"kind origin\n"
+                | .tool => chars!"kind tool\n")
+    [.owners, .delegation, .answer, .retraction, .revocation, .origin, .tool]
+    (by intro k; cases k <;> decide)
     (by decide) (by intro k; cases k <;> decide)
 
 /-- The codec of what a statement of kind `k` states. -/
@@ -442,6 +525,8 @@ def body : (k : Kind) → Codec k.Body
   | .answer => answer
   | .retraction => retraction
   | .revocation => revocation
+  | .origin => origin
+  | .tool => tool
 
 /-- The fields every statement has, after its kind: `project`, `id`, `date` and its source. -/
 def header : Codec (Ident × Ident × Date × Source) :=
@@ -463,13 +548,17 @@ def codec : Codec Statement :=
       | ⟨p, i, d, o, .delegation b⟩ => ⟨.delegation, (p, i, d, o), b⟩
       | ⟨p, i, d, o, .answer b⟩ => ⟨.answer, (p, i, d, o), b⟩
       | ⟨p, i, d, o, .retraction b⟩ => ⟨.retraction, (p, i, d, o), b⟩
-      | ⟨p, i, d, o, .revocation b⟩ => ⟨.revocation, (p, i, d, o), b⟩)
+      | ⟨p, i, d, o, .revocation b⟩ => ⟨.revocation, (p, i, d, o), b⟩
+      | ⟨p, i, d, o, .origin b⟩ => ⟨.origin, (p, i, d, o), b⟩
+      | ⟨p, i, d, o, .tool b⟩ => ⟨.tool, (p, i, d, o), b⟩)
     (fun x => match x with
       | ⟨.owners, (p, i, d, o), b⟩ => some ⟨p, i, d, o, .owners b⟩
       | ⟨.delegation, (p, i, d, o), b⟩ => some ⟨p, i, d, o, .delegation b⟩
       | ⟨.answer, (p, i, d, o), b⟩ => some ⟨p, i, d, o, .answer b⟩
       | ⟨.retraction, (p, i, d, o), b⟩ => some ⟨p, i, d, o, .retraction b⟩
-      | ⟨.revocation, (p, i, d, o), b⟩ => some ⟨p, i, d, o, .revocation b⟩)
+      | ⟨.revocation, (p, i, d, o), b⟩ => some ⟨p, i, d, o, .revocation b⟩
+      | ⟨.origin, (p, i, d, o), b⟩ => some ⟨p, i, d, o, .origin b⟩
+      | ⟨.tool, (p, i, d, o), b⟩ => some ⟨p, i, d, o, .tool b⟩)
     (fun s => by obtain ⟨p, i, d, o, b⟩ := s; cases b <;> rfl)
 
 /-! ## Printing and parsing -/

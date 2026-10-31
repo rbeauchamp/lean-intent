@@ -18,8 +18,11 @@ attributed answer to an explanation in the same way: who gave it and the answer 
 explanation's name and its record's statements and consequences, as the rendering prints them
 (`recordPart`); every declaration the record's meaning and the answer reach, printed in full; and the
 toolchain. `#render_intent e` shows the rendering of the explanation `e`, and `#answer_texts e l` the
-text of each attributed answer of the list `l` to the explanation `e`, as information. This module
-imports all of Lean, so a project that only writes records and explanations need not import it.
+text of each attributed answer of the list `l` to the explanation `e`, as information. An answer
+recorded in a project's owners' log holds two other texts (`LeanIntent.Confirmation`): the rendering
+saying nothing of who settled what (`revisionText`), as the revision it answers, and the text of what
+its predicate means (`consequenceText`). This module imports all of Lean, so a project that only
+writes records and explanations need not import it.
 
 Everything this module prints about who confirmed or answered something is words of
 `LeanIntent.Settled`: `Restatement.words`, `Settled.words`, `Answerer.says` and `Answerer.title`,
@@ -27,7 +30,8 @@ each a function of the recorded status, whose theorems say what the words claim.
 functions below read that
 status from the explanation or the attributed answer by its constructors, and refuse any other term,
 such as an `Answer` with no `Attributed` around it. So no path here names an owner or an answerer
-except through the record, but that the record is true is not checked: the rendering says so.
+except through the record, or words a caller gives (`Statuses.given`), but that the record is true is
+not checked here: the rendering says so, and `LeanIntent.Confirmation` is what checks it.
 
 The declarations a meaning reaches are those `LeanIntent.Print.meaning` collects from the constants
 the printed terms name (`LeanIntent.Cone.exprRefs`), by the relation the check that a record does
@@ -571,24 +575,42 @@ def kindWords (e : Expr) : MetaM (Expr × String) := do
     return (kind, "a possibility: some subject that meets the record satisfies it")
   else throwError "expected the kind of a consequence, found{indentExpr kind}"
 
+/-- What a rendering says of who settled each thing. -/
+inductive Statuses where
+  /-- What the explanation holds, which is a value its project writes. -/
+  | recorded
+  /-- Nothing: the text an answer is recorded against, which recording the answer must not change. -/
+  | omitted
+  /-- These words for the restatement, and for each consequence in order, which a caller has
+  checked. -/
+  | given (restatement : String) (consequences : Array String)
+
 /-- The rendering of the explanation `decl`, a constant of type `LeanIntent.Explanation r`, up to
-its definitions: whether an owner confirmed the record's restatement, the record's shape and
-statements, and the consequences shown with who settled each, each printed exactly with its gloss;
-with the constants the record's meaning starts from, and the record's own constant,
-at which it stops. -/
-def recordPart (decl : Name) : MetaM (String × List Name × NameSet) := do
+its definitions: what `statuses` says of whether an owner confirmed the record's restatement, the
+record's shape and statements, and the consequences shown with what `statuses` says of who settled
+each, each printed exactly with its gloss; with the constants the record's meaning starts from, and
+the record's own constant, at which it stops. -/
+def recordPart (decl : Name) (statuses : Statuses := .recorded) :
+    MetaM (String × List Name × NameSet) := do
   let ci ← getConstInfo decl
   let ex ← ctorArgs (mkConst decl (ci.levelParams.map .param)) ``Explanation.mk 11
   let r ← ctorArgs ex[1]! ``IntentRecord.mk 5
   let restatement ← readRestatement ex[6]!
+  let confirmedPart (intro words : String) : String :=
+    s!" {intro}\n\n## Whether an owner confirmed this restatement\n\n{words}\n"
+  let standing := match statuses with
+    | .recorded => confirmedPart "Who settled each thing is printed as this record holds it; \
+        `LeanIntent.Trace` decides, from a project's owners' log, whether an answer's authority \
+        traces back to a declared owner, and this document does not."
+        (String.ofList restatement.words)
+    | .omitted => "\n\n"
+    | .given words _ => confirmedPart "Who settled each thing is printed as the project's owners' \
+        log holds it for this revision." words
   let mut doc := s!"# The intent record {← printExact ex[1]!}\n\n\
     Each statement is printed exactly: as Lean syntax that Lean elaborates back to the term its \
     kernel checks, binder names and metadata aside, from the root namespace with nothing opened. \
-    The plain words after it are written by a model and are trusted, not proved. Who settled \
-    each thing is printed as this record holds it; `LeanIntent.Trace` decides, from a project's \
-    owners' log, whether an answer's authority traces back to a declared owner, and this document \
-    does not.\n\n## Whether an owner confirmed this restatement\n\n\
-    {String.ofList restatement.words}\n## Shape\n\n"
+    The plain words after it are written by a model and are trusted, not proved.\
+    {standing}## Shape\n\n"
   let mut printed : Array Expr := #[ex[1]!]
   doc := doc ++ statement "The subject" (← printExact r[1]!) (← readGloss ex[2]!)
   printed := printed.push r[1]!
@@ -610,16 +632,25 @@ def recordPart (decl : Name) : MetaM (String × List Name × NameSet) := do
       else
         doc := doc ++ statement (← strLit a[1]!) (← printExact a[2]!) (← readGloss gloss)
         printed := printed.push a[2]!
-  doc := doc ++ "## Consequences, each with who settled it\n\n"
+  doc := doc ++ match statuses with
+    | .omitted => "## Consequences\n\n"
+    | _ => "## Consequences, each with who settled it\n\n"
   let consequences ← listElems ex[7]!
   if consequences.isEmpty then doc := doc ++ "None.\n\n"
-  for shown in consequences do
+  if let .given _ words := statuses then
+    unless words.size == consequences.size do
+      throwError "{consequences.size} consequences and words for {words.size}"
+  for h : i in [:consequences.size] do
+    let shown := consequences[i]
     let s ← ctorArgs shown ``Shown.mk 7
     let c ← ctorArgs s[3]! ``Consequence.mk 4
     let (_, shownAs) ← kindWords c[2]!
-    let settled := String.ofList (← readSettled restatement s[6]!).words
+    let settled ← match statuses with
+      | .recorded => pure s!"- **Settled:** {String.ofList (← readSettled restatement s[6]!).words}"
+      | .omitted => pure ""
+      | .given _ words => pure s!"- **Settled:** {words[i]!}"
     doc := doc ++ statement s!"{← strLit c[1]!}, {shownAs}" (← printExact c[3]!) (← readGloss s[5]!)
-      s!"- **Settled:** {settled}"
+      settled
     printed := printed.push c[3]!
   -- The record's own constant is the record shown above, statement by statement. What it means for
   -- a subject to meet the record, and for a consequence to hold of it as shown, are lean-intent's
@@ -630,9 +661,10 @@ def recordPart (decl : Name) : MetaM (String × List Name × NameSet) := do
   return (doc, roots, shown)
 
 /-- The rendering of the explanation `decl`, a constant of type `LeanIntent.Explanation r`: its
-record part (`recordPart`), every declaration that part's meaning reaches, and the toolchain. -/
-def renderExplanation (decl : Name) : MetaM String := do
-  let (doc, roots, shown) ← recordPart decl
+record part (`recordPart`), saying what `statuses` says of who settled each thing, every declaration
+that part's meaning reaches, and the toolchain. -/
+def renderExplanation (decl : Name) (statuses : Statuses := .recorded) : MetaM String := do
+  let (doc, roots, shown) ← recordPart decl statuses
   return doc ++ s!"## Definitions the record's meaning reaches\n\nThese are not statements of the \
     record: each is a declaration that a statement above depends on, or that says what it is for \
     a subject to meet the record and for a consequence to hold of it as shown, with everything \
@@ -642,6 +674,26 @@ def renderExplanation (decl : Name) : MetaM String := do
     opaque constant's value are not, since no term that uses them depends on more than their \
     types. Their plain words are those of the statements that use them.\n\n\
     {← definitions roots shown}{toolchain}"
+
+/-! ## The texts an answer is recorded against -/
+
+/-- The text of the revision the explanation `decl` shows: its rendering, saying nothing of who
+settled what, since recording an answer changes that and must not change what the answer names. -/
+def revisionText (decl : Name) : MetaM String :=
+  renderExplanation decl .omitted
+
+/-- The canonical text of what the consequence with the predicate `pred` means: the predicate printed
+exactly; every declaration it reaches, and `LeanIntent.Answer.KeptBy`, which says what an answer to
+it asks of every later revision, each printed in full by `definitions`; and the toolchain. It does
+not stop at the record, so a predicate stated through a record prints the record's value and
+changes with it. An error, naming what cannot be printed, when any of it cannot be. -/
+def consequenceText (pred : Expr) : MetaM String := do
+  return s!"# A consequence's predicate\n\nPrinted exactly: as Lean syntax that Lean elaborates back \
+    to the term its kernel checks, binder names and metadata aside, from the root namespace with \
+    nothing opened.\n\n{code (← printExact pred)}\n## Definitions the predicate reaches\n\nEach \
+    is printed in full, as in the rendering of a record, with what an answer to it asks of every \
+    later revision (`LeanIntent.Answer.KeptBy`).\n\n\
+    {← definitions (exprRefs pred [] ++ [``Answer.KeptBy]) {}}{toolchain}"
 
 /-! ## The answers -/
 

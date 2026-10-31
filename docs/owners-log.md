@@ -6,12 +6,14 @@ Modules: `LeanIntent/Codec.lean` and `LeanIntent/Codec/Text.lean` (the codecs), 
 
 **Complete in this version:** the grammar of the owners' log with its printer, its parser and their round trip.
 
-A project records who may answer for its intent, and each answer, as statements committed in the project (`LeanIntent.Statement`). An answer counts only when a declared owner made it, or a party acting under a delegation that traces back to one, within its scope; the log is the record of where each came from, reviewed like any other change. There are five kinds of statement:
+A project records who may answer for its intent, and each answer, as statements committed in the project (`LeanIntent.Statement`). An answer counts only when a declared owner made it, or a party acting under a delegation that traces back to one, within its scope; the log is the record of where each came from, reviewed like any other change. There are seven kinds of statement:
 
 - an owners declaration: the principals, each with the public keys it signs with, if any, and optionally how many owners must approve the next declaration;
 - a delegation: who grants it, as an owner or under which delegation; the delegate; the records it covers (all, or those named); whether the delegate may confirm, decline and retract; and whether it may pass the delegation on;
 - an answer: who answers, and under which delegation, if any, so an answer the owner gave as owner is told apart from a decision made on the owner's behalf under a delegation; the intent record and the revision of it that was shown; the consequence's name, kind and predicate as they were shown; and the verdict;
-- a retraction of an answer, and a revocation of a delegation, each naming the statement it withdraws.
+- a retraction of an answer, and a revocation of a delegation, each naming the statement it withdraws;
+- an origin, for a record's source the owner adopted from someone else: who adopts it, who wrote the words, what that writer had read of the implementation and of the work that changed it, and the words as adopted, while the statement's own source and date are the adoption;
+- a tool statement, for a consequence that rests on an external tool: the tool's version, configuration, result and cost, or the open item and what depends on it.
 
 Every statement also names its project, its id, the date, and its source: the owner's words, or a reference to where they are kept. Nothing requires a signature; a project that signs signs the same text.
 
@@ -50,9 +52,9 @@ predicate 1
 verdict declined
 ```
 
-A checkout that rewrites a statement's bytes, by converting its line endings or adding a byte-order mark, makes the parser refuse it; a project keeps its log out of Git's line-ending conversion, for example with `-text` in `.gitattributes`.
+A checkout that rewrites a statement's bytes in a file, by converting its line endings or adding a byte-order mark, makes the parser refuse it; a project that keeps statements in files of their own keeps them out of Git's line-ending conversion, for example with `-text` in `.gitattributes`.
 
-Whether an answer's authority traces back to a declared owner within the scope of every delegation on the way is decided by `LeanIntent.Trace` ([Tracing authority](tracing-authority.md)); the text an answer is recorded against is `LeanIntent.Render.answerText`, and recording that text with an answer statement, whose `revision` and `predicate` fields hold what was shown, and refusing an answer whose text has since changed, are #5's; and checking signatures, for a project that signs, is #19's.
+Whether an answer's authority traces back to a declared owner within the scope of every delegation on the way is decided by `LeanIntent.Trace` ([Tracing authority](tracing-authority.md)); an answer's `revision` and `predicate` fields hold what was shown, the record's rendering without who settled what and the text of what the predicate means, and [the confirmation check](confirmation.md) refuses an answer whose text has since changed, and reads the log from the project's declared `OwnersLog`, which commits each statement's text in a Lean module; and checking signatures, for a project that signs, is #19's.
 
 ## Worked examples
 
