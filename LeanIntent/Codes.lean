@@ -30,11 +30,11 @@ For each code this module computes:
   value of its result;
 * `Ty.Small`, the rule that fixes the values at which the class takes constant subjects: a number, a
   string, a list or an array only its empty value; the unit type, `Bool`, `Fin (n + 1)` and a machine
-  type every value; an option, a pair or a sum every value built from its components' parts; a
-  declared type each constructor applied to each combination of values of its fields' parts; and a
-  function type every function where it has finitely many, and otherwise the constant function at
-  each value of its result's part. The rule is fixed here, with the class, so that no record chooses
-  which constants it is checked against.
+  type every value; an option, a pair or a sum every value built from values its components' rules
+  admit; a declared type each constructor applied to each combination of values its fields' rules
+  admit; and a function type every function where it has finitely many, and otherwise the constant
+  function at each value its result's rule admits. The rule is fixed here, with the class, so that
+  no record chooses which constants it is checked against.
 * `Ty.finite`, which decides whether the type has finitely many values: when it holds, a list holds
   every value (`Ty.exists_list_of_finite`) and the rule admits each (`Ty.small_of_finite`), and when
   it fails, the type has infinitely many (`Ty.infinite`). A function type has finitely many exactly
@@ -226,9 +226,10 @@ def finite : Ty → Bool
 /-- The rule that fixes which values of a type the degenerate class takes constant subjects at,
 written apart from `part`: a number, a string, a list or an array only at its empty value; the unit
 type, `Bool`, `Fin (n + 1)` and a machine type at every value; an option at `none` and at each value
-of its part under `some`; a pair at each pair of values of its sides' parts; a sum at each value of
-either side's part; and a function type at every function where it has finitely many, and otherwise
-at the constant function at each value its result's rule admits. -/
+its component's rule admits under `some`; a pair at each pair of values its sides' rules admit; a
+sum at each value either side's rule admits; a declared type as its representation; and a function
+type at every function where it has finitely many, and otherwise at the constant function at each
+value its result's rule admits. -/
 def Small : (t : Ty) → t.denote → Prop
   | unit, _ => True
   | bool, _ => True
