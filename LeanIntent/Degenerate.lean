@@ -39,9 +39,9 @@ code is a `Sig`. Its degenerate subjects (`Sig.degenerate`) are:
 
 `Sig.mem_degenerate_iff` states the membership of the class apart from the list that computes it,
 and `Fn.apply_const` and `ArgProj.apply_fn` what a constant and a projection return, apart from how
-each is built. No class is empty
-(`Sig.degenerate_ne_nil`), so a record is never checked against nothing, and every class has at most
-`Ty.listBound` members besides its projections (`Sig.length_degenerate_le`).
+each is built. No class is empty (`Sig.degenerate_ne_nil`), so a record is never checked against
+nothing, and every class has at most `Ty.listBound` members besides its projections
+(`Sig.length_degenerate_le`).
 
 ## The class of a record's type
 
@@ -73,11 +73,12 @@ part of the theorem's statement, and a list of the wrong length is refused (`ver
 `metBy W bs` lists the members the verdicts say meet the record, which are exactly those that do
 (`mem_metBy`). Mapped through `Degenerate.reading`, that list shows each subject it names, which meets
 the record (`meets_of_subject_mem_metBy`), and shows the other constants as a group exactly when some
-one of them meets it (`otherConstants_mem_metBy_iff`). `possibilities h`, from a proof `h : Verdicts r bs`, reports each as a
-`Consequence` of kind possibility, the predicate that the subject is one the member stands for
-(`Degenerate.consequence`), which holds of the record as it is shown (`possibilities_holdsOf`), so
-it can be shown with the record (`LeanIntent.Shown`) and an answer to it stored and kept by
-every later revision (`LeanIntent.Answers`). A report exists only for proved verdicts. A declined
+one of them meets it (`otherConstants_mem_metBy_iff`). `possibilities h`, from a proof
+`h : Verdicts r bs`, reports each as a `Consequence` of kind possibility, the predicate that the
+subject is one the member stands for (`Degenerate.consequence`), which holds of the record as it is
+shown (`possibilities_holdsOf`), so it can be shown with the record (`LeanIntent.Shown`) and an
+answer to it stored and kept by every later revision (`LeanIntent.Answers`). A report exists only
+for proved verdicts. A declined
 one is kept by exactly the revisions that no subject of the member meets
 (`Degenerate.declined_keptBy_iff`). Proved verdicts that report nothing refute every subject of every
 member (`not_meets_of_metBy_eq_nil`).
