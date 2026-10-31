@@ -6,7 +6,7 @@ Module: `LeanIntent/Settled.lean`, read and printed by `LeanIntent/Render.lean`.
 
 **Complete in this version:** the record of who settled each thing, its printed words and the theorems that say what they claim, and the rendering and the answer's text printed through them.
 
-**Not yet built**, a separate issue of this repository: checking what is recorded here against the owners' log, and against the revision each applies to (#5).
+[The confirmation check](confirmation.md) checks what is recorded here against the owners' log, and against the revision each applies to. A project that does not run it has what it recorded and nothing more.
 
 The owner states and confirms a system's contract, and the agents decide what lies below it on the owner's behalf, as [the README](../README.md#the-owner-and-the-agents) sets out. So each thing a rendered record shows says who settled it:
 
@@ -47,6 +47,6 @@ A fork is the one consequence the rendering puts to the owner, since their atten
 
 ## What is trusted
 
-- That what is recorded is true. These are values a project writes: a record can name as owner a principal who is not one, or keep `.confirmed` after a revision the owner never saw, and the rendering then prints that. `LeanIntent.Trace` decides, from the owners' log, whether an answer's authority traces back to a declared owner, and the rendering says that it does not; tying these values to that log and to a revision is #5's. A consequence's status and an `Attributed` answer to it are separate values, which nothing compares.
+- That what is recorded is true. These are values a project writes: a record can name as owner a principal who is not one, or keep `.confirmed` after a revision the owner never saw, and the rendering then prints that. `LeanIntent.Trace` decides, from the owners' log, whether an answer's authority traces back to a declared owner, and the rendering says that it does not. [The confirmation check](confirmation.md) refuses a value that disagrees with that log or names another revision, a consequence's status that disagrees with the `Attributed` answers kept, and a value of the project no deliverable holds, and `LeanIntent.Confirmation.Read.renderChecked` prints what the log holds in place of the value; `#render_intent` and `renderExplanation` still print the value, which is accepted, since they read no log and say so, and a project whose check passes holds no such constant, among those the check finds, that the log contradicts.
 - That `LeanIntent.Render` reads from the term what it prints: it reads each status by its constructors, and refuses any other term, and this is argued from its code, since it works on Lean's terms rather than on typed values, and is not stated as a theorem.
 - A reason, a gloss and a consequence's name are free text, printed as written. Their author is the one who writes the status, so they can say nothing the status could not; each status is printed on one line of its own, opening with its claim.

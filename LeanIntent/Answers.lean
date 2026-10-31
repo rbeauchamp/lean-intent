@@ -59,17 +59,16 @@ What this module does not establish:
 
 * that a stored answer was given by a declared owner, or under a delegation that traces back to
   one, and that no one else removed or changed one. `LeanIntent.Trace` decides, from a project's
-  owners' log, whether each answer recorded there has such authority and is not retracted; tying
-  the answers a project keeps here to the statements of its log is lean-intent #5's;
+  owners' log, whether each answer recorded there has such authority and is not retracted, and
+  `LeanIntent.Confirmation` ties the answers a project keeps here to the statements of its log;
 * that an answer's predicate still means what was confirmed or declined. It is a Lean term, read in
   the environment that elaborates it, so a revision that changes the body of a definition the
   predicate uses, the subject type's among them, changes the stored answer's meaning without
   removing it, and a confirmed entailment stated through the record it answers, such as
   `fun f => sorting.Props f`, is kept by every revision of that record. A predicate that uses only
   Lean's own library, as both answers of `LeanIntentExamples.Answers` do, keeps its meaning while
-  the Lean release does; that every other stored answer still says what was confirmed or declined is
-  left to the record of the answers, which names the revision each answer applies to (lean-intent
-  #5);
+  the Lean release does; `LeanIntent.Confirmation` refuses a stored answer whose predicate's text,
+  everything the predicate reaches printed in full, no answer of the log holds;
 * that a project checks its current revision against its stored answers: it does so by declaring a
   value of `Accepted answers` for that revision, and a project that declares none checks nothing.
 -/
