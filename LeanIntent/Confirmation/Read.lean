@@ -183,7 +183,7 @@ def renderChecked (mods : Array Name) (decl : Name) : MetaM String := do
   let (_, explanation, _) ← deliverableParts decl
   let words := rev.shown.map fun x => String.ofList (checked p o log rev x.1 x.2).words
   renderExplanation explanation
-    (.given (String.ofList (logStanding p o log rev).words) words.toArray)
+    (statuses := .given (String.ofList (logStanding p o log rev).words) words.toArray)
 
 /-- The text of a statement, made by `author` on `date` with the source `source`, answering the
 question named `consequence` of the deliverable `decl`, at its current revision, with the two texts

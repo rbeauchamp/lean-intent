@@ -15,7 +15,8 @@ for a Lean intent record:
 * **O3, refutable**: each property has a subject that fails it, so a property nothing fails is
   refused.
 * **O4, progress**: for a function, totality; for a subject with state, every subject that leaves
-  the state unchanged fails the record; a plain value is asked nothing.
+  the state unchanged fails the record; for a description made of functions, every subject in which
+  one of them ignores its input fails the record; a plain value is asked nothing.
 * **O5, determinate or confirmed freedom**: any two models of the record are equal, or related by
   a stated relation, what the intent leaves unsaid (`Freedom`). The freedom is part of the
   restatement the owner confirms; where it is a fork that changes what they get the owner decides
@@ -29,7 +30,8 @@ that equates what it states with an intended proposition (`intendedO1` and the r
 proposition is written by a direct match on the record and the obligation's definition, and uses no
 definition of the formers or of the helpers they use (`Goals`, `HasInstance`, `HasNonInstance`,
 `Clause.typed`, `Pred.typed`, `IntentRecord.Dom`, `IntentRecord.Props`, `IntentRecord.Meets`,
-`Shape.Idle`, `Shape.progress`, `Total`, `Freedom.relates`), so a wrong helper makes its
+`Member.Ignores`, `Shape.Covers`, `Shape.Free`, `Shape.Sound`, `Shape.Idle`, `Shape.progress`,
+`Total`, `Freedom.relates`), so a wrong helper makes its
 correctness theorem fail. Every theorem quantifies over every record, so it holds of no fixed
 example only.
 
@@ -146,8 +148,28 @@ theorem o3_correct (r : IntentRecord W) : O3 r ↔ intendedO3 r := by
 
 /-! ## O4, progress -/
 
+/-- The function `m` of the subject `w` ignores its input: it returns the same for every one. -/
+def Member.Ignores (m : Member W) (w : W) : Prop := ∀ x y, m.get w x = m.get w y
+
+/-- The plain values and the functions of a description determine the subject, so no part of it lies
+outside them. -/
+def Shape.Covers {D : Type u} (data : W → D) (ms : List (Member W)) : Prop :=
+  ∀ u v, data u = data v → (∀ m ∈ ms, m.get u = m.get v) → u = v
+
+/-- Each of the functions of a description can be any function of its type, so none is a decoy whose
+behaviour is fixed whatever the subject is. -/
+def Shape.Free (ms : List (Member W)) : Prop := ∀ m ∈ ms, ∀ f : m.In → m.Out, ∃ w, m.get w = f
+
+/-- What a shape must itself satisfy for O4 to ask what it says: for a description made of functions,
+that they and its plain values are the whole subject and that each function is free; nothing of
+any other shape. -/
+def Shape.Sound : {W : Type u} → Shape W → Prop
+  | _, .bundle data first rest => Shape.Covers data (first :: rest) ∧ Shape.Free (first :: rest)
+  | _, _ => True
+
 /-- The subjects of a shape that do nothing: for a subject with state, those that leave the state
-unchanged on every state and input; a plain value or a function has none. -/
+unchanged on every state and input; for a description made of functions, those in which one of the
+functions ignores its input; a plain value or a function has none. -/
 def Shape.Idle : {W : Type u} → Shape W → W → Prop
   | _, .value _, _ => False
   | _, .function _ _, _ => False
@@ -155,6 +177,7 @@ def Shape.Idle : {W : Type u} → Shape W → W → Prop
   | _, .stepOn _ _, f => ∀ s i, f s i = s
   | _, .action _ _, f => ∀ s, (f s).2 = s
   | _, .actionOn _ _ _, f => ∀ s i, (f s i).2 = s
+  | _, .bundle _ first rest, w => ∃ m ∈ first :: rest, m.Ignores w
 
 /-- Every function of a Π-type gives every input an output. -/
 def Total (A : Type u) (B : A → Type u) : Prop := ∀ f : (x : A) → B x, ∀ x, ∃ y, f x = y
@@ -163,11 +186,15 @@ def Total (A : Type u) (B : A → Type u) : Prop := ∀ f : (x : A) → B x, ∀
 def Shape.progress : {W : Type u} → Shape W → (W → Prop) → List Prop
   | _, .value _, _ => []
   | _, .function A B, _ => [Total A B]
+  | _, s@(.bundle data first rest), meets =>
+    [Shape.Covers data (first :: rest), Shape.Free (first :: rest), ∀ w, s.Idle w → ¬ meets w]
   | _, s, meets => [∀ w, s.Idle w → ¬ meets w]
 
 /-- O4's goals: nothing for a plain value; totality for a function, which Lean discharges since
-every Lean function is total (`o4_function`); and for a subject with state, that every subject
-leaving the state unchanged fails the record. -/
+every Lean function is total (`o4_function`); for a subject with state, that every subject leaving
+the state unchanged fails the record; and for a description made of functions, that they and its
+plain values are the whole subject, that each function can be any function of its type, and that
+every subject in which one of them ignores its input fails the record. -/
 def o4 (r : IntentRecord W) : List Prop := r.shape.progress r.Meets
 
 /-- O4 holds of `r`. -/
@@ -185,6 +212,11 @@ def intendedO4At : {W : Type u} → Shape W → IntentRecord W → Prop
       ¬ ((∀ d ∈ r.dom, d.holds f) ∧ ∀ p ∈ r.props, p.holds f)
   | _, .actionOn S I O, r => ∀ f : S → I → O × S, (∀ s i, (f s i).2 = s) →
       ¬ ((∀ d ∈ r.dom, d.holds f) ∧ ∀ p ∈ r.props, p.holds f)
+  | W, .bundle data first rest, r =>
+      (∀ u v : W, data u = data v → (∀ m ∈ first :: rest, m.get u = m.get v) → u = v) ∧
+      (∀ m ∈ first :: rest, ∀ f : m.In → m.Out, ∃ w, m.get w = f) ∧
+      ∀ w : W, (∃ m ∈ first :: rest, ∀ x y, m.get w x = m.get w y) →
+        ¬ ((∀ d ∈ r.dom, d.holds w) ∧ ∀ p ∈ r.props, p.holds w)
 
 /-- What O4 asks, written apart from the former. -/
 def intendedO4 (r : IntentRecord W) : Prop := intendedO4At r.shape r
@@ -193,8 +225,9 @@ def intendedO4 (r : IntentRecord W) : Prop := intendedO4At r.shape r
 theorem o4_correct (r : IntentRecord W) : O4 r ↔ intendedO4 r := by
   obtain ⟨shape, dom, props, vocab⟩ := r
   cases shape <;>
-    simp only [O4, o4, Shape.progress, Goals, goals_singleton, Total, Shape.Idle,
-      IntentRecord.Meets, IntentRecord.Dom, IntentRecord.Props, intendedO4, intendedO4At]
+    simp only [O4, o4, Shape.progress, Goals, goals_singleton, Total, Shape.Idle, Shape.Covers,
+      Shape.Free, Member.Ignores, IntentRecord.Meets, IntentRecord.Dom, IntentRecord.Props,
+      intendedO4, intendedO4At, and_true]
 
 /-- O4 asks nothing exactly of a plain value. -/
 theorem o4_eq_nil_iff (r : IntentRecord W) : o4 r = [] ↔ r.shape = .value W := by
@@ -213,8 +246,43 @@ theorem not_o4_of_idle {r : IntentRecord W} {w : W} (hIdle : r.shape.Idle w) (hw
     ¬ O4 r := by
   intro h
   obtain ⟨shape, dom, props, vocab⟩ := r
-  cases shape <;> simp only [Shape.Idle] at hIdle <;>
-    exact (goals_singleton _).mp h w hIdle hw
+  cases shape with
+  | value => exact hIdle.elim
+  | function => exact hIdle.elim
+  | step => exact (goals_singleton _).mp h w hIdle hw
+  | stepOn => exact (goals_singleton _).mp h w hIdle hw
+  | action => exact (goals_singleton _).mp h w hIdle hw
+  | actionOn => exact (goals_singleton _).mp h w hIdle hw
+  | bundle => exact h.2.2.1 w hIdle hw
+
+/-- A free function of a description, whose results include some value, ignores its input in some
+subject: the subject that gives the constant function of that value. -/
+theorem Shape.exists_ignores {m : Member W} (hFree : ∀ f : m.In → m.Out, ∃ w, m.get w = f)
+    (b : m.Out) : ∃ w, m.Ignores w :=
+  let ⟨w, hw⟩ := hFree fun _ => b
+  ⟨w, fun x y => by rw [hw]⟩
+
+/-- O4 asks something real of a description made of functions: a record with no hypothesis and no
+property, which every subject meets, fails it, wherever the first function can return a value. So
+neither an empty list of functions nor a decoy whose behaviour never varies meets O4 vacuously. -/
+theorem not_o4_bundle_of_trivial {D : Type u} {data : W → D} {first : Member W}
+    {rest : List (Member W)} {vocab : List Pred.{u}} (b : first.Out) :
+    ¬ O4 (⟨.bundle data first rest, [], [], vocab⟩ : IntentRecord W) := by
+  intro h
+  obtain ⟨w, hw⟩ := Shape.exists_ignores (fun f => h.2.1 first (List.mem_cons_self ..) f) b
+  exact h.2.2.1 w ⟨first, List.mem_cons_self .., hw⟩
+    ⟨(fun _ hd => nomatch hd), fun _ hp => nomatch hp⟩
+
+/-- A function of a description that takes at most one input always ignores it, so O4 and a model of
+the record cannot both hold of a record with such a function: a plain value belongs in the
+description's `data`. -/
+theorem no_model_of_o4_bundle_subsingleton {D : Type u} {data : W → D} {first : Member W}
+    {rest : List (Member W)} {r : IntentRecord W} (hs : r.shape = .bundle data first rest)
+    {m : Member W} (hm : m ∈ first :: rest) (hIn : ∀ x y : m.In, x = y) (h : O4 r) (w : W) :
+    ¬ r.Meets w := by
+  obtain ⟨shape, dom, props, vocab⟩ := r
+  cases hs
+  exact h.2.2.1 w ⟨m, hm, fun x y => by rw [hIn x y]⟩
 
 /-! ## O5, determinate or confirmed freedom -/
 
