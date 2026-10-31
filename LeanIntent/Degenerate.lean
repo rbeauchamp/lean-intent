@@ -901,7 +901,8 @@ theorem not_meets_of_metBy_eq_nil {r : IntentRecord W} {bs : List Bool} (h : Ver
 /-- The name a degenerate subject's consequence is read by: what kind of member it is. -/
 def Degenerate.name {σ : Sig} : Degenerate σ → String
   | .const _ => "the record allows a subject that returns one value whatever its arguments"
-  | .proj _ => "the record allows a subject that returns one of its arguments, or a part of one"
+  | .proj _ => "the record allows a subject that returns one of its arguments, what a function among \
+      them returns, or a part of either"
   | .others => "the record allows a subject that returns one value whatever its arguments, at some \
       value other than the empty one"
 
