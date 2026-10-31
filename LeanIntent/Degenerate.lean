@@ -38,7 +38,8 @@ code is a `Sig`. Its degenerate subjects (`Sig.degenerate`) are:
   taking a function, `fun f n => f n`.
 
 `Sig.mem_degenerate_iff` states the membership of the class apart from the list that computes it,
-and `Degenerate.apply_fn` what each member returns, apart from how it is built. No class is empty
+and `Fn.apply_const` and `ArgProj.apply_fn` what a constant and a projection return, apart from how
+each is built. No class is empty
 (`Sig.degenerate_ne_nil`), so a record is never checked against nothing, and every class has at most
 `Ty.listBound` members besides its projections (`Sig.length_degenerate_le`).
 
@@ -52,8 +53,11 @@ value, whose class would hold no projection. Each code carries the isomorphism t
 for its type and the proof that both are those the library fixes (`Ty.Stands`, `Sig.Stands`): the
 identity for a type built only from those `Ty` builds in, and for a type the project declares, the
 code and isomorphism its deriving handler writes from the declaration, which rests on what
-`LeanIntent.Declared` states. Each degenerate subject is a value of `W`, its member carried back
-through that isomorphism (`Degenerate.subject`, `Degenerate.iso_subject`). A type with no code is
+`LeanIntent.Declared` states. A subject is a value of `W`, carried back through that isomorphism from
+a value of the output type or from a projection (`Degenerate.constantSubject`,
+`Degenerate.projSubject`). A member stands for one such subject, or `.others` for many
+(`Degenerate.Is`), so no function takes a member and returns one subject: `Degenerate.reading` reads
+a member as the subject it names or as the group of other constants. A type with no code is
 not covered: no `Covered W` instance exists, so Lean reports that it cannot synthesize one, and no
 verdict about the class of `W` can be stated. Among such types are dependent functions, `Fin 0` and
 `Fin n` for a variable `n`, and every type constrained by proofs, indices or value parameters other
@@ -66,8 +70,10 @@ subject it stands for (`Degenerate.Is`) meets `r` (`Degenerate.Meets`): `true` t
 that none does, as goals the agent proves (`verdicts`), so
 each verdict is a theorem Lean's kernel checks, never the result of running code. The verdicts are
 part of the theorem's statement, and a list of the wrong length is refused (`verdicts_correct`).
-`metBy W bs` lists the degenerate subjects the verdicts say meet the record, which are exactly those
-that do (`mem_metBy`). `possibilities h`, from a proof `h : Verdicts r bs`, reports each as a
+`metBy W bs` lists the members the verdicts say meet the record, which are exactly those that do
+(`mem_metBy`). Mapped through `Degenerate.reading`, that list shows each subject it names, which meets
+the record (`meets_of_subject_mem_metBy`), and shows the other constants as a group exactly when some
+one of them meets it (`otherConstants_mem_metBy_iff`). `possibilities h`, from a proof `h : Verdicts r bs`, reports each as a
 `Consequence` of kind possibility, the predicate that the subject is one the member stands for
 (`Degenerate.consequence`), which holds of the record as it is shown (`possibilities_holdsOf`), so
 it can be shown with the record (`LeanIntent.Shown`) and an answer to it stored and kept by
@@ -379,25 +385,6 @@ inductive Degenerate (σ : Sig) where
   value. -/
   | others
 
-/-- The degenerate subject a description stands for. `.others` stands for many (`Degenerate.Is`, which
-the verdicts read), and only its place in a listing is held by the constant at the empty value. -/
-def Degenerate.fn {σ : Sig} : Degenerate σ → σ.denote
-  | .const v => Fn.const σ.out v σ.args
-  | .proj p => p.fn
-  | .others => Fn.const σ.out σ.out.empty σ.args
-
-/-- Each degenerate subject returns the value its description says: a constant its value, and a
-projection the component it selects. -/
-theorem Degenerate.apply_fn {σ : Sig} (d : Degenerate σ) (xs : Args σ.args) :
-    d.fn.apply xs = match d with
-      | .const v => v
-      | .proj p => p.read xs
-      | .others => σ.out.empty := by
-  cases d with
-  | const v => exact Fn.apply_const v σ.args xs
-  | proj p => exact ArgProj.apply_fn p xs
-  | others => exact Fn.apply_const _ σ.args xs
-
 /-- The constant members of the class: the constant function at each value of the output type's part
 where `count` is at most `Ty.listBound`; and otherwise the constant at its empty value, the empty
 output, and all the other constants the rule `Ty.Small` admits as one member. -/
@@ -491,8 +478,8 @@ theorem length_degenerate_le (σ : Sig) :
 
 /-- The identity of a function of one argument to its own type is in the class. -/
 theorem identity_mem (t : Ty) :
-    ∃ d ∈ (⟨[t], t⟩ : Sig).degenerate, d.fn = fun x => x :=
-  ⟨.proj (.here (.self t)), proj_mem _, rfl⟩
+    ∃ p : ArgProj t [t], Degenerate.proj p ∈ (⟨[t], t⟩ : Sig).degenerate ∧ p.fn = fun x => x :=
+  ⟨.here (.self t), proj_mem _, rfl⟩
 
 /-- Where the output type has infinitely many values, so has the type infinitely many constant
 functions: an injection from `Nat` to its subjects, each of which returns one value whatever its
@@ -668,19 +655,44 @@ instance {α : Type} [h : HasCode α] : Covered α :=
 takes no record, so it is the same for every record about `W`. -/
 def degenerate (W : Type) [c : Covered W] : List (Degenerate c.sig) := c.sig.degenerate
 
-/-- The subject of type `W` a description stands for: the member, carried back to `W` through the
-isomorphism by which `W`'s code stands for `W`. `.others` stands for many subjects
-(`Degenerate.Is`), and here for the constant at the empty value, which holds its place in a listing
-and is no subject of it. -/
-def Degenerate.subject {W : Type} [c : Covered W] (d : Degenerate c.sig) : W := c.iso.inv d.fn
+/-- The constant subject of type `W` at the value `v`, carried back to `W` through the isomorphism by
+which `W`'s code stands for `W`. It takes a value and no member, so it cannot be given a member
+standing for many subjects. -/
+def Degenerate.constantSubject {W : Type} [c : Covered W] (v : c.sig.out.denote) : W :=
+  c.iso.inv (Fn.const c.sig.out v c.sig.args)
 
-/-- The subject is the member itself, carried to `W` through the isomorphism that `Sig.Stands` fixes:
-for a type built only from those `Ty` builds in, the identity, so that no code can mis-encode such a
-type; and for a type the project declares, the isomorphism its deriving handler writes from the
-declaration (`LeanIntent.Declared`, which states what that rests on). -/
-theorem Degenerate.iso_subject {W : Type} [c : Covered W] (d : Degenerate c.sig) :
-    c.iso.to d.subject = d.fn :=
-  c.iso.to_inv d.fn
+/-- The subject of type `W` that returns the component the path `p` selects, carried back to `W` as
+`Degenerate.constantSubject` is. -/
+def Degenerate.projSubject {W : Type} [c : Covered W] (p : ArgProj c.sig.out c.sig.args) : W :=
+  c.iso.inv p.fn
+
+/-- The constant subject is the constant function, carried to `W` through the isomorphism that
+`Sig.Stands` fixes: for a type built only from those `Ty` builds in, the identity, so that no code can
+mis-encode such a type; and for a type the project declares, the isomorphism its deriving handler
+writes from the declaration (`LeanIntent.Declared`, which states what that rests on). -/
+theorem Degenerate.iso_constantSubject {W : Type} [c : Covered W] (v : c.sig.out.denote) :
+    c.iso.to (Degenerate.constantSubject v : W) = Fn.const c.sig.out v c.sig.args :=
+  c.iso.to_inv _
+
+/-- The projection subject is the projection, carried to `W` through the same isomorphism. -/
+theorem Degenerate.iso_projSubject {W : Type} [c : Covered W] (p : ArgProj c.sig.out c.sig.args) :
+    c.iso.to (Degenerate.projSubject p : W) = p.fn :=
+  c.iso.to_inv _
+
+/-- What a member of the class says of `W`'s subjects: the one subject it stands for, or that it
+stands for the group of constants other than the one at the empty value. -/
+inductive Degenerate.Reading (W : Type) where
+  /-- The one subject the member stands for. -/
+  | subject (w : W)
+  /-- The group of constants `.others` stands for, of which it names none. -/
+  | otherConstants
+
+/-- A member of the class read as what it says of `W`'s subjects. It is total, so reading a list keeps
+every member, a group among them. -/
+def Degenerate.reading {W : Type} [c : Covered W] : Degenerate c.sig → Degenerate.Reading W
+  | .const v => .subject (Degenerate.constantSubject v)
+  | .proj p => .subject (Degenerate.projSubject p)
+  | .others => .otherConstants
 
 /-- No covered type's class is empty, so no record is checked against nothing. -/
 theorem degenerate_ne_nil (W : Type) [Covered W] : degenerate W ≠ [] := Sig.degenerate_ne_nil _
@@ -692,21 +704,21 @@ section Verdicts
 variable {W : Type} [c : Covered W]
 
 /-- `w` is a subject the description `d` stands for: for `.others`, the constant function at a value
-of the rule `Ty.Small` other than the output type's empty value, and otherwise `d`'s subject. -/
+of the rule `Ty.Small` other than the output type's empty value, and otherwise the one subject `d`
+stands for. -/
 def Degenerate.Is (d : Degenerate c.sig) (w : W) : Prop :=
   match d with
-  | .const v => w = (Degenerate.const v : Degenerate c.sig).subject
-  | .proj p => w = (Degenerate.proj p : Degenerate c.sig).subject
-  | .others => ∃ v, c.sig.out.Small v ∧ v ≠ c.sig.out.empty ∧
-      w = (Degenerate.const v : Degenerate c.sig).subject
+  | .const v => w = Degenerate.constantSubject v
+  | .proj p => w = Degenerate.projSubject p
+  | .others => ∃ v, c.sig.out.Small v ∧ v ≠ c.sig.out.empty ∧ w = Degenerate.constantSubject v
 
 /-- A subject the description `d` stands for meets `r`. For a member standing for one subject this is
 that subject meeting `r`; for `.others`, some constant among them does, which a proof states of all
 of them at once, so that no value of the type is enumerated. -/
 def Degenerate.Meets (d : Degenerate c.sig) (r : IntentRecord W) : Prop :=
   match d with
-  | .const v => r.Meets (Degenerate.const v : Degenerate c.sig).subject
-  | .proj p => r.Meets (Degenerate.proj p : Degenerate c.sig).subject
+  | .const v => r.Meets (Degenerate.constantSubject v)
+  | .proj p => r.Meets (Degenerate.projSubject p)
   | .others => ∃ w, (Degenerate.others : Degenerate c.sig).Is w ∧ r.Meets w
 
 theorem Degenerate.meets_iff (d : Degenerate c.sig) (r : IntentRecord W) :
@@ -714,11 +726,28 @@ theorem Degenerate.meets_iff (d : Degenerate c.sig) (r : IntentRecord W) :
   cases d with
   | const v =>
     refine ⟨fun h => ⟨_, rfl, h⟩, fun ⟨w, e, h⟩ => ?_⟩
-    rwa [show w = (Degenerate.const v : Degenerate c.sig).subject from e] at h
+    rwa [show w = Degenerate.constantSubject v from e] at h
   | proj p =>
     refine ⟨fun h => ⟨_, rfl, h⟩, fun ⟨w, e, h⟩ => ?_⟩
-    rwa [show w = (Degenerate.proj p : Degenerate c.sig).subject from e] at h
+    rwa [show w = Degenerate.projSubject p from e] at h
   | others => exact Iff.rfl
+
+/-- A reading that names a subject names the one subject the member stands for. -/
+theorem Degenerate.is_of_reading_eq_subject {d : Degenerate c.sig} {w : W}
+    (h : d.reading = .subject w) : d.Is w ∧ ∀ w', d.Is w' → w' = w := by
+  cases d with
+  | const v =>
+    obtain rfl := Degenerate.Reading.subject.inj h
+    exact ⟨rfl, fun _ e => e⟩
+  | proj p =>
+    obtain rfl := Degenerate.Reading.subject.inj h
+    exact ⟨rfl, fun _ e => e⟩
+  | others => exact Degenerate.Reading.noConfusion h
+
+/-- The only member read as the group is `.others`. -/
+theorem Degenerate.reading_eq_otherConstants_iff (d : Degenerate c.sig) :
+    d.reading = (.otherConstants : Degenerate.Reading W) ↔ d = .others := by
+  cases d <;> simp [Degenerate.reading]
 
 /-- The goal that `b` is the verdict on the member `d` for `r`: that a subject of `d` meets `r` when
 `b` is `true`, and that none does when `b` is `false`. -/
@@ -781,7 +810,7 @@ def metByGo : List (Degenerate c.sig) → List Bool → List (Degenerate c.sig)
   | _ :: ds, false :: bs => metByGo ds bs
   | _, _ => []
 
-/-- The degenerate subjects of `W` whose verdict in `bs` is that they meet the record. -/
+/-- The members of the class of `W` whose verdict in `bs` is that they meet the record. -/
 def metBy (W : Type) [c : Covered W] (bs : List Bool) : List (Degenerate c.sig) :=
   metByGo (degenerate W) bs
 
@@ -809,22 +838,45 @@ theorem mem_metByGo (r : IntentRecord W) (d : Degenerate c.sig) : (ds : List (De
         · exact absurd hm hv
         · exact ⟨hd, hm⟩
 
-/-- The degenerate subjects the verdicts report are exactly those that meet the record. -/
+/-- The members the verdicts report are exactly those a subject of which meets the record. -/
 theorem mem_metBy {r : IntentRecord W} {bs : List Bool} (h : Verdicts r bs)
     (d : Degenerate c.sig) : d ∈ metBy W bs ↔ d ∈ degenerate W ∧ d.Meets r :=
   mem_metByGo r d _ bs h
 
-/-- The verdicts report no degenerate subject exactly when none meets the record. -/
+/-- The verdicts report no member exactly when no subject of any member meets the record. -/
 theorem metBy_eq_nil_iff {r : IntentRecord W} {bs : List Bool} (h : Verdicts r bs) :
     metBy W bs = [] ↔ ∀ d ∈ degenerate W, ¬ d.Meets r := by
   rw [List.eq_nil_iff_forall_not_mem]
   exact forall_congr' fun d => by rw [mem_metBy h]; exact not_and
 
+/-- A subject named in the reading of what the proved verdicts report meets the record. -/
+theorem meets_of_subject_mem_metBy {r : IntentRecord W} {bs : List Bool} (h : Verdicts r bs) {w : W}
+    (hw : Degenerate.Reading.subject w ∈ (metBy W bs).map Degenerate.reading) : r.Meets w := by
+  obtain ⟨d, hd, e⟩ := List.mem_map.mp hw
+  obtain ⟨w', hi, hm⟩ := (d.meets_iff r).mp ((mem_metBy h d).mp hd).2
+  rwa [(Degenerate.is_of_reading_eq_subject e).2 w' hi] at hm
+
+/-- Under proved verdicts, the reading of what they report shows the group of other constants exactly
+when the class holds that member and one of those constants meets the record, so a group that meets
+it is never dropped from the reading, and one that does not is never shown. -/
+theorem otherConstants_mem_metBy_iff {r : IntentRecord W} {bs : List Bool} (h : Verdicts r bs) :
+    Degenerate.Reading.otherConstants ∈ (metBy W bs).map Degenerate.reading ↔
+      Degenerate.others ∈ degenerate W ∧ ∃ v, c.sig.out.Small v ∧ v ≠ c.sig.out.empty ∧
+        r.Meets (Degenerate.constantSubject v) := by
+  constructor
+  · intro hw
+    obtain ⟨d, hd, e⟩ := List.mem_map.mp hw
+    obtain rfl := (Degenerate.reading_eq_otherConstants_iff d).mp e
+    obtain ⟨ho, w, ⟨v, hs, hn, rfl⟩, hm⟩ := (mem_metBy h _).mp hd
+    exact ⟨ho, v, hs, hn, hm⟩
+  · rintro ⟨ho, v, hs, hn, hm⟩
+    exact List.mem_map.mpr ⟨.others, (mem_metBy h _).mpr ⟨ho, _, ⟨v, hs, hn, rfl⟩, hm⟩, rfl⟩
+
 /-- Every constant function at a value of the rule `Ty.Small` is a subject of a member of the class,
 however many values the output type has, so a class that lists its constants and one that does not
 differ only in how many verdicts state them. -/
 theorem constant_covered {v : c.sig.out.denote} (hv : c.sig.out.Small v) :
-    ∃ d ∈ degenerate W, d.Is (Degenerate.const v : Degenerate c.sig).subject := by
+    ∃ d ∈ degenerate W, d.Is (Degenerate.constantSubject v) := by
   by_cases hc : c.sig.out.count ≤ Ty.listBound
   · exact ⟨.const v, Sig.const_mem_of_small hc hv, rfl⟩
   · by_cases he : v = c.sig.out.empty
@@ -835,7 +887,7 @@ theorem constant_covered {v : c.sig.out.denote} (hv : c.sig.out.Small v) :
 /-- Where the output type has finitely many values, the constant function at every one of them is a
 subject of a member of the class, whether or not they are listed. -/
 theorem constant_covered_of_finite (h : c.sig.out.finite = true) (v : c.sig.out.denote) :
-    ∃ d ∈ degenerate W, d.Is (Degenerate.const v : Degenerate c.sig).subject :=
+    ∃ d ∈ degenerate W, d.Is (Degenerate.constantSubject v) :=
   constant_covered (Ty.small_of_finite _ h v)
 
 /-- Proved verdicts that report nothing refute every subject of every member: no constant the rule
@@ -864,8 +916,8 @@ theorem Degenerate.declined_keptBy_iff (d : Degenerate c.sig) (r : IntentRecord 
   simp only [Answer.KeptBy, Degenerate.consequence, d.meets_iff]
   exact ⟨fun h ⟨w, hi, hm⟩ => h w hm hi, fun h w hm hi => h ⟨w, hi, hm⟩⟩
 
-/-- The consequences reported: one for each degenerate subject the proved verdicts
-`bs` say meets the record, in order. It takes the proof of the verdicts, so no report exists for
+/-- The consequences reported: one for each member the proved verdicts `bs` say meets the record, in
+order. It takes the proof of the verdicts, so no report exists for
 verdicts that are not proved. -/
 def possibilities {r : IntentRecord W} {bs : List Bool} (_ : Verdicts r bs) : List (Consequence W) :=
   (metBy W bs).map Degenerate.consequence

@@ -9,7 +9,8 @@ projections (`hash_length`, `hash_subjects`). The verdict on the other constants
 all of them, so nothing enumerates the type: a record that asks the result to vary with the arguments
 refutes them all at once and is met by each projection (`varies_verdicts`), and a record met only by
 the constant at 42, a subject no fixed sample of values need contain, is reported through that member
-(`fortyTwo_verdicts`, `fortyTwo_possibilities`).
+(`fortyTwo_verdicts`, `fortyTwo_possibilities`), and read from the verdicts as that group, so it names
+no subject the verdicts exclude (`fortyTwo_metBy`).
 
 A function from a clock to `Fin 8`, with at most `Ty.listBound` values, has the constant at each of
 the eight values and no projection, since no field has type `Fin 8` (`phase_subjects`); a record that
@@ -30,12 +31,12 @@ abbrev Hash := UInt64 → UInt64 → UInt64 → UInt64
 /-- The class of `Hash` has five members, whatever the number of values of `UInt64`. -/
 theorem hash_length : (degenerate Hash).length = 5 := rfl
 
-/-- Its members standing for one subject: the constant at zero, then the projections; the second
-member's place in this listing is held by the constant at zero, and it stands for all the others
-(`Degenerate.Is`). -/
+/-- Its members, read: the constant at zero, all the other constants as a group, and the
+projections. -/
 theorem hash_subjects :
-    (degenerate Hash).map Degenerate.subject =
-      [fun _ _ _ => 0, fun _ _ _ => 0, fun a _ _ => a, fun _ b _ => b, fun _ _ c => c] := rfl
+    (degenerate Hash).map Degenerate.reading =
+      [.subject fun _ _ _ => 0, .otherConstants, .subject fun a _ _ => a, .subject fun _ b _ => b,
+        .subject fun _ _ c => c] := rfl
 
 /-- Every one of the `2 ^ 64` constants is a subject of a member of the class. -/
 theorem hash_constant_covered (v : UInt64) :
@@ -97,6 +98,11 @@ theorem fortyTwo_possibilities :
     (possibilities fortyTwo_verdicts).map Consequence.holds =
       [(Degenerate.others : Degenerate (Covered.sig (W := Hash))).Is] := rfl
 
+/-- Read from the verdicts, what meets `fortyTwo` is the group of other constants, which holds the
+constant at 42, and not the constant at zero. -/
+theorem fortyTwo_metBy :
+    (metBy Hash [false, true, false, false, false]).map Degenerate.reading = [.otherConstants] := rfl
+
 /-- A clock and the length of its day. -/
 structure Clock where
   /-- The steps since the start. -/
@@ -108,9 +114,9 @@ structure Clock where
 /-- The class of a function from clocks to phases: the constant at each phase, and no projection,
 since no field has type `Fin 8`. -/
 theorem phase_subjects :
-    (degenerate (Clock → Fin 8)).map Degenerate.subject =
-      [fun _ => 0, fun _ => 1, fun _ => 2, fun _ => 3, fun _ => 4, fun _ => 5, fun _ => 6,
-        fun _ => 7] := rfl
+    (degenerate (Clock → Fin 8)).map Degenerate.reading =
+      [.subject fun _ => 0, .subject fun _ => 1, .subject fun _ => 2, .subject fun _ => 3,
+        .subject fun _ => 4, .subject fun _ => 5, .subject fun _ => 6, .subject fun _ => 7] := rfl
 
 /-- Every phase is reached. -/
 def reachesAll : IntentRecord (Clock → Fin 8) where

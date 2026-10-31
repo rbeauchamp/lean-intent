@@ -54,7 +54,8 @@ theorem advances_o4 : O4 advances := by
 infinitely many and the class takes a numeric constant only at zero, and the step that does
 nothing, the identity. -/
 theorem degenerate_subjects :
-    (degenerate (Nat → Nat)).map Degenerate.subject = [fun _ => 0, fun n => n] := rfl
+    (degenerate (Nat → Nat)).map Degenerate.reading = [.subject fun _ => 0, .subject fun n => n] :=
+  rfl
 
 /-- The step that does nothing meets `neverDecreases` and the step to zero does not, so the check
 reports the step that does nothing. -/
@@ -83,6 +84,6 @@ theorem neverDecreasesAsValue_verdicts : Verdicts neverDecreasesAsValue [false, 
   neverDecreases_verdicts
 
 theorem neverDecreasesAsValue_metBy :
-    (metBy (Nat → Nat) [false, true]).map Degenerate.subject = [fun n => n] := rfl
+    (metBy (Nat → Nat) [false, true]).map Degenerate.reading = [.subject fun n => n] := rfl
 
 end LeanIntentExamples.Counter

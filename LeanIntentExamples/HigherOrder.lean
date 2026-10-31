@@ -26,8 +26,9 @@ open LeanIntent
 
 /-- The class of a function that takes a function and a number. -/
 theorem apply_subjects :
-    (degenerate ((Nat → Nat) → Nat → Nat)).map Degenerate.subject =
-      [fun _ _ => 0, fun f _ => f 0, fun f n => f n, fun _ n => n] := rfl
+    (degenerate ((Nat → Nat) → Nat → Nat)).map Degenerate.reading =
+      [.subject fun _ _ => 0, .subject fun f _ => f 0, .subject fun f n => f n,
+        .subject fun _ n => n] := rfl
 
 /-- The subject applies its function to its argument. -/
 def applies : IntentRecord ((Nat → Nat) → Nat → Nat) where
@@ -66,9 +67,9 @@ theorem handler_code :
 /-- The class reaches the function through its field and applies it to the empty value, to the
 structure's other number and to the argument. -/
 theorem handler_subjects :
-    (degenerate (Handler → Nat → Nat)).map Degenerate.subject =
-      [fun _ _ => 0, fun h _ => h.run 0, fun h _ => h.run h.limit, fun h n => h.run n,
-        fun h _ => h.limit, fun _ n => n] := rfl
+    (degenerate (Handler → Nat → Nat)).map Degenerate.reading =
+      [.subject fun _ _ => 0, .subject fun h _ => h.run 0, .subject fun h _ => h.run h.limit,
+        .subject fun h n => h.run n, .subject fun h _ => h.limit, .subject fun _ n => n] := rfl
 
 /-- A function inside the output has the constant at the empty value and the others, and no
 projection, since no argument holds that output. -/
@@ -91,7 +92,7 @@ theorem nat_infinite : (Ty.arrow .nat .bool).finite = false := rfl
 
 /-- The class of a function of lists of functions: the empty list, and the identity. -/
 theorem list_subjects :
-    (degenerate (List (Nat → Nat) → List (Nat → Nat))).map Degenerate.subject =
-      [fun _ => [], fun l => l] := rfl
+    (degenerate (List (Nat → Nat) → List (Nat → Nat))).map Degenerate.reading =
+      [.subject fun _ => [], .subject fun l => l] := rfl
 
 end LeanIntentExamples.HigherOrder
