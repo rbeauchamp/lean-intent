@@ -4,9 +4,9 @@
 # has no tests. Every claim the library makes about itself is a theorem Lean's kernel checks, and
 # tools/check.lean is the repository's one check program: it builds the library with warnings as
 # errors, audits the axioms every declaration rests on and the runtime functions its compiled code
-# calls, and with --tests it lists the repository's tests. no-mistakes honours `test.instructions`, `test.no_surface` and
-# `test.tests_as_evidence` only from the copy of this file on the default branch, so a change to
-# any of them governs the runs that follow its merge.
+# calls, and with --tests it lists the repository's tests. no-mistakes honours `test.instructions`,
+# `test.no_surface` and `test.tests_as_evidence` only from the copy of this file on the default
+# branch, so a change to any of them governs the runs that follow its merge.
 #
 # Memory. Lean work runs through `no-mistakes admit` with a bound above its peak, so that it waits
 # until the bound fits the machine's memory budget beside all other admitted work. Measured on

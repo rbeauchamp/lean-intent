@@ -24,7 +24,9 @@ it, never by reading source text by hand:
   the target's globs over the working tree, as a build of the target does);
 * each file's module name, from Lean (`moduleNameOfFileName`), and its build, from Lake;
 * the axioms each declaration rests on, from Lean (`collectAxioms`) over the environment Lean
-  imports from the built modules.
+  imports from the built modules;
+* the compiled code of each declaration and what it uses, from Lean (`Lean.IR.findEnvDecl`,
+  `Lean.IR.collectUsedDecls`) over that environment.
 
 The rules:
 
