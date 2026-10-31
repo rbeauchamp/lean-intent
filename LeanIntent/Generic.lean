@@ -5,8 +5,8 @@ import LeanIntent.Progress
 
 A record may be generic: a family of records, one for each value of its parameters, such as the types
 a world is made of (`Family`). Checking or rendering such a record at representative parameters is
-often what a project can afford, and an obligation of a generic record is usually true only of
-parameters with some witnesses (an action, four different sights, two energy amounts in order).
+often what a project can afford, and an obligation of a generic record is usually proved only of
+parameters with some witnesses (such as an action, different sights, energy amounts in order).
 
 This module fixes what an instance says about the family, for every obligation, stated as a predicate
 `O` on the record of each parameter, so that it holds of O2, O2 before running, O3, O4 and O5 alike:
@@ -26,8 +26,8 @@ This module fixes what an instance says about the family, for every obligation, 
   exactly that instance would make it enough, and a transfer along a map of models
   (`Family.o2Run_along`) is what carries a model of one instance to another parameter.
 
-So a representative instance is a check that can find a counterexample and a reading aid, and never a
-proof of the generic record.
+So a representative instance is a check that can find a counterexample and a reading aid, and alone
+not in general a proof of the generic record.
 -/
 
 namespace LeanIntent

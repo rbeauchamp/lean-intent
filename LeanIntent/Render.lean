@@ -18,7 +18,7 @@ release whose libraries those are (`toolchain`). A rendering prints in one of tw
 readable, the default, with Lean's notation and without what Lean infers, or exact, with every
 implicit argument, by the audited printer. `answerText` gives the canonical text of one
 attributed answer to an explanation in the same way: who gave it and the answer printed exactly; the
-explanation's name and its record's statements and consequences, as the rendering prints them
+explanation's name and its record's statements and consequences, as the exact form prints them
 (`recordPart`); every declaration the record's meaning and the answer reach, printed in full; and the
 toolchain. `#render_intent e` shows the rendering of the explanation `e`, `#render_intent_exact e`
 the same in the exact form, `#render_intent_at e a₁ … aₙ` the rendering of a generic explanation at
@@ -742,8 +742,9 @@ def instanceNote (f : Name) : String :=
   s!"These are the statements of {f} with its parameters replaced by these values, read from {f} \
     applied to them, and they speak of these values only. An obligation proved here shows only that \
     some parameter has it (`{``LeanIntent.Family.exists_of_at}`), a failure here refutes a generic \
-    claim (`{``LeanIntent.Family.not_holdsWhere_of_at}`), and no obligation of a family follows from \
-    an instance: `{``LeanIntent.Family.not_generic}` gives, for each, a family of which it holds at \
+    claim whose condition admits these values (`{``LeanIntent.Family.not_holdsWhere_of_at}`), and \
+    an instance alone does not in general prove an obligation of a family: \
+    `{``LeanIntent.Family.not_generic}` gives, for each, a family of which it holds at \
     one parameter and fails at another.\n\n"
 
 /-- One binder of a generic explanation, `x`, written as a binder is, by the reader. -/
@@ -911,8 +912,8 @@ def renderAt (decl : Name) (us : List Level) (args : Array Expr) : MetaM String 
 the explanation `ex`, a constant of type `LeanIntent.Explanation r`: who gave it
 (`Answerer.title`, `Answerer.says`), and the answer printed exactly, with its consequence's name,
 kind and predicate and its verdict, each reduced to its constructor or literal; then the name of
-`ex` and its record part (`recordPart`), the record's statements and the consequences shown, as its
-rendering prints them; then every declaration the record part and the
+`ex` and its record part (`recordPart`), the record's statements and the consequences shown, as the
+exact form prints them; then every declaration the record part and the
 answer reach, `LeanIntent.Answer.KeptBy`'s among them, which says what the answer asks of every
 later revision, each printed in full by one call of `definitions`; and the toolchain. An error,
 naming what cannot be printed, when any of it cannot be. -/

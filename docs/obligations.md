@@ -4,7 +4,7 @@
 
 Modules: `LeanIntent/Obligations.lean`, and `LeanIntent/Progress.lean` for the progress theorem. A record generic in a world's types has [a document of its own](generic-records.md).
 
-**Complete in this version:** the five obligations with their goal formers and correctness theorems, and the progress theorem (the obligations refuse no record with content).
+**Complete in this version:** the five obligations with their goal formers and correctness theorems, and the progress theorem (the obligations refuse no record with content and a sound shape).
 
 | Obligation | What it asks of a record `r` | Former and correctness theorem |
 |---|---|---|
@@ -36,7 +36,7 @@ A property such as "no fixed rule keeps every spot", over every input of a 64-bi
 3. Separate the variables: a sum of functions of one input each keeps its value only if each input's own difference is constant (`separate`), so the property over all rules reduces to one statement about one input.
 4. Reduce that statement to finitely many words by algebra (`rigid_flip`, `rigid_add`), and let Lean's kernel refute those at a few inputs (`table`, 288 evaluations). Nothing enumerates a 64-bit domain, and `native_decide` is not used, so the proof rests on Lean's axioms alone.
 
-**Resource bound.** The file checks under `lean -M 1024` with two threads; observed at Lean v4.35.0, it took under a second, 463 MB resident (most of it Lean's own files, mapped) and a physical footprint of 124 MB. The cost is that of the fixed number of words the proof names, whatever the width of the words it quantifies over.
+**Resource bound.** The file checks under `lean -M 1024` with two threads; observed at Lean v4.35.0, it took under a second, 463 MB resident (most of it Lean's own files, mapped) and a physical footprint of 124 MB. The argument reduces additive shifts to 32 candidates for each of nine pairs of places, rather than enumerating all 64-bit shifts; it makes no resource guarantee for other word widths.
 
 **What this establishes, and what it does not.** That the record does not contradict itself: some subject meets the whole of it. `model` is no hash function, and the theorem says nothing of a function a project runs. Whether that function meets the record is the implementation's own obligation (`IntentRecord.Fulfilled`), and in the Acorn pilot it stays open for the rules that shift two or more inputs (rbeauchamp/acorn#184).
 

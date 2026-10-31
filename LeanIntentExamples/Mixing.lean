@@ -26,9 +26,9 @@ built to make the proof short, not the mixing function the project runs. This fi
    the amount is below 32, which leaves 32 words, each refuted by Lean's kernel at a few inputs
    (`table`).
 
-`hashes_o2Run` is the result. It rests on Lean's axioms alone, and nothing in it evaluates the record
-at more than a few dozen words, so its cost does not depend on the width of the words; the document
-states the bound it was measured under.
+`hashes_o2Run` is the result. It rests on Lean's axioms alone. Algebra reduces the quantified shift
+domain to a finite check of 32 candidate additive shifts for each of nine pairs of places, rather
+than enumerating all 64-bit words; the document states the bound it was measured under.
 
 What this does not establish: that any function a project runs meets the record. `model` is no hash
 function, and `hashes_o2Run` says only that the record does not contradict itself. Whether a real

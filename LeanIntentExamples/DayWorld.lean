@@ -195,10 +195,10 @@ theorem dayCycle_refutes_dayOrNightOnly (c : Ctx) (lo hi : E) (o₁ o₂ : Obs) 
 
 /-! ## Adequacy
 
-The obligations need witnesses from the world's types: a situation and an action, four different
-sights, and two energy amounts of which the first is less than the second and not less than
-itself. Acorn's world has all of them; a world with no action, or with fewer than four sights,
-could not meet the record, and its obligations O2 and O3 are stated under those witnesses. -/
+The obligations below use witnesses from the world's types, each theorem stating which it needs:
+a situation and an action, sights, and energy amounts with the stated order properties. These are
+sufficient hypotheses, not necessary conditions for a model: `clockWorld_meets` requires no
+situation or action, and a two-tick day can distinguish its two occupied quarters with two sights. -/
 
 /-- O2: the record has a model of its (empty) domain hypotheses and an instance of each
 predicate of its vocabulary. -/
@@ -501,7 +501,7 @@ def dayCycleExplained (c : Ctx) (a : Act) {lo hi hi' : E} (hlt : lo < hi) (hlt' 
     ⟨seesQuarterOfDay, seesQuarterOfDay_holds,
       { requires := "From what it sees, the agent can always tell which quarter of the day it \
           is in."
-        rulesOut := "An agent that sees only day or night."
+        rulesOut := "An agent that sees only day or night, in a day longer than two ticks."
         allows := "Seeing a finer part of the day, or the exact tick."
         freedom := "How much finer than a quarter." }, .unsettled⟩,
     ⟨longDay, longDay_holds hlt hsight,
