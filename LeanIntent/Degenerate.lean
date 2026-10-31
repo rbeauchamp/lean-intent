@@ -742,7 +742,7 @@ theorem Degenerate.is_of_reading_eq_subject {d : Degenerate c.sig} {w : W}
   | proj p =>
     obtain rfl := Degenerate.Reading.subject.inj h
     exact ⟨rfl, fun _ e => e⟩
-  | others => exact Degenerate.Reading.noConfusion h
+  | others => cases h
 
 /-- The only member read as the group is `.others`. -/
 theorem Degenerate.reading_eq_otherConstants_iff (d : Degenerate c.sig) :
