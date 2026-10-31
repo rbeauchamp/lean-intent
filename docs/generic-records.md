@@ -20,7 +20,7 @@ The generic claim for an obligation `O` is `Family.HoldsWhere r Good O`: it hold
 | The obligation at an instance shows only that some parameter has it | `Family.exists_of_at` | proved |
 | A `Good` no parameter meets makes the generic claim hold of anything; an instance meeting `Good` shows it is not that | `Family.holdsWhere_of_empty`, `Family.not_vacuous` | proved |
 | A model at one parameter gives a model at another along a map that keeps meeting the record | `Family.o2Run_along` | proved |
-| **An obligation of a family does not in general follow from an instance** | `Family.not_generic`: for each of O2, O2 before running, O3, O4 and O5, a family of which it holds at one parameter and fails at another | proved |
+| **An obligation of a family does not in general follow from an instance** | `Family.not_generic`: for each of O2, O2 before running, O3, O4 and O5 with equality, a family of which it holds at one parameter and fails at another | proved |
 
 So an instance can find a counterexample, can show that a condition can be met, and can be read; alone, it does not in general prove the generic record. In the worked example, O4 holds at the representative types (`rep_o4`) and fails at a world with no situation (`dayCycle_not_o4_without_a_situation`), so what is proved of the family is that it holds at every world with the witnesses (`family_o4`, `Good`), of which the representative world is one (`rep_good`).
 
