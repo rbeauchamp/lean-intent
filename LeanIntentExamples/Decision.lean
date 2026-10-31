@@ -39,7 +39,8 @@ def decides : IntentRecord (Nat → Bool) where
 /-- The degenerate subjects of `Nat → Bool`: the constant function at each of `Bool`'s two
 values. -/
 theorem degenerate_subjects :
-    (degenerate (Nat → Bool)).map Degenerate.subject = [fun _ => false, fun _ => true] := rfl
+    (degenerate (Nat → Bool)).map Degenerate.reading =
+      [.subject fun _ => false, .subject fun _ => true] := rfl
 
 /-- The procedure that always answers `false` meets `soundOnly`; the one that always answers
 `true` does not. -/

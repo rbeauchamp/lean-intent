@@ -89,7 +89,8 @@ theorem labelled_code :
 /-- The degenerate subjects of a function from points to numbers: the constant at zero, then the
 projections onto the coordinates, in the order of the fields. -/
 theorem point_degenerate :
-    (degenerate (Point → Nat)).map Degenerate.subject = [fun _ => 0, fun p => p.x, fun p => p.y] :=
+    (degenerate (Point → Nat)).map Degenerate.reading =
+      [.subject fun _ => 0, .subject fun p => p.x, .subject fun p => p.y] :=
   rfl
 
 /-- The result is at least the first coordinate. -/
@@ -119,10 +120,12 @@ theorem atLeastX_possibilities :
 /-- The degenerate subjects of a function from lights to lights: the constant at each light, in the
 order of the constructors, and the identity. -/
 theorem light_degenerate :
-    (degenerate (Light → Light)).map Degenerate.subject =
-      [fun _ => .red, fun _ => .amber, fun _ => .green, fun l => l] := by
-  show [fun _ => Light.red, fun _ => Light.amber, fun _ => Light.green,
-    fun l => (HasCode.iso (α := Light)).inv ((HasCode.iso (α := Light)).to l)] = _
+    (degenerate (Light → Light)).map Degenerate.reading =
+      [.subject fun _ => .red, .subject fun _ => .amber, .subject fun _ => .green,
+        .subject fun l => l] := by
+  show [Degenerate.Reading.subject fun _ => Light.red, .subject fun _ => Light.amber,
+    .subject fun _ => Light.green,
+    .subject fun l => (HasCode.iso (α := Light)).inv ((HasCode.iso (α := Light)).to l)] = _
   simp only [Iso.inv_to]
 
 /-- Red follows green. -/
@@ -150,8 +153,8 @@ theorem afterGreen_verdicts : Verdicts afterGreen [true, false, false, false] :=
 /-- The degenerate subjects of a function from labelled points to numbers: the constant at zero,
 then the projections onto the coordinates of the point, reached through the field `pos`. -/
 theorem labelled_degenerate :
-    (degenerate (Labelled → Nat)).map Degenerate.subject =
-      [fun _ => 0, fun l => l.pos.x, fun l => l.pos.y] :=
+    (degenerate (Labelled → Nat)).map Degenerate.reading =
+      [.subject fun _ => 0, .subject fun l => l.pos.x, .subject fun l => l.pos.y] :=
   rfl
 
 end LeanIntentExamples.Declared

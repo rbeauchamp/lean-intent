@@ -181,7 +181,8 @@ theorem sorting_progress :
 returning the empty list, since lists are infinitely many and the class takes a list constant only
 at the empty list, and the identity, the one projection. -/
 theorem degenerate_subjects :
-    (degenerate (List Int → List Int)).map Degenerate.subject = [nilSort, fun l => l] := rfl
+    (degenerate (List Int → List Int)).map Degenerate.reading =
+      [.subject nilSort, .subject fun l => l] := rfl
 
 /-- The record that forgets the rearrangement property is met by the function returning the empty
 list and not by the identity. -/
@@ -193,8 +194,8 @@ theorem sortedOnly_verdicts : Verdicts sortedOnly [true, false] := by
 
 /-- So the check reports the function returning the empty list, as the possibility the owner is
 shown: "your specification allows returning the empty list for every input". -/
-theorem sortedOnly_metBy : (metBy (List Int → List Int) [true, false]).map Degenerate.subject =
-    [nilSort] := rfl
+theorem sortedOnly_metBy : (metBy (List Int → List Int) [true, false]).map Degenerate.reading =
+    [.subject nilSort] := rfl
 
 theorem sortedOnly_possibilities :
     (possibilities sortedOnly_verdicts).map Consequence.holds = [fun f => f = nilSort] := rfl

@@ -13,14 +13,14 @@
 # 2026-10-30 under Lean v4.35.0 as the largest sum of resident memory over the processes each ran,
 # sampled every 0.1 seconds, which counts the .olean files every Lean process maps and so bounds
 # their footprint from above, from a clean checkout, after this library's growth took the check
-# past its earlier bound: the check, with an empty artifact cache, 4.35 GiB; the listing, which
+# past its earlier bound: the check, with an empty artifact cache, 4.69 GiB; the listing, which
 # elaborates tools/check.lean against Lean and Lake and runs once per side, 4.76 GiB. Measure again
 # when the library grows or the toolchain changes, and raise a bound before a peak comes within 15%
 # of it.
 test:
   instructions: |
     On lean-intent this step is verification. A change's claims are established by machine-checked proof, by derivation and by reading; lean-intent has no running product to drive.
-    1. Run the repository's checks from the worktree root and cite the command and its exit status: no-mistakes admit --memory 6GiB --limit "none; measured peak 4.35 GiB" -- lean --run tools/check.lean. It exits 0 only when lakefile.toml requires no other package, Lake builds every library module with no error and no warning (a sorry is a warning), and every declaration of the library rests only on Lean's axioms propext, Classical.choice and Quot.sound. tools/check.lean's module comment says what each rule decides; claim no more than that.
+    1. Run the repository's checks from the worktree root and cite the command and its exit status: no-mistakes admit --memory 6GiB --limit "none; measured peak 4.69 GiB" -- lean --run tools/check.lean. It exits 0 only when lakefile.toml requires no other package, Lake builds every library module with no error and no warning (a sorry is a warning), and every declaration of the library rests only on Lean's axioms propext, Classical.choice and Quot.sound. tools/check.lean's module comment says what each rule decides; claim no more than that.
     2. Do not write, request or suggest a test, and do not improvise disposable break-it runs as evidence: lean-intent establishes its claims by theorems. A claim about what a theorem states is settled by reading its statement, binders and hypotheses included, never its docstring or name alone.
     3. Report each claim by how it was established: machine-checked (a Lean proof that the check above built; cite the theorem and the command's exit status), argued (by derivation or by reading; cite the file and lines), observed (executed in this run for this claim), assumed (a hypothesis the change relies on; say why it is trusted) or open (not established; say what would establish it and which issue tracks it).
   # lean-intent has no running product; proof, its check and reading settle its claims.
@@ -82,7 +82,7 @@ commands:
     set -eu
     export LAKE_CACHE_DIR="$PWD/.lake/cache"
     unset LAKE_ARTIFACT_CACHE
-    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.35 GiB" -- lean --run tools/check.lean
+    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.69 GiB" -- lean --run tools/check.lean
     mkdir -p .lake
     no-mistakes admit --memory 6GiB --limit "none; measured peak 4.76 GiB" -- lean --run tools/check.lean --tests > .lake/tests-listing
     if [ -s .lake/tests-listing ]; then
@@ -103,7 +103,7 @@ commands:
 # Test command needs no such setting, because Lake restores every output it takes from a cache it
 # only reads.
 build_outputs:
-  command: no-mistakes admit --memory 6GiB --limit "none; measured peak 4.35 GiB" -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true lean --run tools/check.lean
+  command: no-mistakes admit --memory 6GiB --limit "none; measured peak 4.69 GiB" -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true lean --run tools/check.lean
   directories:
     - .lake/cache
   toolchain_files:
