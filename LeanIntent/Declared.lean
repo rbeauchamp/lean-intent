@@ -26,7 +26,8 @@ and writes:
 
 So a declared type's empty value is its first constructor applied to the empty values of its
 fields, the class takes constants at each constructor applied to each combination of values of its
-fields' parts, and its projections are the components of its fields when it has one constructor, as
+fields' rules (`Ty.Small`), one by one or as one member, and its projections are the components of
+its fields when it has one constructor, a function in a field included, as
 `Ty.decl` delegates to its representation (`LeanIntent.Codes`) and `Ty.projs` descends into the
 fields of a declaration with one constructor (`LeanIntent.Degenerate`). Nothing of it is chosen by
 the record or by the instance's author.
