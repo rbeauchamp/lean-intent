@@ -7,7 +7,7 @@ The subject computes a check digit for a list of numbers, of type `List Nat → 
 `checkDigits` asks that it return, for every list, the last decimal digit of the sum of the digit
 sums of its numbers, as `checkDigit` computes it. The record fixes the function completely
 (`checkDigits_o5_eq`), and every function that meets it returns a single digit, the consequence its
-explanation shows the owner (`checkDigitsExplained`).
+explanation shows (`checkDigitsExplained`).
 
 Its meaning reaches three definitions of this file, which its rendering prints in two ways:
 `digitSum`, by well-founded recursion, and `total`, by structural recursion, each by its type and
@@ -82,6 +82,7 @@ def checkDigitsExplained : Explanation checkDigits where
       allows := "Exactly one function."
       freedom := "None: obligation O5 holds with equality." }]
   vocab := []
+  restatement := .unconfirmed
   consequences := [
     { consequence := ⟨"returns a single digit", .entailment, fun f => ∀ l, f l < 10⟩
       holds := show ∀ f, checkDigits.Meets f → ∀ l, f l < 10 from checkDigits_lt_ten
@@ -90,6 +91,7 @@ def checkDigitsExplained : Explanation checkDigits where
             every list."
           rulesOut := "Any function that returns ten or more for some list."
           allows := "Every function that meets the record."
-          freedom := "None that this consequence adds." } }]
+          freedom := "None that this consequence adds." }
+      settled := .unsettled }]
 
 end LeanIntentExamples.Recursion

@@ -55,7 +55,7 @@ part of the theorem's statement, and a list of the wrong length is refused (`ver
 that do (`mem_metBy`). `possibilities h`, from a proof `h : Verdicts r bs`, reports each as a
 `Consequence` of kind possibility, the predicate that the subject is that degenerate subject
 (`Degenerate.consequence`), which holds of the record as it is shown (`possibilities_holdsOf`), so
-it can be shown to the owner (`LeanIntent.Shown`) and an answer to it stored and kept by
+it can be shown with the record (`LeanIntent.Shown`) and an answer to it stored and kept by
 every later revision (`LeanIntent.Answers`). A report exists only for proved verdicts. A declined
 one is kept by exactly the revisions that the degenerate subject does not meet
 (`Degenerate.declined_keptBy_iff`).
@@ -579,13 +579,13 @@ theorem metBy_eq_nil_iff {r : IntentRecord W} {bs : List Bool} (h : Verdicts r b
   rw [List.eq_nil_iff_forall_not_mem]
   exact forall_congr' fun d => by rw [mem_metBy h]; exact not_and
 
-/-- The name the owner reads a degenerate subject's consequence by: what kind of member it is. -/
+/-- The name a degenerate subject's consequence is read by: what kind of member it is. -/
 def Degenerate.name {σ : Sig} : Degenerate σ → String
   | .const _ => "the record allows a subject that returns one value whatever its arguments"
   | .proj _ => "the record allows a subject that returns one of its arguments, or a part of one"
 
-/-- The consequence shown to the owner for a degenerate subject: the possibility that the subject is
-that degenerate subject. -/
+/-- The consequence shown for a degenerate subject: the possibility that the subject is that
+degenerate subject. -/
 def Degenerate.consequence (d : Degenerate c.sig) : Consequence W :=
   ⟨d.name, .possibility, fun w => w = d.subject⟩
 
@@ -596,7 +596,7 @@ theorem Degenerate.declined_keptBy_iff (d : Degenerate c.sig) (r : IntentRecord 
   simp only [Answer.KeptBy, Degenerate.consequence]
   exact ⟨fun h hm => h _ hm rfl, fun h w hm e => h (e ▸ hm)⟩
 
-/-- The consequences reported to the owner: one for each degenerate subject the proved verdicts
+/-- The consequences reported: one for each degenerate subject the proved verdicts
 `bs` say meets the record, in order. It takes the proof of the verdicts, so no report exists for
 verdicts that are not proved. -/
 def possibilities {r : IntentRecord W} {bs : List Bool} (_ : Verdicts r bs) : List (Consequence W) :=
