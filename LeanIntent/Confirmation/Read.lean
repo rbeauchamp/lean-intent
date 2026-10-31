@@ -172,13 +172,13 @@ def check (mods : Array Name) : MetaM Report := do
 /-- The rendering of the deliverable `decl` of the project whose modules are `mods`, saying of who
 settled each thing what the project's owners' log holds for this revision (`logStanding`,
 `checked`), whatever the explanation still records: so a record revised after its owner confirmed it
-does not print as confirmed. A log that cannot be read is an error. -/
+does not print as confirmed. A log that cannot be read, or that `inForce` refuses, is an error. -/
 def renderChecked (mods : Array Name) (decl : Name) : MetaM String := do
   let texts ← match ← projectLog mods with
     | .ok texts => pure texts
     | .error fs => throwError "the project's owners' log cannot be read: {fs.length} findings"
   let .ok log := parseLog texts | throwError "the project's owners' log cannot be read"
-  let .ok (p, o) := inForce log | throwError "the project's owners' log declares no owners in force"
+  let .ok (p, o) := inForce log | throwError "the project's owners' log is refused"
   let rev ← revisionOf decl
   let (_, explanation, _) ← deliverableParts decl
   let words := rev.shown.map fun x => String.ofList (checked p o log rev x.1 x.2).words

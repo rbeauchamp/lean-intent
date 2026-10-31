@@ -14,8 +14,9 @@ and the log and nothing a caller chooses, whether they agree and the current rev
 deliverable is confirmed, and says why when it is not.
 
 * **The owners** are read from the log (`Declares`): it holds exactly one owners declaration, which
-  names at least one principal, and every statement of the log belongs to that declaration's
-  project. So no caller supplies who the owners are, and a log with no owner declared passes nothing.
+  names at least one principal, every statement of the log belongs to that declaration's project, and
+  no two statements share an id (`Confirmed.nodup`). So no caller supplies who the owners are, and a
+  log with no owner declared passes nothing.
 * **An answer counts** (`Counts`) exactly when `LeanIntent.Trace` accepts it, by the owners so
   declared, which is exactly when it traces back to a declared owner within the scope of every
   delegation on the way (`counts_iff`, `Trace.check_eq_ok_iff`), for every log and statement. So the
@@ -70,6 +71,11 @@ The decisions this module makes, each on the owner's behalf:
 * A log with several owners declarations is refused, and owners change by a reviewed edit of the one
   declaration. A declaration names no author, and only signatures (lean-intent #19) could settle
   which of several is in force.
+* **A log that repeats a statement's id is refused**, naming each id it repeats. `Trace` refuses an
+  answer whose id another statement shares, and breaks a link to a delegation whose id another
+  shares, so an unrelated statement could otherwise make an answer refuse and so drop out of what is
+  checked: an owner's decline would no longer stop the deliverable, with no retraction by anyone with
+  authority. Refusing costs one id renamed.
 
 What this module does not establish: that a statement's author made it, which review of the change
 that commits it checks, and a dishonest agent could invent an answer, which the history would show;
@@ -166,10 +172,10 @@ def declarations (log : List Statement) : List (Statement × Statement.Owners) :
   log.filterMap fun s => match s.body with | .owners o => some (s, o) | _ => none
 
 /-- The log `log` declares the owners `o` of the project `p`: exactly one declaration, which names at
-least one principal, and every statement of the log is of that project. -/
+least one principal, every statement of the log is of that project, and no two share an id. -/
 def Declares (log : List Statement) (p : Ident) (o : Statement.Owners) : Prop :=
   (∃ s, declarations log = [(s, o)] ∧ s.project = p) ∧ o.principals ≠ [] ∧
-    ∀ s ∈ log, s.project = p
+    (∀ s ∈ log, s.project = p) ∧ (log.map (·.id)).Nodup
 
 section
 
@@ -254,6 +260,8 @@ inductive Finding where
   | severalOwners (ids : List Ident)
   /-- The statement named belongs to another project than the owners declaration. -/
   | foreign (id : Ident)
+  /-- More than one statement of the log has this id. -/
+  | repeated (id : Ident)
   /-- The project declares no deliverable. -/
   | noDeliverable
   /-- This answer counts and records no source. -/
@@ -384,16 +392,23 @@ def revisionFindings (rev : Revision) : List Finding :=
 
 end
 
+/-- A finding for each id more than one statement of the log has, once. -/
+def repeatedFindings (log : List Statement) : List Finding :=
+  let ids := log.map (·.id)
+  ((ids.filter fun i => 2 ≤ ids.count i).eraseDups).map .repeated
+
 /-- The owners in force: the project and the declaration, or what is wrong with the log. -/
 def inForce (log : List Statement) : Except (List Finding) (Ident × Statement.Owners) :=
   match declarations log with
-  | [] => .error [.noOwners]
+  | [] => .error (.noOwners :: repeatedFindings log)
   | [(s, o)] =>
-    let foreign := (log.filter fun t => t.project != s.project).map fun t => Finding.foreign t.id
-    if o.principals.isEmpty then .error (.noOwners :: foreign)
-    else if foreign.isEmpty then .ok (s.project, o)
-    else .error foreign
-  | ds => .error [.severalOwners (ds.map (·.1.id))]
+    let refused :=
+      (log.filter fun t => t.project != s.project).map (fun t => Finding.foreign t.id) ++
+        repeatedFindings log
+    if o.principals.isEmpty then .error (.noOwners :: refused)
+    else if refused.isEmpty then .ok (s.project, o)
+    else .error refused
+  | ds => .error (.severalOwners (ds.map (·.1.id)) :: repeatedFindings log)
 
 /-- **The decision**: everything wrong with the project's confirmations. -/
 def findings (log : List Statement) (revs : List Revision) : List Finding :=
@@ -767,6 +782,37 @@ theorem foreign_isEmpty {q : Ident} :
   simp only [List.isEmpty_iff, List.map_eq_nil_iff, List.filter_eq_nil_iff, bne_iff_ne, ne_eq,
     Decidable.not_not]
 
+/-- `repeatedFindings` names exactly the ids more than one statement of the log has. -/
+theorem mem_repeatedFindings {f : Finding} :
+    f ∈ repeatedFindings log ↔ ∃ i, f = .repeated i ∧ 2 ≤ (log.map (·.id)).count i := by
+  simp only [repeatedFindings, List.mem_map, List.mem_eraseDups, List.mem_filter, decide_eq_true_eq]
+  constructor
+  · rintro ⟨i, ⟨-, hc⟩, rfl⟩
+    exact ⟨i, rfl, hc⟩
+  · rintro ⟨i, rfl, hc⟩
+    exact ⟨i, ⟨List.mem_map.mp (List.count_pos_iff.mp (Nat.lt_of_lt_of_le Nat.two_pos hc)), hc⟩, rfl⟩
+
+theorem repeatedFindings_eq_nil_iff : repeatedFindings log = [] ↔ (log.map (·.id)).Nodup := by
+  rw [List.eq_nil_iff_forall_not_mem, List.nodup_iff_count]
+  constructor
+  · intro h i
+    have := h (.repeated i)
+    rw [mem_repeatedFindings] at this
+    apply Classical.byContradiction
+    intro hc
+    exact this ⟨i, rfl, by omega⟩
+  · intro h f hf
+    obtain ⟨i, -, hc⟩ := mem_repeatedFindings.mp hf
+    have := h i
+    omega
+
+theorem refused_isEmpty {q : Ident} :
+    ((log.filter fun t => t.project != q).map (fun t => Finding.foreign t.id) ++
+        repeatedFindings log).isEmpty = true ↔
+      (∀ t ∈ log, t.project = q) ∧ (log.map (·.id)).Nodup := by
+  rw [List.isEmpty_iff, List.append_eq_nil_iff, ← List.isEmpty_iff, foreign_isEmpty,
+    repeatedFindings_eq_nil_iff]
+
 theorem inForce_eq_ok_iff : inForce log = .ok (p, o) ↔ Declares log p o := by
   unfold inForce Declares
   rcases hd : declarations log with _ | ⟨⟨s, o'⟩, _ | ⟨d, ds⟩⟩
@@ -790,17 +836,17 @@ theorem inForce_eq_ok_iff : inForce log = .ok (p, o) ↔ Declares log p o := by
       have he' : o'.principals ≠ [] := fun h => he (List.isEmpty_iff.mpr h)
       split
       · rename_i hf
-        have hall := foreign_isEmpty.mp hf
+        obtain ⟨hall, hnd⟩ := refused_isEmpty.mp hf
         constructor
         · intro h
           cases h
-          exact ⟨⟨rfl, rfl⟩, he', hall⟩
+          exact ⟨⟨rfl, rfl⟩, he', hall, hnd⟩
         · rintro ⟨⟨rfl, rfl⟩, -, -⟩
           rfl
       · rename_i hf
         refine ⟨fun h => (by cases h), ?_⟩
         rintro ⟨⟨rfl, rfl⟩, -, h⟩
-        exact absurd (foreign_isEmpty.mpr h) hf
+        exact absurd (refused_isEmpty.mpr h) hf
   · simp
 
 /-- Every refusal of `inForce` says something. -/
@@ -890,6 +936,7 @@ def Finding.Holds (log : List Statement) (revs : List Revision) : Finding → Pr
   | .severalOwners ids => ids = (declarations log).map (·.1.id) ∧ 2 ≤ ids.length
   | .foreign id => (¬ ∃ p o, Declares log p o) ∧ ∃ s ∈ log, s.id = id ∧
       ∃ d ∈ declarations log, s.project ≠ d.1.project
+  | .repeated id => (¬ ∃ p o, Declares log p o) ∧ 2 ≤ (log.map (·.id)).count id
   | .noDeliverable => revs = []
   | .sourceless id => ∃ p o, Declares log p o ∧ ∃ s ∈ log, s.id = id ∧ Counts p o log s ∧
       s.source.recorded = false
@@ -904,21 +951,28 @@ theorem not_declares_of_error {fs : List Finding} (h : inForce log = .error fs) 
 theorem inForce_error_sound {revs : List Revision} {fs : List Finding} {f : Finding}
     (h : inForce log = .error fs) (hf : f ∈ fs) : f.Holds log revs := by
   have nd := not_declares_of_error h
+  have hrep : ∀ {g : Finding}, g ∈ repeatedFindings log → g.Holds log revs := by
+    intro g hg
+    obtain ⟨i, rfl, hc⟩ := mem_repeatedFindings.mp hg
+    exact ⟨nd, hc⟩
   unfold inForce at h
   rcases hd : declarations log with _ | ⟨⟨s, o'⟩, _ | ⟨d, ds⟩⟩
   · simp only [hd] at h
     cases h
-    simp only [List.mem_singleton] at hf
-    subst hf
-    exact nd
+    rcases List.mem_cons.mp hf with rfl | hf
+    · exact nd
+    · exact hrep hf
   · have hmem : ∀ {g : Finding},
-        g ∈ ((log.filter fun t => t.project != s.project).map fun t => Finding.foreign t.id) →
+        g ∈ ((log.filter fun t => t.project != s.project).map fun t => Finding.foreign t.id) ++
+          repeatedFindings log →
         g.Holds log revs := by
       intro g hg
-      obtain ⟨t, ht, rfl⟩ := List.mem_map.mp hg
-      obtain ⟨htl, hne⟩ := List.mem_filter.mp ht
-      refine ⟨nd, t, htl, rfl, (s, o'), by simp [hd], ?_⟩
-      simpa using hne
+      rcases List.mem_append.mp hg with hg | hg
+      · obtain ⟨t, ht, rfl⟩ := List.mem_map.mp hg
+        obtain ⟨htl, hne⟩ := List.mem_filter.mp ht
+        refine ⟨nd, t, htl, rfl, (s, o'), by simp [hd], ?_⟩
+        simpa using hne
+      · exact hrep hg
     simp only [hd] at h
     split at h
     · cases h
@@ -931,9 +985,38 @@ theorem inForce_error_sound {revs : List Revision} {fs : List Finding} {f : Find
         exact hmem hf
   · simp only [hd] at h
     cases h
-    simp only [List.mem_singleton] at hf
-    subst hf
-    exact ⟨by simp [hd], by simp⟩
+    rcases List.mem_cons.mp hf with rfl | hf
+    · exact ⟨by simp [hd], by simp⟩
+    · exact hrep hf
+
+/-- **A refusal names each id the log repeats**, whatever else is wrong with it. -/
+theorem findings_of_repeated {revs : List Revision} {i : Ident}
+    (hc : 2 ≤ (log.map (·.id)).count i) : Finding.repeated i ∈ findings log revs := by
+  have hm : Finding.repeated i ∈ repeatedFindings log := mem_repeatedFindings.mpr ⟨i, rfl, hc⟩
+  have hnd : ¬ (log.map (·.id)).Nodup := fun h => by
+    rw [repeatedFindings_eq_nil_iff.mpr h] at hm
+    cases hm
+  unfold findings
+  cases h : inForce log with
+  | ok x => exact absurd (inForce_eq_ok_iff.mp h).2.2.2 hnd
+  | error fs =>
+    simp only []
+    unfold inForce at h
+    rcases hd : declarations log with _ | ⟨⟨s, o'⟩, _ | ⟨d, ds⟩⟩
+    · simp only [hd] at h
+      cases h
+      exact List.mem_cons_of_mem _ hm
+    · simp only [hd] at h
+      split at h
+      · cases h
+        exact List.mem_cons_of_mem _ (List.mem_append_right _ hm)
+      · split at h
+        · cases h
+        · cases h
+          exact List.mem_append_right _ hm
+    · simp only [hd] at h
+      cases h
+      exact List.mem_cons_of_mem _ hm
 
 theorem unansweredFinding_names {rev : Revision} {q : Question} :
     (unansweredFinding p o log rev q).Names p o log rev := by
@@ -1138,7 +1221,7 @@ theorem findings_sound {revs : List Revision} {f : Finding} (hf : f ∈ findings
         rw [revisionFindings_eq_nil_iff.mpr hc] at hf
         cases hf
       cases f with
-      | noLog | severalLogs _ | unreadable _ | noOwners | severalOwners _ | foreign _
+      | noLog | severalLogs _ | unreadable _ | noOwners | severalOwners _ | foreign _ | repeated _
       | noDeliverable | sourceless _ | undeclared _ => exact hn.elim
       | _ => exact ⟨p, o, hd, rev, hr, hnc, hn⟩
 
@@ -1190,6 +1273,13 @@ theorem not_confirmed_of_no_declaration {revs : List Revision} (h : declarations
   rintro ⟨_, _, ⟨⟨s, hs, -⟩, -⟩, -⟩
   rw [h] at hs
   cases hs
+
+/-- **No confirmed log repeats an id**, so no statement can make an answer of it refuse by sharing the
+answer's id, or the id of a delegation it cites. -/
+theorem Confirmed.nodup {revs : List Revision} (h : Confirmed log revs) :
+    (log.map (·.id)).Nodup := by
+  obtain ⟨_, _, ⟨-, -, -, hn⟩, -⟩ := h
+  exact hn
 
 /-- A project with no deliverable has nothing confirmed. -/
 theorem not_confirmed_nil : ¬ Confirmed log [] := by

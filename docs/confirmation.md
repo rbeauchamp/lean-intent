@@ -48,7 +48,7 @@ run_meta do
 
 ## What it decides
 
-- **The owners** are read from the log, never given by a caller. The log holds exactly one owners declaration, which names at least one principal, and every statement belongs to that declaration's project (`Declares`). A log with no owner declared passes nothing, and a mistyped project on a revocation is refused rather than silently ignored.
+- **The owners** are read from the log, never given by a caller. The log holds exactly one owners declaration, which names at least one principal, every statement belongs to that declaration's project, and no two statements share an id (`Declares`). A log with no owner declared passes nothing, a mistyped project on a revocation is refused rather than silently ignored, and a log that repeats an id is refused, naming each id it repeats (`repeated`).
 - **An answer counts** (`Counts`) exactly when `LeanIntent.Trace` accepts it by those owners, which is exactly when its authority traces back within the scope of every delegation on the way ([tracing authority](tracing-authority.md)). So the check accepts every confirmation that traces back and refuses every other.
 - **Each answer records its source.** An answer that counts and records no source, only blank text, is a finding of the log (`sourceless`): it says nothing of where it came from, so the deliverables are not confirmed until it does. A refused answer needs no source to be refused.
 - **Which revision an answer is for.** An answer's `revision` field holds the record's rendering without a word of who settled what (`Render.revisionText`), since recording the answer changes those words, and its `predicate` field holds what the consequence's predicate means: the predicate printed exactly, every declaration it reaches printed in full, and the Lean release (`Render.consequenceText`). The check computes both from the build it reads. So an answer to an older revision names another text and does not count, and a definition changed under an unchanged name changes the text.
@@ -71,6 +71,8 @@ The owner confirms the plain restatement and decides the forks; finer consequenc
 | `Confirmed.agrees` | every consequence shown agrees with the answers kept: an answer it records is one of them, and one recorded as derived is answered by none of them |
 | `Report.withUndeclared_findings` | what `Read.check` returns finds nothing exactly when no value stands outside a deliverable and the report on the log and revisions finds nothing |
 | `Confirmed.restated` | the restatement of a confirmed revision has a confirming answer that counts and names it, so no deliverable passes with an empty or absent confirmation |
+| `Confirmed.nodup` | no confirmed log repeats an id |
+| `findings_of_repeated` | the decision names each id a log repeats, whatever else is wrong with the log |
 | `not_confirmed_of_older` | a log none of whose answers names the revision's text does not confirm it |
 | `not_confirmed_of_changed` | a kept answer whose predicate's text no answer holds is refused |
 | `not_confirmed_of_dropped` | an answer that counts and that a deliverable does not keep is refused |
@@ -94,6 +96,7 @@ Each is decided on the owner's behalf, and can be reversed by a later change.
 - **A refused answer does not stop a deliverable being confirmed** by answers that count, and is reported by name. A check that failed on any refused answer would refuse answers that trace back, and would let any bad entry hold a project's confirmations.
 - **A declined consequence of the current revision stops it**, since each consequence shown holds of the record by proof: the record must change.
 - **Several owners declarations are refused.** Owners change by a reviewed edit of the one declaration. A declaration names no author, and only signatures (#19) could settle which of several is in force.
+- **A statement added with an id the log already has refuses the log**, naming the id, until one is renamed. `Trace` refuses an answer whose id another statement shares and breaks a link to a delegation whose id another shares, so an unrelated statement must not be able to make an answer refuse and so drop out of what is checked: an owner's decline would no longer stop the deliverable, and answers under a delegation would stop being ones it must keep, with no retraction by anyone with authority. Refusing costs one id renamed. A log so refused has no owners in force, so its report holds no decisions, counted answers or origins, as for every log `inForce` refuses, and its findings say why.
 
 ## What a checker reads
 
@@ -111,7 +114,7 @@ An origin keeps who wrote a source's words, what they had read of the implementa
 
 ## Worked examples
 
-- [`LeanIntentExamples/Confirmation.lean`](../LeanIntentExamples/Confirmation.lean): a deliverable of the sorting record, with a log in which the owner confirms the restatement, one consequence is derived from that and an assistant, under a delegation, confirms the other, is confirmed; and the decision refuses, by name, a revised record, a changed definition, no owner, an empty declaration, two declarations, no deliverable, a revoked or removed delegation, a removed owner, an agent's self-confirmation, a dropped answer until it is retracted, a statement of another project, an answer that records no source, a fork, a consequence not settled, a derived consequence someone answered, an owner's confirmation the explanation does not record, and a status that disagrees with the answers kept. A worked example uses short texts, since it holds no text of a build, so the reader, its `undeclared` finding and the rendering are not run by it.
+- [`LeanIntentExamples/Confirmation.lean`](../LeanIntentExamples/Confirmation.lean): a deliverable of the sorting record, with a log in which the owner confirms the restatement, one consequence is derived from that and an assistant, under a delegation, confirms the other, is confirmed; and the decision refuses, by name, a revised record, a changed definition, no owner, an empty declaration, two declarations, no deliverable, a revoked or removed delegation, a removed owner, an agent's self-confirmation, a dropped answer until it is retracted, a statement of another project, an answer that records no source, a fork, a consequence not settled, a derived consequence someone answered, an owner's confirmation the explanation does not record, a status that disagrees with the answers kept, and an id two statements share, whether an owner's decline's or a delegation's. A worked example uses short texts, since it holds no text of a build, so the reader, its `undeclared` finding and the rendering are not run by it.
 
 ## What is trusted
 

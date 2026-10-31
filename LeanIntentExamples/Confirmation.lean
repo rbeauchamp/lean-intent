@@ -38,7 +38,11 @@ follows from it or is decided on their behalf. Each change below is refused by n
   confirmation the explanation does not record (`ownerUnrecorded_refused`);
 * a status that disagrees with the answers the deliverable keeps, naming an answerer they do not hold
   (`otherAnswerer_refused`, `bothKept_confirmed`) or saying that no one answered a consequence one of
-  them answers (`derivedKept_refused`, `derivedRetracted_confirmed`).
+  them answers (`derivedKept_refused`, `derivedRetracted_confirmed`);
+* an id two statements share, where the statement sharing it would otherwise make an answer refuse
+  and so drop out of what is checked: an owner's decline, which stops the deliverable
+  (`ownerDeclined_refused`), with its id repeated by a tool statement (`declineRepeated_refused`), and
+  a delegation, with its id repeated by another statement (`delegationRepeated_refused`).
 
 A consequence cannot be recorded as derived in a revision whose restatement stands as unconfirmed:
 `Settled.derived` is no value of `Settled .unconfirmed`.
@@ -371,6 +375,36 @@ theorem origin_read :
                   writer := "claude"
                   hadRead := "The implementation of the sort, and the change that added it."
                   words := "The function sorts its input, and keeps its elements." }, true)] := by
+  decide +kernel
+
+/-! ## An id two statements share -/
+
+/-- The log, with `dana` a second owner, who declines the restatement `richard` confirmed. -/
+def declinedLog : List Statement :=
+  mk (.of "owners") (.owners ⟨[⟨.of "richard", []⟩, ⟨.of "dana", []⟩], none⟩) :: log.erase owners ++
+    [mk (.of "decline") <| .answer
+      { author := ⟨.of "dana", none⟩, record := "sorting", revision := "revision 2",
+        consequence := restatement.consequence, kind := restatement.kind,
+        predicate := restatement.predicate, verdict := .declined }]
+
+/-- An owner's decline stops the deliverable. -/
+theorem ownerDeclined_refused :
+    findings declinedLog [current] =
+      [.declined "sorting" restatement.consequence [.of "decline"]] := by
+  decide +kernel
+
+/-- A tool statement with the decline's id, which would make `Trace` refuse the decline and so drop it
+from what is checked, is refused instead, naming the id. -/
+theorem declineRepeated_refused :
+    findings (declinedLog ++ [{ measured with id := .of "decline" }]) [current] =
+      [.repeated (.of "decline")] := by
+  decide +kernel
+
+/-- Another statement with the delegation's id, which would break the link of every answer citing it,
+and so drop them from what the deliverable must keep, is refused too, naming the id. -/
+theorem delegationRepeated_refused :
+    findings (log ++ [{ origin with id := .of "assistant" }]) [current] =
+      [.repeated (.of "assistant")] := by
   decide +kernel
 
 /-! ## The log as committed -/
