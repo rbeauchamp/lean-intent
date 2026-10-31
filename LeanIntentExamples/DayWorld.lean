@@ -16,6 +16,7 @@ of three things its size and shape exposed:
   them as parameters and prints each statement with them free. With `LeanIntent.Render` imported,
 
       #render_intent LeanIntentExamples.DayWorld.dayCycleExplained
+      open LeanIntentExamples.DayWorld in
       #render_intent_at LeanIntentExamples.DayWorld.dayCycleExplained () () rep_lt rep_lt' rep_ne rep_sight
 
   show it in general and at the representative types `Unit`, `Unit`, `Fin 4` and `Nat`.

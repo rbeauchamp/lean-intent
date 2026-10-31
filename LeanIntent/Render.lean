@@ -883,8 +883,10 @@ def renderExplanation (decl : Name) (form : Form := .readable) : MetaM String :=
 /-- The rendering of the generic explanation `decl` at the representative values `args`, one for
 each of its binders, in the readable form: each statement is read from `decl` applied to `args`, so
 it is the generic statement with the parameters replaced, and the text lists the values and says
-what they do not establish of the generic record (`instanceNote`). A value that is a proof is not
-printed, since no term depends on more than its statement. -/
+what they do not establish of the generic record (`instanceNote`). A value that is a proof is shown
+by the proposition it proves, since no term depends on more than its statement. The meaning starts
+also from each term the list prints, so the definitions a value or a proposition reaches are
+printed. -/
 def renderAt (decl : Name) (us : List Level) (args : Array Expr) : MetaM String := do
   let ci ← getConstInfo decl
   let reader ← newReader decl .readable
@@ -896,11 +898,12 @@ def renderAt (decl : Name) (us : List Level) (args : Array Expr) : MetaM String 
   let mut lines : Array String := #[]
   let mut roots : List Name := []
   for (name, a) in binders.zip args do
-    if ← isProof a then
-      lines := lines.push s!"{name} : a proof of {← reader.print (← inferType a)}"
-    else
-      lines := lines.push s!"{name} := {← reader.print a}"
-      roots := exprRefs (← instantiateMVars a) roots
+    let proof ← isProof a
+    let term ← instantiateMVars (← if proof then inferType a else pure a)
+    let printed ← reader.print term
+    lines := lines.push <|
+      if proof then s!"{name} : a proof of {printed}" else s!"{name} := {printed}"
+    roots := exprRefs term roots
   let values := s!"## Representative values\n\nThis record is generic, and this text shows it at \
     these values of its parameters:\n\n{code ("\n".intercalate lines.toList)}\n{instanceNote decl}"
   let (doc, rootsDoc, shown) ← recordPart reader (mkAppN (mkConst decl us) args) values
