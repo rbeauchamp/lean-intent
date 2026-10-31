@@ -45,8 +45,8 @@ the printed text starts with a claim's phrase exactly when the status makes that
 What this module does not establish: that what is recorded is true. These are values a project
 writes, so a record can name as owner a principal who is not one, or keep `.confirmed` after a
 revision the owner never saw. `LeanIntent.Trace` decides, from a project's owners' log, whether an
-answer's authority traces back to a declared owner; tying the values here to that log, and each to
-the revision it applies to, is lean-intent #5's. That the renderer reads what it prints from the
+answer's authority traces back to a declared owner, and `LeanIntent.Confirmation` ties the values
+here to that log, and each to the revision it applies to. That the renderer reads what it prints from the
 recorded term is argued from `LeanIntent.Render`'s code, not stated as a theorem. Nor does it check a
 reason: a reason is a model's or a person's words, printed as written.
 -/

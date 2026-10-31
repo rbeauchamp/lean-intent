@@ -56,13 +56,13 @@ Acceptance is not monotone everywhere: a revocation can restore an answer, by vo
 made under the revoked delegation; a delegation added can make such a retraction count; and an owners
 declaration with more owners can make a revocation count.
 
-What it does not decide: which owners declaration is in force, which the caller gives (the
-first in a project's log is its root of trust, and a later one is approved by its threshold of
-owners, which signatures settle, lean-intent #19); whether a statement's author made it, which review
-of the change that commits it checks, and a signature too, for a project that signs; whether the
-log given holds every statement the project has committed, which the caller gathers (lean-intent
-#5), since a log missing a revocation or a retraction can accept an answer the whole log refuses;
-and the dates, sources and keys of statements, which it does not read.
+What it does not decide: which owners declaration is in force, which the caller gives
+(`LeanIntent.Confirmation` gives the log's one declaration, and refuses a log with several, since
+only signatures could settle which is in force, lean-intent #19); whether a statement's author made
+it, which review of the change that commits it checks, and a signature too, for a project that
+signs; whether the log given holds every statement the project has committed, which the caller
+gathers, since a log missing a revocation or a retraction can accept an answer the whole log
+refuses; and the dates, sources and keys of statements, which it does not read.
 -/
 
 namespace LeanIntent

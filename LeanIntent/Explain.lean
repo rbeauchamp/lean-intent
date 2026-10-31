@@ -28,8 +28,8 @@ the record does not hold. The answers to them, the owner's own and the decisions
 behalf, are kept across revisions by `LeanIntent.Answers`. An answer recorded in a project's owners'
 log names who gave it, a principal acting as owner or one acting under the delegation it names,
 which tells the owner's own answer apart from a decision made on the owner's behalf; whether that
-authority traces back to a declared owner is decided by `LeanIntent.Trace`, and tying the answers
-and statuses a project keeps to its log is lean-intent #5.
+authority traces back to a declared owner is decided by `LeanIntent.Trace`, and
+`LeanIntent.Confirmation` ties the answers and statuses a project keeps to its log.
 -/
 
 namespace LeanIntent
