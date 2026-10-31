@@ -941,8 +941,8 @@ def answerText (ex : Name) (a : Expr) : MetaM String := do
     {code (← printExact term)}\n"
   let exConst := mkConst ex ((← getConstInfo ex).levelParams.map .param)
   let explained := s!"# The explanation it answers\n\nThe answer is given to the explanation \
-    below, printed exactly, whose record and consequences follow as its rendering prints \
-    them.\n\n{code (← printExact exConst)}\n"
+    below, printed exactly, whose record and consequences follow as the exact form of its \
+    rendering prints them.\n\n{code (← printExact exConst)}\n"
   let reader ← newReader ex .exact
   let (record, roots, shown) ← recordPart reader exConst
   return answer ++ explained ++ record ++ s!"## Definitions the answer and the record reach\n\n\
@@ -950,7 +950,7 @@ def answerText (ex : Name) (a : Expr) : MetaM String := do
     answer or a statement above depends on, or that says what it is for a subject to meet the \
     record, for a consequence to hold of it as shown, and what the answer asks of every later \
     revision of the record (`LeanIntent.Answer.KeptBy`), with everything those depend on in turn, \
-    each printed in full as in the rendering of a record.\n\n\
+    each printed in full as in the exact form of the rendering of a record.\n\n\
     {← definitions reader (roots ++ exprRefs term [] ++ [``Answer.KeptBy]) shown}{toolchain}"
 
 /-- The canonical text of each attributed answer of the list `e` to the explanation `ex`
