@@ -3,8 +3,8 @@
 # `test` is no-mistakes' fixed name for one of its steps and for the key below; lean-intent itself
 # has no tests. Every claim the library makes about itself is a theorem Lean's kernel checks, and
 # tools/check.lean is the repository's one check program: it builds the library with warnings as
-# errors and audits the axioms every declaration rests on, and with --tests it lists the
-# repository's tests. no-mistakes honours `test.instructions`, `test.no_surface` and
+# errors, audits the axioms every declaration rests on and the runtime functions its compiled code
+# calls, and with --tests it lists the repository's tests. no-mistakes honours `test.instructions`, `test.no_surface` and
 # `test.tests_as_evidence` only from the copy of this file on the default branch, so a change to
 # any of them governs the runs that follow its merge.
 #
@@ -20,7 +20,7 @@
 test:
   instructions: |
     On lean-intent this step is verification. A change's claims are established by machine-checked proof, by derivation and by reading; lean-intent has no running product to drive.
-    1. Run the repository's checks from the worktree root and cite the command and its exit status: no-mistakes admit --memory 6GiB --limit "none; measured peak 4.69 GiB" -- lean --run tools/check.lean. It exits 0 only when lakefile.toml requires no other package, Lake builds every library module with no error and no warning (a sorry is a warning), and every declaration of the library rests only on Lean's axioms propext, Classical.choice and Quot.sound. tools/check.lean's module comment says what each rule decides; claim no more than that.
+    1. Run the repository's checks from the worktree root and cite the command and its exit status: no-mistakes admit --memory 6GiB --limit "none; measured peak 4.69 GiB" -- lean --run tools/check.lean. It exits 0 only when lakefile.toml requires no other package, Lake builds every library module with no error and no warning (a sorry is a warning), every declaration of the library rests only on Lean's axioms propext, Classical.choice and Quot.sound, and the library's compiled code calls no runtime function that starts a process or asks where it runs or what its environment holds. tools/check.lean's module comment says what each rule decides; claim no more than that.
     2. Do not write, request or suggest a test, and do not improvise disposable break-it runs as evidence: lean-intent establishes its claims by theorems. A claim about what a theorem states is settled by reading its statement, binders and hypotheses included, never its docstring or name alone.
     3. Report each claim by how it was established: machine-checked (a Lean proof that the check above built; cite the theorem and the command's exit status), argued (by derivation or by reading; cite the file and lines), observed (executed in this run for this claim), assumed (a hypothesis the change relies on; say why it is trusted) or open (not established; say what would establish it and which issue tracks it).
   # lean-intent has no running product; proof, its check and reading settle its claims.

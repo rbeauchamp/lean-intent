@@ -44,6 +44,16 @@ The rules:
   library makes about itself rests on `sorry` (`sorryAx`), on code run to decide it (the axiom
   `native_decide` adds to the module that uses it, asserting what that code returned) or on an
   axiom of the project. The library's modules must declare at least one constant.
+* `PROCESS`: the compiled code of the library, each compiled declaration of a library module with
+  everything it uses, as Lean's C emitter collects that (`Lean.IR.collectUsedDecls`, closures and
+  initializers included), calls no function of Lean's runtime that starts a process or that tells a
+  process where it lies or what it runs in (`processQueries`). So a text the library computes takes
+  nothing from those, and a checker that refuses a process start can call the library. The one
+  exception is `notFollowed`. The rule fails rather than passing when it reads no compiled code,
+  when a declaration it reaches has no compiled code to read, or when a function of `boundQueries`
+  is not bound to the C function it lists, as a new Lean release might make it. It sees calls by
+  name: it does not see a closure called through a value held in a reference, such as Lean's table
+  of elaborators, or code of a project that a text's term elaborates.
 
 The rules read what the build produced, so they hold only if no code the build runs was written to
 defeat them: elaborating a Lean file runs the metaprograms it invokes.
@@ -474,6 +484,79 @@ def projectTests : IO (Array String) := do
     IO.FS.removeDirAll out
 
 
+/-- The declarations of Lean's `Init` that `PROCESS` confirms are bound to the C function it looks
+for: the functions of `IO` that start a process (`IO.Process.output` and `IO.Process.run` go through
+`IO.Process.spawn`), that say where the process lies or what its environment holds. -/
+def boundQueries : List (Name × String) :=
+  [(``IO.Process.spawn, "lean_io_process_spawn"), (``IO.appPath, "lean_io_app_path"),
+   (``IO.currentDir, "lean_io_current_dir"),
+   (``IO.Process.getCurrentDir, "lean_io_process_get_current_dir"),
+   (``IO.getEnv, "lean_io_getenv")]
+
+/-- The C functions of Lean's runtime that `PROCESS` refuses: those of `boundQueries`, and libuv's
+that say the same or what user and host the process runs as (`Std.Internal.UV.System`, read at Lean
+v4.35.0 by a search of every `extern` attribute for names holding `spawn`, `exec`, `fork`, `system`,
+`getenv`, `environ`, `app_path`, `exe`, `current_dir`, `cwd`, `homedir`, `tmpdir`, `passwd`,
+`hostname` or `uname`). -/
+def processQueries : List String :=
+  boundQueries.map (·.2) ++
+    ["lean_uv_exepath", "lean_uv_cwd", "lean_uv_os_getenv", "lean_uv_os_environ",
+     "lean_uv_os_homedir", "lean_uv_os_tmpdir", "lean_uv_os_get_passwd", "lean_uv_os_gethostname",
+     "lean_uv_os_uname"]
+
+/-- What `PROCESS` does not follow, each with its reason. `Lean.manualRoot` reads `LEAN_MANUAL_ROOT`
+when Lean starts, for the links to Lean's manual it writes into a logged error and a docstring
+(`Lean/DocString/Links.lean`, `Lean/Log.lean`), neither of which any text of the library prints. -/
+def notFollowed : List Name := [`Lean.manualRoot]
+
+/-- Whether a compiled binding `entry` calls the C function `symbol`. -/
+def bindsTo (symbol : String) : ExternEntry → Bool
+  | .standard _ fn => fn == symbol
+  | .inline _ pattern => (pattern.splitOn symbol).length > 1
+  | _ => false
+
+/-- `PROCESS` over the compiled declarations `roots`, reached in the environment `env`. -/
+def checkProcess (env : Environment) (roots : Array Name) : Array Rejection := Id.run do
+  let reject (message : String) : Rejection := { rule := "PROCESS", message }
+  if roots.isEmpty then
+    return #[reject "the library's modules hold no compiled code"]
+  let mut errs : Array Rejection := #[]
+  for (decl, symbol) in boundQueries do
+    let bound := match IR.findEnvDecl env decl with
+      | some (.extern _ _ _ data) => data.entries.any (bindsTo symbol)
+      | _ => false
+    unless bound do
+      errs := errs.push <| reject s!"{decl} is not bound to {symbol} under this Lean: read processQueries again from its extern attributes"
+  -- A breadth-first walk, whose parent map names one way each declaration is reached.
+  let mut parent : Std.HashMap Name Name := roots.foldl (fun m r => m.insert r r) {}
+  let mut queue := roots
+  let mut next := 0
+  let path (parent : Std.HashMap Name Name) (c : Name) : List Name := Id.run do
+    let mut out := [c]
+    let mut at' := c
+    for _ in [0:64] do
+      let p := parent.getD at' at'
+      if p == at' then break
+      out := p :: out
+      at' := p
+    return out
+  while h : next < queue.size do
+    let c := queue[next]
+    next := next + 1
+    if notFollowed.contains c then continue
+    let some decl := IR.findEnvDecl env c
+      | errs := errs.push <| reject s!"{path parent c} reaches a declaration with no compiled code to read"
+    if let .extern _ _ _ data := decl then
+      if data.entries.any (· matches .opaque) then
+        errs := errs.push <| reject s!"{path parent c} reaches a declaration whose compiled code is not exported"
+      if let some symbol := processQueries.find? fun s => data.entries.any (bindsTo s) then
+        errs := errs.push <| reject s!"{path parent c} calls {symbol}"
+    for used in IR.collectUsedDecls env [decl] do
+      unless parent.contains used do
+        parent := parent.insert used c
+        queue := queue.push used
+  return errs
+
 /-- Every rule for the project in the current directory. -/
 def check : IO (Array Rejection) := do
   let config ← checkConfig
@@ -495,14 +578,17 @@ def check : IO (Array Rejection) := do
   let idxs := mods.filterMap env.getModuleIdx?
   let mut errs : Array Rejection := #[]
   let mut audited := 0
+  let mut compiled : Array Name := #[]
   for (c, ci) in env.constants.map₁.toList do
     if let some idx := env.getModuleIdxFor? c then
       if idxs.contains idx then
         audited := audited + 1
         errs := errs ++ (← auditConstant env env.header.moduleNames[idx.toNat]! c ci)
+        if (IR.findEnvDecl env c).isSome then
+          compiled := compiled.push c
   if audited == 0 then
     errs := errs.push { rule := "AXIOMS", message := "the library's modules declare no constant" }
-  return errs
+  return errs ++ checkProcess env compiled
 
 end Check
 

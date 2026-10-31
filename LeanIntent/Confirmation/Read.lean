@@ -20,6 +20,12 @@ them through the library, and parses no source text. Each input is read through 
 | each consequence's text | `LeanIntent.Render.consequenceText` of its predicate, computed now |
 | the standing and statuses recorded | the explanation's and each answer's constructors, by `LeanIntent.Render`'s `readRestatement`, `readSettled` and `readAnswerer` |
 | values no deliverable holds | every other constant of those modules whose type so reduces to `LeanIntent.Explanation _`, `LeanIntent.Attributed _` or a list of those answers (`undeclaredIn`), read the same way |
+| which imported modules are Lean's own, where a text's meaning stops | the process's search path (`LeanIntent.Render.leanOwnModules`), never where the running executable lies |
+
+A process of any kind reads the same: a compiled checker sets its search path before it imports the
+project, as `lean` does for itself, and an error, never a text, comes of a path that holds no Lean
+library. Nothing here starts a process or asks where it runs, as `tools/check.lean`'s rule `PROCESS`
+checks of the compiled code, so a checker that refuses a process start can call this.
 
 `check mods` gives the `Report`. The texts are computed from the build the check reads, so an answer
 recorded against any other build's text, an older revision's or a definition's former body's, names
