@@ -69,8 +69,8 @@ what it is for a subject to meet the record, and, when it shows consequences, `C
 which says what it is for one to hold as shown; for an answer, those of the record it answers and
 `Answer.KeptBy`, which says what it asks of every later revision. `LeanIntent.Print.meaning_ok`
 proves that it collects every declaration reached, and nothing else. The meaning stops at the
-declarations of Lean's own libraries, whose modules Lean found in the library directory of the
-release that runs (`leanOwnModules`), and the text records that release and its commit instead;
+declarations of Lean's own libraries, whose modules the process's search path finds in those
+libraries' directory (`leanOwnModules`), and the text records that release and its commit instead;
 the definitions of lean-intent itself are printed like a project's. For an intent record, and an
 answer to it, it also stops at the record's own constant, whose meaning is shown statement by
 statement.
@@ -400,16 +400,62 @@ def statement (heading text : String) (gloss : Array String) (settled : String :
 
 /-! ## The declarations a meaning reaches -/
 
-/-- For each module the environment imports, whether it is one of Lean's own libraries: the first
-component of its name is `Init`, `Std`, `Lean` or `Lake`, and Lean found its `.olean` file in the
-library directory of the Lean release that runs (`Lean.findOLean`, `Lean.getLibDir`). A module of
-a project that merely shares one of those names is not. -/
+/-- The first components of the names of the modules of Lean's own libraries. -/
+def leanRoots : List Name := [`Init, `Std, `Lean, `Lake]
+
+/-- Whether the module `m`, whose `.olean` file has the real path `real?` if it has one, is one of
+Lean's own libraries, whose directory has the components `lib`: the first component of its name is
+one of `leanRoots`, and its file really lies in that directory. Its arguments are all it reads, so
+it takes nothing from where the running executable lies (`isLeanOwn_iff`). -/
+def isLeanOwn (lib : List String) (m : Name) (real? : Option System.FilePath) : Bool :=
+  leanRoots.contains m.getRoot && real?.any fun p => lib.isPrefixOf p.components
+
+/-- A module is one of Lean's own libraries exactly when it has the first component of one of their
+names and its file really lies in their directory. So a project's module that merely shares such a
+name is not, wherever its name would place it, and neither is one with no file. -/
+theorem isLeanOwn_iff {lib : List String} {m : Name} {real? : Option System.FilePath} :
+    isLeanOwn lib m real? = true ↔
+      m.getRoot ∈ leanRoots ∧ ∃ p, real? = some p ∧ lib <+: p.components := by
+  cases real? <;> simp [isLeanOwn]
+
+/-- The real path of the `.olean` file the process's search path (`Lean.searchPathRef`) gives the
+module `m`, when that file exists. Lean resolves an import through the same path
+(`Lean.findOLean`), and starts no process to do so. -/
+def realOLean? (m : Name) : IO (Option System.FilePath) := do
+  (← (← searchPathRef.get).findModuleWithExt "olean" m).mapM IO.FS.realPath
+
+/-- The real path of the directory of Lean's own libraries, read from the process's search path and
+never from where the running executable lies, which is the toolchain only in the `lean` binary
+(`Lean.getBuildDir`): the directory that really holds the `.olean` file the search path gives
+`Init.Prelude`, the module that declares what all else rests on, and that also really holds the root
+file of each library. So a toolchain copied elsewhere is found where the search path has it, and
+modules of a project that shadow `Init` with links to the toolchain, or `Init` itself, do not move
+it. An error, never an empty set of modules, when there is no such directory: a process that has
+set no search path, or whose path gives `Init.Prelude` no such file. -/
+def leanLibDir : IO System.FilePath := do
+  let refuse {α} (why : String) : IO α := throw <| IO.userError
+    s!"cannot find Lean's own libraries from the search path: {why}. The process must set its search \
+      path (Lean.initSearchPath, or Lean.searchPathRef) to the one it imports the project through"
+  let some prelude ← realOLean? `Init.Prelude
+    | refuse "it gives Init.Prelude no file"
+  let some lib := prelude.parent >>= (·.parent)
+    | refuse s!"{prelude} has no parent directory"
+  for root in leanRoots do
+    let file := modToFilePath lib root "olean"
+    unless ← file.pathExists do
+      refuse s!"{lib}, which holds Init.Prelude, has no {file.fileName.getD ""}"
+    unless (← IO.FS.realPath file).parent == some lib do
+      refuse s!"{file}, beside the Init.Prelude it gives, is a link to another directory"
+  return lib
+
+/-- For each module the environment imports, whether it is one of Lean's own libraries (`isLeanOwn`,
+in the directory `leanLibDir` finds), asking the file system only of a module whose name could be.
+A module of a project that merely shares one of those names is not. An error when the process
+cannot establish where those libraries are. -/
 def leanOwnModules : MetaM (Array Bool) := do
-  let env ← getEnv
-  let lib := (← IO.FS.realPath (← getLibDir (← getBuildDir))).components
-  env.header.moduleNames.mapM fun m => do
-    unless [`Init, `Std, `Lean, `Lake].contains m.getRoot do return false
-    return lib.isPrefixOf (← IO.FS.realPath (← findOLean m)).components
+  let lib := (← leanLibDir).components
+  (← getEnv).header.moduleNames.mapM fun m => do
+    return isLeanOwn lib m (← if leanRoots.contains m.getRoot then realOLean? m else pure none)
 
 /-- Whether the meaning stops at the constant `c`: it is in `shown`, or declared in one of Lean's
 own libraries (`own`, by module). -/
