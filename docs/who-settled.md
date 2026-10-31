@@ -1,6 +1,6 @@
 # Who settled each thing
 
-**Who settled each thing** (`LeanIntent.Settled`): what a project records about who confirmed or answered something, and the only words the rendering prints about it, each a function of that record, so a rendered record says the owner confirmed something only where the record holds that the owner did.
+**Who settled each thing** (`LeanIntent.Settled`): what a project records about who confirmed or answered something, and the only words the rendering prints about it, each a function of that record, so a rendered record says the owner confirmed something only where the record holds that the owner did, or, printed by `LeanIntent.Confirmation.Read.renderChecked`, where the owners' log does.
 
 Module: `LeanIntent/Settled.lean`, read and printed by `LeanIntent/Render.lean`.
 

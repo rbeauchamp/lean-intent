@@ -46,9 +46,9 @@ deliverable is confirmed, and says why when it is not.
   says no one answered it, names no consequence one of them answers.
 * **The decision** (`findings`) lists everything wrong, and is empty exactly when the deliverables
   are confirmed (`findings_eq_nil_iff`); each finding states what holds (`findings_sound`).
-* **The standing the log gives** (`standing`, `checked`): a status printed from these reads a
+* **The standing the log gives** (`logStanding`, `checked`): a status printed from these reads a
   confirmation only where the log holds one of this revision, so a record revised after its owner
-  confirmed it stops printing as confirmed, whatever value it still holds (`standing_of_older`).
+  confirmed it stops printing as confirmed, whatever value it still holds (`logStanding_of_older`).
 
 A status is a field of a consequence the explanation shows, so a status of a consequence the revision
 no longer has does not exist; an answer in the log to such a consequence still counts, and must be
