@@ -43,7 +43,9 @@ environment, that a declaration depends on no such attestation.
   with what it found (`Outcome`), which `report` prints. `requireCodes c` audits `c` alone and
   throws an error that says why, unless the audit accepts it. No entry point can be given an empty
   scope, whose audit would accept anything; a caller whose scope comes from a search refuses when
-  the search finds nothing, as `tools/codes.lean` does.
+  the search finds nothing, as `tools/codes.lean` does. Diagnostic types retain their enclosing
+  binders as type families (`AttestedType`, `mem_attestedTypes`), rather than losing types that
+  depend on a bound variable; Lean's pretty printer renders those families with binder types.
 
 A refused attestation is one of three kinds. A hand-written instance, or a proof Lean abstracts out
 of one (`inst._proof_1`), that applies the constructor with a code or isomorphism other than the
@@ -272,29 +274,72 @@ def isCarrier (ci : ConstantInfo) : Bool :=
   let head := ci.type.getForallBody.getAppFn
   head.isConstOf ``HasCode || head.isConstOf ``Covered
 
-/-- The types `e` applies `ctor` to, wherever it applies `ctor` to an argument holding no variable
-bound inside `e`, added to `acc`. -/
-partial def attestedTypes (ctor : Name) (e : Expr) (acc : Array Expr) : Array Expr :=
-  match e with
-  | .app .. =>
-    let args := e.getAppArgs
-    let acc := match args[0]? with
-      | some α => if e.getAppFn.isConstOf ctor && !α.hasLooseBVars then acc.push α else acc
-      | none => acc
-    args.foldl (fun acc a => attestedTypes ctor a acc) (attestedTypes ctor e.getAppFn acc)
-  | .lam _ t b _ | .forallE _ t b _ => attestedTypes ctor b (attestedTypes ctor t acc)
-  | .letE _ t v b _ => attestedTypes ctor b (attestedTypes ctor v (attestedTypes ctor t acc))
-  | .mdata _ b | .proj _ _ b => attestedTypes ctor b acc
-  | _ => acc
+/-- `AttestedType ctor e α`: `α` is the first argument of an application of `ctor` in `e`,
+abstracted over the binders enclosing that occurrence. Both `fun` and `∀` binders become `fun`
+binders of the type family; a `let` retains its type and value. Thus `Wrap α` under a binder
+`α : Type` is reported as `fun (α : Type) => Wrap α`, never dropped or left with a loose variable.
+Metadata on the constructor does not change which constant it names. -/
+def AttestedType (ctor : Name) : Expr → Expr → Prop
+  | .app f a, α =>
+    (f.consumeMData.isConstOf ctor = true ∧ α = a) ∨
+      AttestedType ctor f α ∨ AttestedType ctor a α
+  | .lam n t b bi, α | .forallE n t b bi, α =>
+    AttestedType ctor t α ∨ ∃ β, AttestedType ctor b β ∧ .lam n t β bi = α
+  | .letE n t v b nd, α =>
+    AttestedType ctor t α ∨ AttestedType ctor v α ∨
+      ∃ β, AttestedType ctor b β ∧ .letE n t v β nd = α
+  | .mdata _ b, α | .proj _ _ b, α => AttestedType ctor b α
+  | .bvar _, _ | .fvar _, _ | .mvar _, _ | .sort _, _ | .const .., _ | .lit _, _ => False
 
-/-- An attestation the audit refuses: the declaration `decl` that holds it, the type it attests when
-it could be read, why it is not the handler's, and the reached instances of `HasCode` or `Covered`
-that depend on `decl`. -/
+/-- Every type attested in `e`, with its enclosing binders (`AttestedType`). Rebuilding the
+binders preserves de Bruijn indices, including dependencies in binder types and let values.
+The structural recursion visits every constructor of Lean's expression type. -/
+def attestedTypes (ctor : Name) : Expr → List Expr
+  | .app f a =>
+    (if f.consumeMData.isConstOf ctor then [a] else []) ++
+      attestedTypes ctor f ++ attestedTypes ctor a
+  | .lam n t b bi | .forallE n t b bi =>
+    attestedTypes ctor t ++ (attestedTypes ctor b).map (fun α => .lam n t α bi)
+  | .letE n t v b nd =>
+    attestedTypes ctor t ++ attestedTypes ctor v ++
+      (attestedTypes ctor b).map (fun α => .letE n t v α nd)
+  | .mdata _ b | .proj _ _ b => attestedTypes ctor b
+  | .bvar _ | .fvar _ | .mvar _ | .sort _ | .const .. | .lit _ => []
+
+/-- The diagnostic traversal retains exactly the attested types with their binder contexts,
+for every expression, including occurrences under arbitrary nested binders. -/
+theorem mem_attestedTypes {ctor : Name} {α : Expr} :
+    (e : Expr) → (α ∈ attestedTypes ctor e ↔ AttestedType ctor e α)
+  | .app f a => by
+    by_cases h : f.consumeMData.isConstOf ctor = true <;>
+      simp [attestedTypes, AttestedType, h, mem_attestedTypes f, mem_attestedTypes a]
+  | .lam n t b bi => by
+    simp [attestedTypes, AttestedType, mem_attestedTypes t, mem_attestedTypes b]
+  | .forallE n t b bi => by
+    simp [attestedTypes, AttestedType, mem_attestedTypes t, mem_attestedTypes b]
+  | .letE n t v b nd => by
+    simp [attestedTypes, AttestedType, mem_attestedTypes t, mem_attestedTypes v,
+      mem_attestedTypes b]
+  | .mdata _ b | .proj _ _ b => by simp [attestedTypes, AttestedType, mem_attestedTypes b]
+  | .bvar _ | .fvar _ | .mvar _ | .sort _ | .const .. | .lit _ => by
+    simp [attestedTypes, AttestedType]
+
+/-- Render a diagnostic type with its binder types, whether it is a type family extracted from
+an attestation or an instance's full quantified declaration type. -/
+def diagnosticType (α : Expr) : MetaM String := withOptions
+    (fun o => ((o.setBool `pp.funBinderTypes true).setBool `pp.piBinderTypes true).setBool
+      `pp.letVarTypes true) do
+  return toString (← ppExpr α)
+
+/-- An attestation the audit refuses: the declaration `decl` that holds it, the types it applies
+the constructor to with their enclosing binders (none only for an unapplied constructor), why it
+is not the handler's, and the reached instances of `HasCode` or `Covered` that depend on `decl`,
+each paired with its full quantified declaration type even if the constructor is unapplied. -/
 structure Finding where
   decl : Name
   type? : Option String
   why : String
-  carriers : Array Name
+  carriers : Array (Name × String)
 
 /-- What an audit found: the declarations it audited, `first :: rest`, the attestations it refuses, and the refusal of `decide`, if any, with, for a refusal at a name outside
 the modules that can name the constructor, the axioms other than Lean's three that the name rests
@@ -343,13 +388,12 @@ def audit (first : Name) (rest : List Name) : MetaM Outcome := do
   for (c, ci) in candidates do
     match ← Declared.checkAttestation ctor ci with
     | (_, none) => verified := verified.insert c
-    | (some ty, some why) => refused := refused.push (c, some ty, why)
-    | (none, some why) =>
-      -- The types it applies the constructor to, where they can be read.
-      let es := attestedTypes ctor ci.type (match ci.value? (allowOpaque := true) with
-        | some v => attestedTypes ctor v #[]
-        | none => #[])
-      let tys ← es.mapM fun α => return toString (← ppExpr α)
+    | (_, some why) =>
+      -- One diagnostic path for every refusal; no binder-dependent type can be discarded.
+      let es := attestedTypes ctor ci.type ++ (match ci.value? (allowOpaque := true) with
+        | some v => attestedTypes ctor v
+        | none => [])
+      let tys ← es.toArray.mapM diagnosticType
       let tys := tys.foldl (fun acc t => if acc.contains t then acc else acc.push t) #[]
       refused := refused.push (c, if tys.isEmpty then none else some (", ".intercalate tys.toList), why)
   -- The reached declarations that depend on each refused one, for its carriers.
@@ -369,8 +413,12 @@ def audit (first : Name) (rest : List Name) : MetaM Outcome := do
         unless seen.contains d do
           seen := seen.insert d
           up := (dependents.getD d #[]).toList ++ up
-    let carriers := seen.toArray.filter fun d => (lookup d).any isCarrier
-    findings := findings.push { decl := c, type? := ty, why, carriers := carriers.qsort Name.lt }
+    let mut carriers := #[]
+    for d in seen.toArray.qsort Name.lt do
+      if let some ci := lookup d then
+        if isCarrier ci then
+          carriers := carriers.push (d, ← diagnosticType ci.type)
+    findings := findings.push { decl := c, type? := ty, why, carriers }
   let refusal? := decide lookup relevant exempt verified.contains (axiomsIn env) ctor first rest
   -- A refusal at a name outside the modules that can name the constructor is for its axioms.
   let outside (c : Name) : Option (Array Name) :=
@@ -384,9 +432,9 @@ def report (o : Outcome) : Array String :=
   let lines := o.findings.map fun f =>
     let carried := if f.carriers.isEmpty then
         "no instance of `LeanIntent.HasCode` or `LeanIntent.Covered` declared among the dependencies depends on it"
-      else s!"the instances that depend on it: {", ".intercalate (f.carriers.toList.map (s!"{·}"))}"
+      else s!"the instances that depend on it: {", ".intercalate (f.carriers.toList.map fun (c, ty) => s!"{c} : {ty}")}"
     let what := match f.type? with
-      | some ty => s!"to {ty} with a code or isomorphism the deriving handler does not write from that type's declaration"
+      | some ty => s!"to the types (abstracted over their enclosing binders) {ty} with a code or isomorphism the deriving handler does not write from their declarations"
       | none => "in a form the deriving handler does not write"
     s!"{f.decl} applies the private constructor of `LeanIntent.Ty.Stands` {what}: {f.why}; {carried}"
   match o.refusal? with
