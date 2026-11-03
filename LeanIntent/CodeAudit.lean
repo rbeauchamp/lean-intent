@@ -46,6 +46,8 @@ environment, that a declaration depends on no such attestation.
   the search finds nothing, as `tools/codes.lean` does. Diagnostic types retain their enclosing
   binders as type families (`AttestedType`, `mem_attestedTypes`), rather than losing types that
   depend on a bound variable; Lean's pretty printer renders those families with binder types.
+  Carrier recognition uses Lean's `isClass?`, as instance registration does, so reducible aliases
+  of either class, including aliases hiding quantifiers, are recognized (`isCarrier_eq`).
 
 A refused attestation is one of three kinds. A hand-written instance, or a proof Lean abstracts out
 of one (`inst._proof_1`), that applies the constructor with a code or isomorphism other than the
@@ -83,6 +85,8 @@ What the theorems do not reach, and what is trusted:
   Lean's module system an imported theorem is shown as an axiom, so the audit refuses there rather
   than accept a proof it cannot read; run it where every module is imported in full.
 * That Lean's compiler runs these definitions as defined: the theorems are about the definitions.
+* That Lean's `isClass?` recognizes class types: `isCarrier_eq` specifies the call and how its
+  result selects carriers, not the correctness of Lean's reduction and class recognition.
 -/
 
 namespace LeanIntent.CodeAudit
@@ -268,11 +272,21 @@ imported declaration, those Lean recorded when it exported the declaration's mod
 def axiomsIn (env : Environment) (c : Name) : Array Name :=
   (collectAxioms c : EnvM (Array Name)).run' env
 
-/-- Whether `ci` is an instance of `HasCode` or `Covered`, or a function returning one: the
-conclusion of its type is one of the two classes applied to a type. -/
-def isCarrier (ci : ConstantInfo) : Bool :=
-  let head := ci.type.getForallBody.getAppFn
-  head.isConstOf ``HasCode || head.isConstOf ``Covered
+/-- Whether Lean recognizes `ci` as an instance of `HasCode` or `Covered`, or a function
+returning one. Use the same semantic class recognition as instance registration, including its
+reducible unfolding and telescope traversal, rather than inspecting the type's written head. -/
+def isCarrier (ci : ConstantInfo) : MetaM Bool := do
+  let cls ← isClass? ci.type
+  return cls == some ``HasCode || cls == some ``Covered
+
+/-- Carrier selection asks Lean to recognize the declaration's full type and selects exactly
+the two carrier classes. This specifies the request to Lean and the use of its result; Lean's
+recognition itself remains trusted. The reporting traversal uses this operation directly. -/
+theorem isCarrier_eq (ci : ConstantInfo) :
+    isCarrier ci = (do
+      let cls ← isClass? ci.type
+      pure (Decidable.decide (cls = some ``HasCode ∨ cls = some ``Covered))) := by
+  simp [isCarrier, Bool.beq_eq_decide_eq]
 
 /-- `AttestedType ctor e α`: `α` is the first argument of an application of `ctor` in `e`,
 abstracted over the binders enclosing that occurrence. Both `fun` and `∀` binders become `fun`
@@ -416,7 +430,7 @@ def audit (first : Name) (rest : List Name) : MetaM Outcome := do
     let mut carriers := #[]
     for d in seen.toArray.qsort Name.lt do
       if let some ci := lookup d then
-        if isCarrier ci then
+        if ← isCarrier ci then
           carriers := carriers.push (d, ← diagnosticType ci.type)
     findings := findings.push { decl := c, type? := ty, why, carriers }
   let refusal? := decide lookup relevant exempt verified.contains (axiomsIn env) ctor first rest
