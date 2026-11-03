@@ -22,8 +22,9 @@ A value whose value does not reduce to the constructor's application, such as an
 an axiom, is an error naming it, never a pass: Lean's `whnf` unfolds only definitions
 (`Meta.getUnfoldableConst?`). So is an unsafe value, as `declaredIn` refuses every unsafe constant it
 finds: an unsafe definition may refer to itself, so its proof could prove anything, while a safe one
-cannot refer to an unsafe constant, which Lean's kernel refuses. What a value's proof proves is fixed by its type and was checked by
-Lean's kernel when the value was declared, so nothing here reads a theorem's statement.
+cannot refer to an unsafe constant, which Lean's kernel refuses. What a value's proof proves is fixed
+by its type and was checked by Lean's kernel when the value was declared, so nothing here reads a
+theorem's statement.
 
 The modules given are the caller's, and should be every module of the project, as Lake lists them,
 the same list given to `LeanIntent.Confirmation.Read.check`: a module left out hides what it
