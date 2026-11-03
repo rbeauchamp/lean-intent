@@ -83,7 +83,9 @@ builds the term directly, can still apply it; no mechanism inside Lean's logic p
 the logic cannot refer to the constructors of an arbitrary type. The audit of declared types' codes
 (`LeanIntent.CodeAudit`) decides the second for a declaration: it reads every attestation the
 declaration depends on with `checkAttestation`, which re-derives the code through `codeWith` and the
-isomorphism by where it takes each constructor, and compares them by Lean's kernel. The handler runs
+isomorphism by where it takes each constructor, and compares them by Lean's kernel; for a recursive
+type, the code through `readGroup` and `recCode`, and the isomorphism by the equations its maps meet
+at every constructor of the group (`checkRecMaps`). The handler runs
 `checkAttestation` on what it writes and fails rather than write a code the audit would refuse, so
 the two agree on every type the handler covers. The first stays trusted: the audit derives the code
 through the same functions, not by a second reading of the declaration.
@@ -347,17 +349,14 @@ group and the chain of the codes of its recursive fields' arguments, in declarat
 code for a field that holds a value of the group, the argument's code for a function of one argument
 and the chain of the arguments' codes for a function of several); `r` the same chain with each
 constructor the chain of `ref l` for each recursive field, `l` the type of the group it holds.
-Refuses a field or argument whose type has no code, a type with no constructor of the first kind,
-and a type that does not grow (`Ty.grows`). -/
-def recCode (indVal : InductiveVal) (group : Array (Expr × Array GCtor)) (i : Nat) :
-    TermElabM (Expr × Expr × Expr) := do
-  let codeOf (t : Expr) : TermElabM Expr := do
-    let some inst ← synthInstance? (mkApp (mkConst ``HasCode) t)
-      | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: the type `{t}` of one of its fields has no code; derive `LeanIntent.HasCode` for it first if the project declares it"
-    return mkApp2 (mkConst ``HasCode.code) t inst
-  let dataCodes (c : GCtor) : TermElabM (List Expr) :=
+Each field's and argument's code is the one `codeOf` gives for its type. Refuses a type with no
+constructor of the first kind, and a type that does not grow (`Ty.grows`). -/
+def recCodeWith {m : Type → Type} [Monad m] [MonadError m] [MonadEnv m] [MonadLCtx m]
+    (indVal : InductiveVal) (group : Array (Expr × Array GCtor)) (i : Nat)
+    (codeOf : Expr → m Expr) : m (Expr × Expr × Expr) := do
+  let dataCodes (c : GCtor) : m (List Expr) :=
     c.fields.toList.filterMapM fun | .data t => some <$> codeOf t | .ref _ _ => pure none
-  let domCodes (c : GCtor) : TermElabM (List Expr) :=
+  let domCodes (c : GCtor) : m (List Expr) :=
     c.fields.toList.filterMapM fun
       | .data _ => pure none
       | .ref _ doms => do
@@ -378,9 +377,21 @@ def recCode (indVal : InductiveVal) (group : Array (Expr × Array GCtor)) (i : N
   let g := chainCode (← others.mapM fun cs => return chainCode (← cs.mapM fun c => do
     return chainCode [chainCode (← dataCodes c), chainCode (← domCodes c)]))
   let r := chainCode (others.map fun cs => chainCode (cs.map fun c => chainCode (targets c)))
-  unless ← isDefEq (mkApp2 (mkConst ``Ty.grows) r (toExpr i)) (toExpr true) do
+  -- `r` holds only numbers of types, so Lean's kernel decides whether the group grows.
+  let grows := Kernel.isDefEq (← getEnv) (← getLCtx) (mkApp2 (mkConst ``Ty.grows) r (toExpr i))
+    (toExpr true)
+  unless grows matches .ok true do
     throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: its recursive constructors do not build values of every depth, since a type of its group they need has no value"
   return (b, g, r)
+
+/-- `recCodeWith` with the code of each field's type found by Lean's instance resolution, as the
+handler writes it. Refuses a field or argument whose type has no code. -/
+def recCode (indVal : InductiveVal) (group : Array (Expr × Array GCtor)) (i : Nat) :
+    TermElabM (Expr × Expr × Expr) :=
+  recCodeWith indVal group i fun t => do
+    let some inst ← synthInstance? (mkApp (mkConst ``HasCode) t)
+      | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: the type `{t}` of one of its fields has no code; derive `LeanIntent.HasCode` for it first if the project declares it"
+    return mkApp2 (mkConst ``HasCode.code) t inst
 
 /-! ## Reading an attestation -/
 
@@ -426,6 +437,165 @@ def builtinHeads : MetaM (Array Name) := do
           heads := heads.push h
   return heads
 
+/-- Whether `f`, a map from the `i`-th type of the recursive group `group` (as `readGroup` reads it)
+to that type's trees, is the map the handler writes, read constructor by constructor: `none` when
+it is, and otherwise the reason it is not. Starting from `f` for the `i`-th type, it checks, for
+every constructor of every type of the group the maps reach, that the map applied to the constructor
+and its fields is, by Lean's kernel:
+
+* for a base constructor of the `i`-th type, the base value holding the constructor's alternative
+  of the base, with each field carried through its own type's isomorphism;
+* for any other constructor, the node of that constructor, in the type's list, holding the chain
+  of its other fields each so carried, whose child at each recursive field and position is the
+  map of the type that field holds, applied to the field at that position, each argument carried
+  back through its own type's isomorphism.
+
+The map of a type other than the `i`-th is the one `candidate` gives, the handler's beside the
+attestation where there is one, or else the one read from the first child of that type, and every
+child of that type is checked against it. A candidate decides nothing by its name: only these
+equations accept it. Maps that satisfy these equations for every constructor
+are, by structural recursion over the group, the handler's maps, so an isomorphism with this forward
+map is the handler's, its map back being that map's inverse. Each type of the group is read at most
+once. -/
+def checkRecMaps (group : Array (Expr × Array GCtor)) (i : Nat) (f : Expr)
+    (instOf : Expr → MetaM (Option Expr)) (candidate : Nat → MetaM (Option Expr)) :
+    MetaM (Option String) := do
+  let kernelEq (a b : Expr) : MetaM Bool := do
+    return Kernel.isDefEq (← getEnv) (← getLCtx) a b matches .ok true
+  let codeOf (t inst : Expr) : Expr := mkApp2 (mkConst ``HasCode.code) t inst
+  let carry (fn : Name) (t inst v : Expr) : Expr :=
+    mkApp4 (mkConst fn) t (denoteE (codeOf t inst)) (mkApp2 (mkConst ``HasCode.iso) t inst) v
+  -- The data part of a constructor's fields `xs`: each field that holds no value of the group, with
+  -- its code and its value carried through its type's isomorphism.
+  let dataParts (c : GCtor) (xs : Array Expr) : MetaM (Option (List (Expr × Expr))) := do
+    let mut parts := #[]
+    for (fld, x) in c.fields.zip xs do
+      if let .data t := fld then
+        let some inst ← instOf t | return none
+        parts := parts.push (codeOf t inst, carry ``Iso.to t inst x)
+    return some parts.toList
+  -- The alternatives of the base: for each base constructor of the `i`-th type, its data chain.
+  let mut baseAlts := #[]
+  for c in group[i]!.2.filter GCtor.isBase do
+    let mut codes := #[]
+    for fld in c.fields do
+      if let .data t := fld then
+        let some inst ← instOf t | return some s!"the type `{t}` of a field of `{c.name}` has no code"
+        codes := codes.push (codeOf t inst)
+    baseAlts := baseAlts.push (denoteE (chainCode codes.toList))
+  -- A map applied to a constructor, reduced to a base value or a node: by `whnf`; where that stops
+  -- short, as it can at a recursive field that is a function, by an equation Lean proves for the
+  -- map's head constant whose left side is the application, since a proved equation serves the
+  -- argument above as well as a reduction does; and otherwise by Lean's kernel.
+  let reduce (e : Expr) : MetaM Expr := do
+    let w ← whnf e
+    if w.isAppOf ``MuVal.base || w.isAppOf ``MuVal.node then return w
+    if let .const fn _ := e.getAppFn then
+      if let some eqs ← (try getEqnsFor? fn catch _ => pure none) then
+        for eq in eqs do
+          let (_, _, ty) ← forallMetaTelescopeReducing (← inferType (← mkConstWithFreshMVarLevels eq))
+          if let some (_, l, rhs) := ty.eq? then
+            if ← isDefEq l e then
+              let rhs ← whnfR (← instantiateMVars rhs)
+              if !rhs.hasMVar && (rhs.isAppOf ``MuVal.base || rhs.isAppOf ``MuVal.node) then
+                return rhs
+    match Kernel.whnf (← getEnv) (← getLCtx) e with
+    | .ok k => return k
+    | .error _ => return w
+  let mut maps : Array (Option Expr) := group.map fun _ => none
+  maps := maps.set! i (some f)
+  let mut todo : List Nat := [i]
+  for _ in [0:group.size] do
+    let k :: rest := todo | return none
+    todo := rest
+    let some F := maps[k]! | return some "a map of the group is missing"
+    let (τ, cs) := group[k]!
+    let .const tName tUs := τ.getAppFn | return some s!"`{τ}` is not an inductive type applied to its parameters"
+    let _ := tName
+    let mut nb := 0
+    let mut nn := 0
+    for c in cs do
+      let isBase := k == i && c.isBase
+      let types ← c.fields.mapM fun
+        | .data t => pure t
+        | .ref l doms => doms.foldrM (fun d acc => mkArrow d acc) group[l]!.1
+      let outcome : Except String (Array (Nat × Expr)) ←
+          withLocalDeclsDND (types.mapIdx fun j t => (Name.mkSimple s!"x{j}", t)) fun xs => do
+        let lhs ← reduce (mkApp F (mkAppN (mkConst c.name tUs) (τ.getAppArgs ++ xs)))
+        let some parts ← dataParts c xs | return .error s!"a field of `{c.name}` has no code"
+        if isBase then
+          unless lhs.isAppOfArity ``MuVal.base 8 do
+            return .error s!"the map does not take `{c.name}` to a base value"
+          unless ← kernelEq lhs.appArg! (injExpr baseAlts.toList nb (chainExpr parts)) do
+            return .error s!"the map does not take `{c.name}` to base alternative {nb} holding its fields, each carried through its own type's isomorphism"
+          return .ok #[]
+        unless lhs.isAppOfArity ``MuVal.node 11 do
+          return .error s!"the map does not take `{c.name}` to a node"
+        let args := lhs.getAppArgs
+        let (cE, d, kids) := (args[8]!, args[9]!, args[10]!)
+        let some nE := (← whnf (← inferType cE)).app1? ``Fin
+          | return .error s!"the node of `{c.name}` has no constructor number"
+        unless ← kernelEq (mkApp2 (mkConst ``Fin.val) nE cE) (mkNatLit nn) do
+          return .error s!"the map does not take `{c.name}` to the node of constructor {nn}"
+        unless ← kernelEq d (chainExpr parts) do
+          return .error s!"the node of `{c.name}` does not hold its other fields, each carried through its own type's isomorphism"
+        -- Each recursive field's children: the map of its type at the field, its arguments carried back.
+        let some aE := (← whnf (← inferType kids)).bindingDomain!.app1? ``Fin
+          | return .error s!"the children of `{c.name}` are not numbered"
+        let mut found := #[]
+        let mut r := 0
+        for (fld, x) in c.fields.zip xs do
+          let .ref l doms := fld | continue
+          -- `r < A`, proved by `decide` through `Nat.decLt`, built without instance resolution, which
+          -- an environment imported without its extensions' state does not offer.
+          let lt := mkApp4 (mkConst ``LT.lt [Level.zero]) (mkConst ``Nat) (mkConst ``instLTNat)
+            (mkNatLit r) aE
+          let h := mkApp3 (mkConst ``of_decide_eq_true) lt (mkApp2 (mkConst ``Nat.decLt) (mkNatLit r) aE)
+            (mkApp2 (mkConst ``Eq.refl [Level.one]) (mkConst ``Bool) (mkConst ``Bool.true))
+          let pos := mkApp3 (mkConst ``Fin.mk) aE (mkNatLit r) h
+          let yTy := (← whnf (← inferType (mkApp kids pos))).bindingDomain!
+          let res : Except String (Option Expr) ← withLocalDeclD `y yTy fun y => do
+            let mut argVals := #[]
+            for h : q in [0:doms.size] do
+              let d := doms[q]
+              let some inst ← instOf d | return .error s!"an argument type of `{c.name}` has no code"
+              let v ← if doms.size == 1 then pure y else do
+                let mut v := y
+                for _ in [0:q] do v ← mkAppM ``Prod.snd #[v]
+                mkAppM ``Prod.fst #[v]
+              argVals := argVals.push (carry ``Iso.inv d inst v)
+            let arg := mkAppN x argVals
+            let child ← whnfR (mkApp2 kids pos y)
+            match maps[l]!, found.find? (·.1 == l) with
+            | some G, _ | none, some (_, G) =>
+              return if ← kernelEq child (mkApp G arg) then .ok none
+                else .error s!"a child of `{c.name}` is not the map of its type at the field"
+            | none, none =>
+              if let some G ← candidate l then
+                return if ← kernelEq child (mkApp G arg) then .ok (some G)
+                  else .error s!"a child of `{c.name}` is not the map of its type at the field"
+              unless child.isApp && (← kernelEq child.appArg! arg) do
+                return .error s!"a child of `{c.name}` is not a map applied to the field"
+              let G := child.appFn!
+              if G.hasAnyFVar fun v => v == y.fvarId! || xs.any (·.fvarId! == v) then
+                return .error s!"a child of `{c.name}` is not a map of its type"
+              return .ok (some G)
+          match res with
+          | .error why => return .error why
+          | .ok (some G) => found := found.push (l, G)
+          | .ok none => pure ()
+          r := r + 1
+        return .ok found
+      match outcome with
+      | .error why => return some why
+      | .ok found =>
+        for (l, G) in found do
+          if maps[l]!.isNone then
+            maps := maps.set! l (some G)
+            todo := todo ++ [l]
+      if isBase then nb := nb + 1 else nn := nn + 1
+  return if todo.isEmpty then none else some "the maps of the group were not all read"
+
 /-- Whether the declaration `ci` is an attestation the handler writes, where `ctor` is the private
 constructor of `Ty.Stands` that admits a declared type (`standsDecl`). It is one when `ci` is a
 theorem whose statement does not name `ctor` and whose value names it once, as the whole value under
@@ -452,7 +622,7 @@ def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String ×
     return (none, some "its statement names the constructor")
   unless (Cone.exprRefs v.value []).count ctor == 1 do
     return (none, some "its value does not name the constructor exactly once")
-  lambdaTelescope v.value fun _ body => do
+  lambdaTelescope v.value fun binders body => do
     unless body.isAppOfArity ctor 5 do
       return (none, some "its value is not one application of the constructor under `fun` binders")
     let #[α, n, ps, r, e] := body.getAppArgs | unreachable!
@@ -474,6 +644,57 @@ def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String ×
     try
       (withParams indVal fun xs _ _ => discard <| ctors indVal xs : TermElabM Unit).run'
     catch ex => return ← fail (← ex.toMessageData.toString)
+    let kernelEq (a b : Expr) : MetaM Bool := do
+      return Kernel.isDefEq (← getEnv) (← getLCtx) a b matches .ok true
+    -- A recursive type: its code re-derived by the handler's own reading of its group, and the maps
+    -- of its group read constructor by constructor (`checkRecMaps`).
+    if indVal.isRec || indVal.numNested != 0 then
+      let i := indVal.all.idxOf T
+      -- The code of each field's and argument's type: one metavariable for each type, which Lean's
+      -- unifier then finds in the attestation's code, as for `codeWith` below.
+      let codeOf (t : Expr) : StateT (Array (Expr × Expr)) MetaM Expr := do
+        if let some (_, inst) := (← get).find? (·.1 == t) then
+          return mkApp2 (mkConst ``HasCode.code) t inst
+        let inst ← mkFreshExprMVar (mkApp (mkConst ``HasCode) t)
+        modify (·.push (t, inst))
+        return mkApp2 (mkConst ``HasCode.code) t inst
+      let read : Except String (Option (Array (Expr × Array GCtor) × Expr × Array (Expr × Expr))) ← try
+          let group ← (readGroup indVal as : TermElabM _).run'
+          match reachesItself group i with
+          | none => pure (Except.error "whether it reaches itself through the fields of its group is not settled")
+          | some false => pure (.ok none)
+          | some true =>
+            let ((b, g, refs, ps), insts) ← (do
+                let (b, g, refs) ← recCodeWith indVal group i codeOf
+                return (b, g, refs, ← as.toList.mapM codeOf)).run #[]
+            pure (.ok (some (group, mkApp3 (mkConst ``Ty.decl) (toExpr indVal.name) (chainCode ps)
+              (mkApp4 (mkConst ``Ty.mu) b g refs (toExpr i)), insts)))
+        catch ex => pure (.error (← ex.toMessageData.toString))
+      match read with
+      | .error why => return ← fail why
+      | .ok none => pure ()
+      | .ok (some (group, derived, insts)) =>
+        let given := mkApp3 (mkConst ``Ty.decl) n ps r
+        unless ← isDefEq given derived do
+          return ← fail "its code is not the one the declaration fixes"
+        let derived ← instantiateMVars derived
+        let insts ← insts.mapM fun (t, inst) => return (t, ← instantiateMVars inst)
+        if derived.hasMVar || insts.any (·.2.hasMVar) then
+          return ← fail "its code does not fix an instance of `HasCode` for each of its parts"
+        unless ← kernelEq α (mkAppN (mkConst T us) as) do
+          return ← fail "Lean's kernel does not find the type to be its declaration applied to its parameters"
+        unless ← kernelEq given derived do
+          return ← fail "Lean's kernel does not find its code to be the one the declaration fixes"
+        let instOf (t : Expr) : MetaM (Option Expr) := return (insts.find? (·.1 == t)).map (·.2)
+        -- A candidate for the map of another type of the group: the one the handler writes beside
+        -- the attestation, applied to the same binders. Only its equations, checked below, decide.
+        let candidate (l : Nat) : MetaM (Option Expr) := do
+          let nm := ci.name.getPrefix ++ Name.mkSimple s!"to{l}"
+          return if (← getEnv).contains nm then some (mkAppN (mkConst nm) binders) else none
+        if let some why ← checkRecMaps group i (mkApp3 (mkConst ``Iso.to) α (denoteE given) e) instOf
+            candidate then
+          return ← fail s!"its isomorphism is not the handler's: {why}"
+        return (some ty, none)
     let cs ← (ctors indVal as : TermElabM _).run'
     -- The code, with a metavariable for each instance, in the order `codeWith` asks for them.
     let (derived, insts) ← (codeWith indVal as cs fun t => do
