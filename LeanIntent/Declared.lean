@@ -298,23 +298,31 @@ def readGroup (indVal : InductiveVal) (xs : Array Expr) : TermElabM (Array (Expr
         ctors := ctors.modify k (·.push ctor)
       return sorts.zip ctors
 
-/-- Whether the `i`-th type of the group reaches itself through recursive fields: the group's types
-that the fields of each type's constructors hold, followed from the `i`-th type's. -/
-def reachesItself (group : Array (Expr × Array GCtor)) (i : Nat) : Bool := Id.run do
+/-- Whether the `i`-th type of the group reaches itself: `some true` when it is among the types of
+the group that the recursive fields of its constructors hold, or that those of theirs hold, and so
+on, and `some false` when it is not. Each type of the group enters the list still to follow at most
+once, marked when it enters, and an index outside the group never enters, so the list is empty after
+as many steps as the group has types; `none`, which the caller refuses, if it were not. -/
+def reachesItself (group : Array (Expr × Array GCtor)) (i : Nat) : Option Bool := Id.run do
   let next (k : Nat) : List Nat := (group[k]?.map (·.2.toList)).getD [] |>.flatMap fun c =>
     c.fields.toList.filterMap fun | .ref l _ => some l | .data _ => none
   let mut seen : Array Bool := group.map fun _ => false
-  let mut todo := next i
-  for _ in [0:group.size * group.size + 1] do
+  let mut todo : List Nat := []
+  for l in next i do
+    if !(seen[l]?.getD true) then
+      seen := seen.set! l true
+      todo := l :: todo
+  for _ in [0:group.size] do
     match todo with
-    | [] => break
+    | [] => return some false
     | l :: rest =>
+      if l == i then return some true
       todo := rest
-      if l == i then return true
-      if !(seen[l]?.getD true) then
-        seen := seen.set! l true
-        todo := todo ++ next l
-  return false
+      for m in next l do
+        if !(seen[m]?.getD true) then
+          seen := seen.set! m true
+          todo := m :: todo
+  return if todo.isEmpty then some false else none
 
 /-- The code `Ty.decl n ps (Ty.mu b g r i)` of the `i`-th type of the recursive group `group`, as
 its base `b`, data and arguments `g` and recursive fields `r`: `b` the representation of the
@@ -639,7 +647,9 @@ def mkHasCode (declName : Name) : CommandElabM Unit := do
   let i := indVal.all.idxOf declName
   let recursive ← liftTermElabM <| withParams indVal fun xs _ _ => do
     if indVal.isRec || indVal.numNested != 0 then
-      return reachesItself (← readGroup indVal xs) i
+      let some r := reachesItself (← readGroup indVal xs) i
+        | throwError "LeanIntent.HasCode: `{.ofConstName declName}` is not covered: whether it reaches itself through the fields of its group was not settled"
+      return r
     return false
   if recursive then
     return ← mkRecHasCode declName indVal i
