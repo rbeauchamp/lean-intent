@@ -6,8 +6,9 @@ import LeanIntent.TrivialWitnesses
 
 The agent of `LeanIntentExamples.Pairs` sees one bit and answers with one action, and its record
 asks it to reach the goal of every legible world. Its subject type `Bool → Bool` takes one argument,
-so its trivial witnesses are any subject, the table, and one subject of each degenerate member: the
-constants at `false` and `true` and the identity (`agent_witnesses`, `agent_degenerate`).
+and a subject that does not read it is a constant, which the table holds, so the verdicts of its
+pairs are about any subject, the table, the constants at `false` and `true`, and the identity
+(`perWorld_witnesses`, `whole_witnesses`).
 
 The per-world pair meets the pair obligation in the class of agents that ignore what they see
 (`perWorld_blind`), and the check reports why: the table meets it, since each legible world is
@@ -19,8 +20,8 @@ sees, meets both, and each report names it.
 
 An agent with a clock acts at two steps, each on what it sees there, and its record asks it to
 follow every readable course, one in which what it sees at each step is the action it needs then.
-Its subject type `Fin 2 → Bool → Bool` takes two arguments, so its class also holds, for each, the
-member that does not read it (`clocked_witnesses`). Each readable course alone is followed by a
+Its subject type `Fin 2 → Bool → Bool` takes two arguments, so the verdicts of its pairs are also
+about, for each, the member that does not read it. Each readable course alone is followed by a
 script of timed actions, which reads its clock and not what it sees, so the per-course pair is met
 by the member that does not read the second argument (`perCourse_witnesses`), as a timed script
 solves every feasible goal; no constant follows the course that needs `true` and then `false`, so
@@ -34,16 +35,6 @@ namespace LeanIntentExamples.TrivialWitnesses
 open LeanIntent LeanIntentExamples.Pairs
 
 /-! ## An agent that sees one bit -/
-
-/-- An agent of one argument has no member that does not read one argument: the constants hold it.
--/
-theorem agent_witnesses :
-    witnesses Agent = [.vacuous, .table] ++ (degenerate Agent).map .fixed := rfl
-
-/-- The degenerate members of an agent: the constants at `false` and `true`, and the identity. -/
-theorem agent_degenerate :
-    (degenerate Agent).map Degenerate.reading =
-      [.subject fun _ => false, .subject fun _ => true, .subject fun s => s] := rfl
 
 /-- An agent ignores what it sees exactly when it is a constant subject. -/
 theorem blind_iff_constant (a : Agent) : Blind a ↔ Witness.Constant a :=
@@ -120,20 +111,6 @@ def perCourse : Pair Clocked := ⟨Course, Readable, fun v a => Follows a v⟩
 theorem perCourse_pairOf : clocked.PairOf followsReadable perCourse :=
   ⟨List.mem_singleton_self _, fun _ =>
     ⟨fun h v hv => h (fun _ hd => nomatch hd) v hv, fun h _ => h⟩⟩
-
-/-- The class of an agent with a clock: any subject, the table, the members that do not read its
-clock and what it sees, and one subject of each degenerate member. -/
-theorem clocked_witnesses :
-    witnesses Clocked =
-      [.vacuous, .table, .blind ⟨0, by decide⟩, .blind ⟨1, by decide⟩] ++
-        (degenerate Clocked).map .fixed :=
-  rfl
-
-/-- The degenerate members of an agent with a clock: the constants, and the agent that does what it
-sees. -/
-theorem clocked_degenerate :
-    (degenerate Clocked).map Degenerate.reading =
-      [.subject fun _ _ => false, .subject fun _ _ => true, .subject fun _ s => s] := rfl
 
 /-- The course that needs `true` and then `false`, and shows it. -/
 def zigzag : Course := ⟨fun t => t.val == 0, fun t => t.val == 0⟩
