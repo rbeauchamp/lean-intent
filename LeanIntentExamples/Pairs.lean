@@ -74,7 +74,7 @@ theorem perWorld_pairOf : agent.PairOf reachesLegible perWorld :=
 /-- Each legible world alone is reached by an agent that ignores what it sees: the per-world pair
 meets the obligation in that class. -/
 theorem perWorld_blind : OPair perWorld Blind :=
-  oPair_of ⟨⟨true, true⟩, rfl, fun _ => false, nofun⟩ fun v _ =>
+  oPair_of ⟨⟨true, true⟩, rfl⟩ fun v _ =>
     ⟨fun _ => v.need, fun _ _ => rfl, rfl⟩
 
 /-- The legible worlds that see `true` and `false` need different actions. -/
@@ -86,15 +86,13 @@ theorem legible_differ (a : Agent) (h : reachesLegible.holds a) : ¬ Blind a := 
 
 /-- No agent that ignores what it sees reaches the goal of every legible world. -/
 theorem whole_not_blind : ¬ OPair (Pair.whole agent reachesLegible) Blind := fun h => by
-  obtain ⟨_, a, hb, hf⟩ := (oPair_whole_iff _ _ _).mp h
+  obtain ⟨a, hb, hf⟩ := (oPair_whole_iff _ _ _).mp h
   exact legible_differ a (hf fun _ hd => nomatch hd) hb
 
-/-- The agent that does what it sees reaches the goal of every legible world, and the agent that
-always answers `false` fails one: the whole property meets the obligation in the class of all agents. -/
+/-- The agent that does what it sees reaches the goal of every legible world: the whole property
+meets the obligation in the class of all agents. -/
 theorem whole_any : OPair (Pair.whole agent reachesLegible) fun _ => True :=
-  (oPair_whole_iff agent reachesLegible _).mpr
-    ⟨⟨fun _ => false, fun _ hd => (nomatch hd), fun h => Bool.false_ne_true (h ⟨true, true⟩ rfl)⟩,
-      fun s => s, trivial, fun _ _ hv => hv.symm⟩
+  (oPair_whole_iff agent reachesLegible _).mpr ⟨fun s => s, trivial, fun _ _ hv => hv.symm⟩
 
 /-- The obligation of the per-world pair does not give that of the whole property. -/
 theorem perWorld_not_whole :
@@ -132,7 +130,7 @@ def everyPerWorld : Pair Agent := ⟨World, fun _ => True, fun v a => Reaches a 
 
 /-- Each world alone is still reached by an agent that ignores what it sees. -/
 theorem everyPerWorld_blind : OPair everyPerWorld Blind :=
-  oPair_of ⟨⟨true, true⟩, trivial, fun _ => false, nofun⟩ fun v _ =>
+  oPair_of ⟨⟨true, true⟩, trivial⟩ fun v _ =>
     ⟨fun _ => v.need, fun _ _ => rfl, rfl⟩
 
 end LeanIntentExamples.Pairs
