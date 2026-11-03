@@ -33,8 +33,8 @@ a checker that refuses a process start can call this.
 recorded against any other build's text, an older revision's or a definition's former body's, names
 another text and does not count. A deliverable whose meaning reaches what cannot be printed fails
 with an error naming it, never a pass, as does one that is not a constructor's application once
-reduced, such as an opaque constant or an axiom, and every unsafe constant of the types read here,
-whose proofs could prove anything (`declaredWhere`).
+reduced, such as an opaque constant or an axiom, and every unsafe or partial constant of the types
+read here, whose proofs could prove anything (`declaredWhere`).
 
 The modules given are the caller's, and should be every module of the project, as Lake lists them:
 a module left out hides what it declares, and an empty list finds no log. A constant whose type is
@@ -52,13 +52,34 @@ namespace LeanIntent.Confirmation.Read
 
 open Lean Meta LeanIntent.Render
 
+/-- Whether a discovered constant's safety permits relying on the proofs it holds. Definitions
+must be `safe`: `ConstantInfo.isUnsafe` alone also admits `partial` definitions. Other kinds retain
+Lean's unsafe flag check; opaque constants and axioms still fail when their values are read. -/
+def proofSafe : ConstantInfo → Bool
+  | .defnInfo v =>
+    match v.safety with
+    | .safe => true
+    | .unsafe | .partial => false
+  | ci => !ci.isUnsafe
+
+/-- The admission predicate requires exactly `safe` for every definition, covering every
+`DefinitionSafety` constructor, and preserves the unsafe flag check for all other constants. -/
+theorem proofSafe_iff (ci : ConstantInfo) : proofSafe ci = true ↔
+    match ci with
+    | .defnInfo v => v.safety = .safe
+    | ci => ci.isUnsafe = false := by
+  cases ci with
+  | defnInfo v => cases h : v.safety <;> simp [proofSafe, h]
+  | _ => simp [proofSafe]
+
 /-- The definitions, opaque constants and axioms of the modules `mods`, the current one included when
 it is listed, whose type, reduced by unfolding every definition, meets `test`, sorted by name; an
 error when a module given is not imported, since it would hide what it declares. An opaque constant
 or an axiom is found so that reading it is an error, never a value passed over. A constant found that
-is unsafe is an error too: an unsafe definition may refer to itself, so the proofs it holds, a
-deliverable's `keeps` or an implementation's `fulfils`, can prove anything, and a safe declaration
-cannot refer to one, as Lean's kernel refuses (`type_checker::infer_constant`). -/
+is unsafe or partial is an error too (`proofSafe_iff`): such a definition may refer to itself, so
+the proofs it holds, a deliverable's `keeps` or an implementation's `fulfils`, can prove anything,
+and a safe declaration cannot refer to one, as Lean's kernel refuses
+(`type_checker::infer_constant`). -/
 def declaredWhere (mods : Array Name) (test : Expr → MetaM Bool) : MetaM (Array Name) := do
   let env ← getEnv
   for m in mods do
@@ -73,8 +94,8 @@ def declaredWhere (mods : Array Name) (test : Expr → MetaM Bool) : MetaM (Arra
   let mut found := #[]
   for (c, ci) in candidates do
     if ← withTransparency .all (do test (← whnf ci.type)) then
-      if ci.isUnsafe then
-        throwError "{c} is unsafe, so its proofs could prove anything, and it is not read"
+      unless proofSafe ci do
+        throwError "{c} is unsafe or partial, so its proofs could prove anything, and it is not read"
       found := found.push c
   return found.qsort Name.lt
 

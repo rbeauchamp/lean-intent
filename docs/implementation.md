@@ -72,7 +72,7 @@ The decisions, each made on the owner's behalf, which a later change can reverse
 | `findings` | what is wrong; empty exactly when every deliverable is implemented as above |
 | `implementations` | each deliverable implemented by exactly one value whose subject is a constant, with that value and the constant's module and name |
 
-A value that is an opaque constant or an axiom, which does not reduce to the constructor's application, is an error naming it, never a pass, and so is every unsafe constant of the types the reader looks for, since an unsafe definition may refer to itself and so prove anything, while a safe declaration cannot refer to an unsafe one. A gate runs both checks on the same build:
+A value that is an opaque constant or an axiom, which does not reduce to the constructor's application, is an error naming it, never a pass, and so is every unsafe or partial constant of the types the reader looks for. Every discovered definition must have safety `safe` (`Confirmation.Read.proofSafe_iff`): unsafe and partial definitions may refer to themselves and so prove anything, while a safe declaration cannot refer to either. A gate runs both checks on the same build:
 
 ```lean
 import LeanIntent.Confirmation.Read
@@ -89,6 +89,14 @@ run_meta do
   unless implemented.findings.isEmpty do
     throwError "the deliverables are not implemented: {repr implemented.findings}"
 ```
+
+## Why the reader requires safe definitions
+
+The mission property is that the proof in a discovered value binds its recorded implementation to its deliverable's record. Relying on kernel checking alone missed a boundary: Lean permits recursive unsafe definitions and mutual partial definitions. A partial mutual block can contain `p : False := p` and a value whose fulfilment proof is `False.elim p`, with no additional axiom or skipped kernel check. The reader reduces the value to its constructor without inspecting that proof. Its former `ConstantInfo.isUnsafe` guard rejected only `unsafe`, leaving `partial` admitted; treating the complement of one unsafe mode as proof safety was the specification error behind the guard.
+
+The shared discovery boundary, `Confirmation.Read.declaredWhere`, now uses `proofSafe` before adding any matching constant to its result. `proofSafe_iff` characterizes that executable predicate for every `ConstantInfo`: definitions pass exactly when their safety is `safe`, and other kinds retain their unsafe flag check. Its proof splits Lean's closed `DefinitionSafety` type into all three constructors, so both refusal of unsafe and partial definitions and admission of safe definitions are machine checked. This changes the reasoning link from an assumed meaning of `isUnsafe` to a checked positive safety contract. The same boundary serves both readers and every type they discover; it does not depend on the constant's name, body or the example that exposed the defect.
+
+The enforcement rung is an invariant-derived admission guard with a universal characterization proved by exhaustive constructor cases. Lean's environment type permits declarations of every safety, so a type that assumed the entire input environment safe would exclude inputs the reader must diagnose. The scan's use of the predicate is argued from its code; the theorem proves the predicate, not the whole metaprogram. The kernel's exclusion of unsafe and partial references from safe declarations is read from Lean v4.35.0's [constant checker](https://raw.githubusercontent.com/leanprover/lean4/v4.35.0/src/kernel/type_checker.cpp); its [mutual-declaration checker](https://raw.githubusercontent.com/leanprover/lean4/v4.35.0/src/kernel/environment.cpp) explains why checking a partial block alone is insufficient. Kernel checking, accepted axioms, complete module discovery and reader correspondence remain the trusted boundaries below.
 
 ## Worked examples
 
