@@ -217,13 +217,31 @@ def chainExpr : List (Expr × Expr) → Expr
     mkApp4 (mkConst ``Prod.mk [Level.zero, Level.zero]) (denoteE c)
       (denoteE (chainCode (fs.map (·.1)))) v (chainExpr fs)
 
+/-- The inductive types `Ty` builds in: the head constant of `Ty.denote (c ?args)` for each
+constructor `c` of `Ty`, and of `Atom.denote (k ?args)` for each constructor `k` of `Atom`, each
+applied to fresh metavariables and put in weak head normal form, where that head is an inductive
+type. The others are `decl` and `atom`, which denote what their arguments do and are stuck at a
+metavariable, and `arrow`, which denotes a function type. The constructors are read from the
+environment, so a constructor `Ty` gains is counted. -/
+def builtinHeads : MetaM (Array Name) := do
+  let mut heads := #[]
+  for (ind, den) in [(``Ty, ``Ty.denote), (``Atom, ``Atom.denote)] do
+    for c in (← getConstInfoInduct ind).ctors do
+      let (args, _, _) ← forallMetaTelescope (← inferType (mkConst c))
+      if let .const h _ := (← whnf (mkApp (mkConst den) (mkAppN (mkConst c) args))).getAppFn then
+        if ← isInductive h then
+          heads := heads.push h
+  return heads
+
 /-- Whether the declaration `ci` is an attestation the handler writes, where `ctor` is the private
 constructor of `Ty.Stands` that admits a declared type (`standsDecl`). It is one when `ci` is a
 theorem whose statement does not name `ctor` and whose value names it once, as the whole value under
 its `fun` binders, applied to a type, a name, a chain, a representation and an isomorphism, where:
 
 * the type, put in weak head normal form, is `T as` for an inductive type `T` at universe level zero
-  that the handler covers (`refusal?`, `withParams`, `ctors`), applied to its parameters `as`;
+  that the handler covers (`refusal?`, `withParams`, `ctors`), applied to its parameters `as`, and
+  `T` is none of the types `Ty` builds in (`builtinHeads`), whose codes are not declarations' codes,
+  so that no attestation gives such a type, or a type that reduces to one, a second code;
 * the name, chain and representation are the code `codeWith` derives from `T`'s declaration at
   `as`, with some instance of `HasCode` for each parameter's and field's type;
 * the isomorphism takes each constructor of `T`, applied to `as` and to its fields, to the
@@ -251,6 +269,8 @@ def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String ×
     let .const T us := α'.getAppFn | fail "the type is not an inductive type applied to its parameters"
     let some (.inductInfo indVal) := (← getEnv).find? T
       | fail "the type is not an inductive type applied to its parameters"
+    if (← builtinHeads).contains T then
+      return ← fail s!"`{T}` is a type `LeanIntent.Ty` builds in, whose code is not a declaration's"
     if let some why := refusal? indVal then
       return ← fail s!"the handler does not cover `{T}`: {why}"
     unless us.all (·.normalize == Level.zero) do

@@ -25,20 +25,25 @@ environment, that a declaration depends on no such attestation.
   declaration that does name the constructor's type to use, so the axioms it rests on are those
   Lean's `collectAxioms` reports for it (`axiomsIn`), which for an imported declaration Lean
   computed when it exported the declaration's module.
-* **The procedure** (`decide`): cone exclusion's closure (`Cone.exclude`), refusing at the first
-  reached name that, in a module that can hold an attestation, names the constructor in its
-  statement or value (`Applies`), unless it is one of the declarations Lean generates for
-  `Ty.Stands` (`generatedBy`) or an attestation `Declared.checkAttestation` reads as the handler's
-  (`verified`); at a reached name outside those modules that rests on an axiom other than Lean's
-  three; at a reached name with no declaration; and at a reached axiom other than Lean's three.
+* **The procedure** (`decide`): cone exclusion's closure (`Cone.exclude`) from a first declaration
+  and a list of the rest, so that its scope is never empty, refusing at the first reached name
+  that, in a module that can hold an attestation, names the constructor in its statement or value
+  (`Applies`), unless it is one of the declarations Lean generates for `Ty.Stands` (`generatedBy`)
+  or an attestation `Declared.checkAttestation` reads as the handler's (`verified`); at a reached
+  name outside those modules that rests on an axiom other than Lean's three; at a reached name with
+  no declaration; and at a reached axiom other than Lean's three.
   `decide_eq_none_iff` states what it decides, `verified_of_decide_eq_none` that an acceptance
   leaves no reached attestation unread, and `mem_leanAxioms_of_decide_eq_none` and
   `axioms_mem_leanAxioms_of_decide_eq_none` that it leaves no axiom but Lean's three.
-* **In a Lean environment** (`audit`, `requireCodes`): `audit` collects the reached declarations
-  that name the constructor, reads each with `Declared.checkAttestation`, names for each it refuses
-  the type it attests and the instances of `HasCode` or `Covered` that depend on it, and then
-  decides with `decide`, the verified attestations being those it read as the handler's.
-  `requireCodes` throws an error that says why, unless the audit accepts a declaration.
+* **In a Lean environment** (`audit`, `report`, `requireCodes`): `audit`, given a first
+  declaration and a list of the rest as `decide` is, collects the reached declarations that name the
+  constructor, reads each with `Declared.checkAttestation`, names for each it refuses the type it
+  attests and the instances of `HasCode` or `Covered` that depend on it, and then decides with
+  `decide`, the verified attestations being those it read as the handler's. It returns that scope
+  with what it found (`Outcome`), which `report` prints. `requireCodes c` audits `c` alone and
+  throws an error that says why, unless the audit accepts it. No entry point can be given an empty
+  scope, whose audit would accept anything; a caller whose scope comes from a search refuses when
+  the search finds nothing, as `tools/codes.lean` does.
 
 A refused attestation is one of three kinds. A hand-written instance, or a proof Lean abstracts out
 of one (`inst._proof_1`), that applies the constructor with a code or isomorphism other than the
@@ -53,7 +58,9 @@ return a false answer.
 What the theorems do not reach, and what is trusted:
 
 * That `Declared.checkAttestation` refuses every attestation whose type, code or isomorphism is not
-  the one the handler derives from the type's declaration: argued from its code, which takes the
+  the one the handler derives from the type's declaration, including every attestation of a type
+  `Ty` builds in, such as `Bool` or a definition that reduces to it, which already has a code the
+  handler does not write (`Declared.builtinHeads`): argued from its code, which takes the
   derivation from the handler's own functions and leaves each equality to Lean's kernel. The handler
   runs it on what it writes and fails rather than write a code it refuses, so the two agree on every
   type the handler covers. That the handler reads the declaration in order stays trusted, as
@@ -149,34 +156,35 @@ def unattested (lookup : Name → Option ConstantInfo) (relevant exempt verified
       | none => false
   else (axiomsOf c).any fun a => !leanAxioms.contains a
 
-/-- The procedure: cone exclusion's closure from `roots`, following `Follows relevant`, refusing an
-unattested name (`unattested`), a name with no declaration and an axiom other than Lean's three
-(`leanAxioms`), with fuel `2 ^ 64`, more than the declarations that fit in a 64-bit address space.
-`none` when it accepts. -/
+/-- The procedure: cone exclusion's closure from `first :: rest`, a scope that is never empty,
+following `Follows relevant`, refusing an unattested name (`unattested`), a name with no declaration
+and an axiom other than Lean's three (`leanAxioms`), with fuel `2 ^ 64`, more than the declarations
+that fit in a 64-bit address space. `none` when it accepts. -/
 def decide (lookup : Name → Option ConstantInfo) (relevant exempt verified : Name → Bool)
-    (axiomsOf : Name → Array Name) (ctor : Name) (roots : List Name) : Option Refusal :=
+    (axiomsOf : Name → Array Name) (ctor first : Name) (rest : List Name) : Option Refusal :=
   exclude lookup (follow relevant) (unattested lookup relevant exempt verified axiomsOf ctor)
-    leanAxioms (2 ^ 64) roots
+    leanAxioms (2 ^ 64) (first :: rest)
 
 section Decides
 
 variable {lookup : Name → Option ConstantInfo} {relevant exempt verified : Name → Bool}
-  {axiomsOf : Name → Array Name} {ctor : Name} {roots : List Name}
+  {axiomsOf : Name → Array Name} {ctor first : Name} {rest : List Name}
 
-/-- **What the procedure decides.** It accepts exactly when every name reached from `roots`
+/-- **What the procedure decides.** It accepts exactly when every name reached from `first :: rest`
 through `Follows relevant` is not unattested, is declared and is no axiom but Lean's three, and at
 most `2 ^ 64` names are reached. -/
 theorem decide_eq_none_iff :
-    decide lookup relevant exempt verified axiomsOf ctor roots = none ↔
-      (∀ c, Reaches lookup (Follows relevant) roots c →
+    decide lookup relevant exempt verified axiomsOf ctor first rest = none ↔
+      (∀ c, Reaches lookup (Follows relevant) (first :: rest) c →
         Admitted lookup (unattested lookup relevant exempt verified axiomsOf ctor) leanAxioms c) ∧
-      Within lookup (Follows relevant) roots (2 ^ 64) :=
+      Within lookup (Follows relevant) (first :: rest) (2 ^ 64) :=
   exclude_eq_none_iff (mem_follow relevant) _
 
 /-- **An acceptance leaves no attestation unread.** Every reached declaration that names `ctor`,
 in a module `relevant` admits and not `exempt`, is `verified`. -/
-theorem verified_of_decide_eq_none (h : decide lookup relevant exempt verified axiomsOf ctor roots = none)
-    {c : Name} {ci : ConstantInfo} (hc : Reaches lookup (Follows relevant) roots c)
+theorem verified_of_decide_eq_none
+    (h : decide lookup relevant exempt verified axiomsOf ctor first rest = none)
+    {c : Name} {ci : ConstantInfo} (hc : Reaches lookup (Follows relevant) (first :: rest) c)
     (hl : lookup c = some ci) (hr : relevant c = true) (he : exempt c = false)
     (ha : Applies ctor ci) : verified c = true := by
   have := (decide_eq_none_iff.mp h).1 c hc |>.1
@@ -186,8 +194,8 @@ theorem verified_of_decide_eq_none (h : decide lookup relevant exempt verified a
 Every reached name that `relevant` does not admit rests, by `axiomsOf`, on Lean's three axioms
 alone. -/
 theorem axioms_mem_leanAxioms_of_decide_eq_none
-    (h : decide lookup relevant exempt verified axiomsOf ctor roots = none) {c : Name}
-    (hc : Reaches lookup (Follows relevant) roots c) (hr : relevant c = false) :
+    (h : decide lookup relevant exempt verified axiomsOf ctor first rest = none) {c : Name}
+    (hc : Reaches lookup (Follows relevant) (first :: rest) c) (hr : relevant c = false) :
     ∀ a ∈ axiomsOf c, a ∈ leanAxioms := by
   intro a ha
   have hu := (decide_eq_none_iff.mp h).1 c hc |>.1
@@ -197,9 +205,9 @@ theorem axioms_mem_leanAxioms_of_decide_eq_none
 
 /-- **An acceptance leaves no axiom but Lean's three.** -/
 theorem mem_leanAxioms_of_decide_eq_none
-    (h : decide lookup relevant exempt verified axiomsOf ctor roots = none) {c : Name} {ci : ConstantInfo}
-    (hc : Reaches lookup (Follows relevant) roots c) (hl : lookup c = some ci)
-    (hax : ci.isAxiom = true) : c ∈ leanAxioms := by
+    (h : decide lookup relevant exempt verified axiomsOf ctor first rest = none) {c : Name}
+    {ci : ConstantInfo} (hc : Reaches lookup (Follows relevant) (first :: rest) c)
+    (hl : lookup c = some ci) (hax : ci.isAxiom = true) : c ∈ leanAxioms := by
   obtain ⟨-, ci', hl', hax'⟩ := (decide_eq_none_iff.mp h).1 c hc
   rw [hl] at hl'
   cases hl'
@@ -288,15 +296,22 @@ structure Finding where
   why : String
   carriers : Array Name
 
-/-- The audit of the declarations `roots` in the current environment. It collects the reached
-declarations, through `Follows`, that name the private constructor of `Ty.Stands` that admits a
-declared type and are not among those Lean generates for `Ty.Stands`; reads each with
-`Declared.checkAttestation`; and decides with `decide`, the verified attestations being exactly
-those it read as the handler's. Returns a finding for each attestation it refuses, and the
-refusal of `decide`, if any, with, for a refusal at a name outside the modules that can name the
-constructor, the axioms other than Lean's three that the name rests on. -/
-def audit (roots : List Name) :
-    MetaM (Array Finding × Option (Refusal × Option (Array Name))) := do
+/-- What an audit found: the declarations it audited, `first :: rest`, the attestations it refuses, and the refusal of `decide`, if any, with, for a refusal at a name outside
+the modules that can name the constructor, the axioms other than Lean's three that the name rests
+on. -/
+structure Outcome where
+  first : Name
+  rest : List Name
+  findings : Array Finding
+  refusal? : Option (Refusal × Option (Array Name))
+
+/-- The audit of the declarations `first :: rest` in the current environment, a scope that is never
+empty. It collects the reached declarations, through `Follows`, that name the private constructor
+of `Ty.Stands` that admits a declared type and are not among those Lean generates for `Ty.Stands`;
+reads each with `Declared.checkAttestation`; and decides with `decide`, the verified attestations
+being exactly those it read as the handler's. Returns the scope with a finding for each attestation
+it refuses and the refusal of `decide` (`Outcome`). -/
+def audit (first : Name) (rest : List Name) : MetaM Outcome := do
   let env ← getEnv
   let ctor ← Declared.standsDecl
   let some m := env.getModuleIdxFor? ``Ty.Stands
@@ -308,7 +323,7 @@ def audit (roots : List Name) :
   let mut visited : Std.HashSet Name := {}
   let mut refs : Std.HashMap Name (List Name) := {}
   let mut candidates : Array (Name × ConstantInfo) := #[]
-  let mut work := roots
+  let mut work := first :: rest
   repeat
     match work with
     | [] => break
@@ -356,17 +371,17 @@ def audit (roots : List Name) :
           up := (dependents.getD d #[]).toList ++ up
     let carriers := seen.toArray.filter fun d => (lookup d).any isCarrier
     findings := findings.push { decl := c, type? := ty, why, carriers := carriers.qsort Name.lt }
-  let refusal? := decide lookup relevant exempt verified.contains (axiomsIn env) ctor roots
+  let refusal? := decide lookup relevant exempt verified.contains (axiomsIn env) ctor first rest
   -- A refusal at a name outside the modules that can name the constructor is for its axioms.
   let outside (c : Name) : Option (Array Name) :=
     if relevant c then none else some ((axiomsIn env c).filter fun a => !leanAxioms.contains a)
-  return (findings, refusal?.map fun r => (r, match r with | .impl c => outside c | _ => none))
+  let refusal? := refusal?.map fun r => (r, match r with | .impl c => outside c | _ => none)
+  return { first, rest, findings, refusal? }
 
 /-- What the audit reports: a line for each finding, and one for the refusal of `decide` unless it
 names a declaration a finding already names. Empty exactly when the audit accepts. -/
-def report (findings : Array Finding) (refusal? : Option (Refusal × Option (Array Name))) :
-    Array String :=
-  let lines := findings.map fun f =>
+def report (o : Outcome) : Array String :=
+  let lines := o.findings.map fun f =>
     let carried := if f.carriers.isEmpty then
         "no instance of `LeanIntent.HasCode` or `LeanIntent.Covered` declared among the dependencies depends on it"
       else s!"the instances that depend on it: {", ".intercalate (f.carriers.toList.map (s!"{·}"))}"
@@ -374,13 +389,13 @@ def report (findings : Array Finding) (refusal? : Option (Refusal × Option (Arr
       | some ty => s!"to {ty} with a code or isomorphism the deriving handler does not write from that type's declaration"
       | none => "in a form the deriving handler does not write"
     s!"{f.decl} applies the private constructor of `LeanIntent.Ty.Stands` {what}: {f.why}; {carried}"
-  match refusal? with
+  match o.refusal? with
   | none => lines
   | some (.impl c, some axs) =>
     let what := if axs == #[c] then s!"the axiom {c}" else s!"{c}, which rests on the axioms {axs.toList}"
     lines.push s!"a dependency is {what}, not among Lean's three (propext, Classical.choice, Quot.sound), which could prove an attestation without naming the constructor"
   | some (.impl c, none) =>
-    if findings.any (·.decl == c) then lines
+    if o.findings.any (·.decl == c) then lines
     else lines.push s!"{c} applies the private constructor of `LeanIntent.Ty.Stands`, and the audit did not read it"
   | some (.unknown c, _) => lines.push s!"the audit reaches {c}, which has no declaration here"
   | some (.axiom c, _) => lines.push s!"a dependency rests on the axiom {c}, which is not one of Lean's three (propext, Classical.choice, Quot.sound) and could state an attestation without the constructor; in a module of Lean's module system an imported theorem is shown as an axiom"
@@ -391,8 +406,7 @@ declaration it depends on attests a declared type's code with a code or isomorph
 one the deriving handler writes from the type's declaration, and it rests on no axiom but Lean's
 three. -/
 def requireCodes (c : Name) : MetaM Unit := do
-  let (findings, refusal?) ← audit [c]
-  let lines := report findings refusal?
+  let lines := report (← audit c [])
   unless lines.isEmpty do
     throwError "the audit of declared types' codes refuses {c}:\n{"\n".intercalate lines.toList}"
 

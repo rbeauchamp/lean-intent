@@ -26,12 +26,12 @@ def main (args : List String) : IO UInt32 := do
   let idxs := mods.filterMap env.getModuleIdx?
   let roots := env.constants.map₁.toList.filterMap fun (c, _) =>
     (env.getModuleIdxFor? c).bind fun i => if idxs.contains i then some c else none
-  if roots.isEmpty then
-    IO.println "the modules declare no constant, so there is nothing to audit"
-    return 1
-  let (findings, refusal?) ← ((LeanIntent.CodeAudit.audit roots).run' : CoreM _).toIO'
+  let first :: rest := roots
+    | IO.println "the modules declare no constant to audit"
+      return 1
+  let o ← ((LeanIntent.CodeAudit.audit first rest).run' : CoreM _).toIO'
     { fileName := "<codes>", fileMap := default, initHeartbeats := ← IO.getNumHeartbeats } { env }
-  let lines := LeanIntent.CodeAudit.report findings refusal?
+  let lines := LeanIntent.CodeAudit.report o
   for l in lines do
     IO.println l
   return if lines.isEmpty then 0 else 1
