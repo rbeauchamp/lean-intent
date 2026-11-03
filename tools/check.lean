@@ -12,9 +12,10 @@ Run from the repository's top level as
 
 where `lean` is elan's, which runs the Lean that `lean-toolchain` names. It is not run through
 `lake env`, so that it reads the project's configuration before Lake loads it. The checks exit with
-status `0` when every rule holds, `1` when a rule rejects the project, and another non-zero status,
-through an uncaught error, when they cannot run. Every input is read through the system that owns
-it, never by reading source text by hand:
+status `0` when every rule holds and `1` when a rule rejects the project, after printing each
+rejection to standard output. When they cannot run they end through an uncaught error, which Lean
+prints to standard error and also ends with status `1`. Every input is read through the system that
+owns it, never by reading source text by hand:
 
 * the project's Lean files, from Git's index (`git ls-files`); the library's are every one of them
   outside `tools/`, which holds this program;
@@ -236,9 +237,10 @@ def build (files : Array String) : IO (Array Rejection) := do
   return #[{ rule := "LEAN-BUILD", message :=
     s!"lake build --wfail of the library's Lean files failed; a file that is not a module of the workspace is an unknown target:\n{out}" }]
 
-/-- `CODES` for the library's modules `mods`, built into the directory `libDir`: the lines
-`tools/codes.lean` prints when the audit refuses (status `1`), or an error when it cannot run (any
-other status but `0`). -/
+/-- `CODES` for the library's modules `mods`, built into the directory `libDir`, by the status of
+`tools/codes.lean`: no rejection for `0`; for `1`, a refusal, one rejection for each line it printed
+to standard output, or, when it printed none, one rejection carrying its standard error; and for
+any other status, `2` when it could not run, an error carrying its standard output and error. -/
 def checkCodes (libDir : System.FilePath) (mods : Array Name) : IO (Array Rejection) := do
   let args := #["--run", "tools/codes.lean"] ++ mods.map (·.toString)
   let o ← IO.Process.output { cmd := "lean", args, env := #[("LEAN_PATH", some libDir.toString)] }
@@ -247,7 +249,8 @@ def checkCodes (libDir : System.FilePath) (mods : Array Name) : IO (Array Reject
   | 1 =>
     let lines := ((o.stdout.splitOn "\n").filter (· ≠ "")).toArray
     if lines.isEmpty then
-      return #[{ rule := "CODES", message := "tools/codes.lean refused without saying why" }]
+      return #[{ rule := "CODES", message :=
+        s!"tools/codes.lean exited with status 1 and printed no reason; its standard error:\n{o.stderr}" }]
     return lines.map fun l => { rule := "CODES", message := l }
   | c => throw <| IO.userError s!"tools/codes.lean could not run (status {c}):\n{o.stdout}{o.stderr}"
 
