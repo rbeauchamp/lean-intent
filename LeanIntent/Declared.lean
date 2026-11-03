@@ -1,4 +1,5 @@
 import LeanIntent.Degenerate
+import LeanIntent.Cone
 import Lean.Elab.Deriving.Basic
 import Lean.Elab.Deriving.Util
 
@@ -46,8 +47,13 @@ order, which is its own code below and not checked by Lean's kernel; and that no
 the private constructor of `Ty.Stands`. Lean's privacy is a rule of name resolution, so the
 `constructor` tactic, which applies a constructor without resolving its name, or a metaprogram that
 builds the term directly, can still apply it; no mechanism inside Lean's logic prevents this, since
-the logic cannot refer to the constructors of an arbitrary type. An audit that re-derives each
-declared type's code from the environment is lean-intent #24.
+the logic cannot refer to the constructors of an arbitrary type. The audit of declared types' codes
+(`LeanIntent.CodeAudit`) decides the second for a declaration: it reads every attestation the
+declaration depends on with `checkAttestation`, which re-derives the code through `codeWith` and the
+isomorphism by where it takes each constructor, and compares them by Lean's kernel. The handler runs
+`checkAttestation` on what it writes and fails rather than write a code the audit would refuse, so
+the two agree on every type the handler covers. The first stays trusted: the audit derives the code
+through the same functions, not by a second reading of the declaration.
 -/
 
 namespace LeanIntent.Declared
@@ -144,18 +150,26 @@ def ctors (indVal : InductiveVal) (xs : Array Expr) : TermElabM (List Ctor) := d
       | _ => break
     return { name := c, fields }
 
-/-- The code of the declaration `indVal` with parameters `xs`, each with its instance of `HasCode` in
-the local context: `Ty.decl` of its name, its parameters' chain and its representation. Refuses a
-field whose type has no code. -/
-def code (indVal : InductiveVal) (xs : Array Expr) (cs : List Ctor) : TermElabM Expr := do
-  let codeOf (t : Expr) : TermElabM Expr := do
-    let cls := mkApp (mkConst ``HasCode) t
-    let some inst ← synthInstance? cls
-      | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: the type `{t}` of one of its fields has no code; derive `LeanIntent.HasCode` for it first if the project declares it"
-    return mkApp2 (mkConst ``HasCode.code) t inst
+/-- The code of the declaration `indVal` with parameters `xs` and constructors `cs`: `Ty.decl` of
+its name, its parameters' chain and its representation, where the code of each parameter, and then
+of each constructor's fields in order, is `HasCode.code t i` for the instance `i` that `inst t` gives
+for its type `t`. The handler takes each instance from Lean's instance resolution (`code`), and the
+audit of an attestation (`checkAttestation`) from the attestation it reads. -/
+def codeWith {m : Type → Type} [Monad m] (indVal : InductiveVal) (xs : Array Expr) (cs : List Ctor)
+    (inst : Expr → m Expr) : m Expr := do
+  let codeOf (t : Expr) : m Expr := return mkApp2 (mkConst ``HasCode.code) t (← inst t)
   let ps ← xs.toList.mapM codeOf
   let reps ← cs.mapM fun c => return chainCode (← c.fields.toList.mapM (codeOf ·.2))
   return mkApp3 (mkConst ``Ty.decl) (toExpr indVal.name) (chainCode ps) (sumCode reps)
+
+/-- The code of the declaration `indVal` with parameters `xs`, each with its instance of `HasCode` in
+the local context: `codeWith`, each instance found by Lean's instance resolution. Refuses a field
+whose type has no code. -/
+def code (indVal : InductiveVal) (xs : Array Expr) (cs : List Ctor) : TermElabM Expr :=
+  codeWith indVal xs cs fun t => do
+    let some inst ← synthInstance? (mkApp (mkConst ``HasCode) t)
+      | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: the type `{t}` of one of its fields has no code; derive `LeanIntent.HasCode` for it first if the project declares it"
+    return inst
 
 /-- Adds the definition `name := fun binders => value` of type `∀ binders, type`. -/
 def addFun (name : Name) (binders : Array Expr) (type value : Expr) (thm : Bool) : TermElabM Unit := do
@@ -174,6 +188,120 @@ def standsDecl : MetaM Name := do
   let some c := info.ctors.find? fun c => (privateToUserName? c).getD c == `LeanIntent.Ty.Stands.decl
     | throwError "LeanIntent.HasCode: `Ty.Stands` has no constructor `decl`"
   return c
+
+/-! ## Reading an attestation -/
+
+/-- The type a code denotes, `Ty.denote c`. -/
+def denoteE (c : Expr) : Expr := mkApp (mkConst ``Ty.denote) c
+
+/-- The type of the alternatives whose types are `ts`, nested as `sumCode` nests their codes. -/
+def sumType : List Expr → Expr
+  | [] => mkConst ``Unit
+  | [t] => t
+  | t :: ts => mkApp2 (mkConst ``Sum [Level.zero, Level.zero]) t (sumType ts)
+
+/-- The value `v` in the alternative `i` of the alternatives whose types are `ts`, as `injStx` writes
+it: itself when there is one alternative, and otherwise `Sum.inr` applied `i` times to `Sum.inl v`,
+or to `v` itself in the last alternative. -/
+def injExpr : List Expr → Nat → Expr → Expr
+  | [], _, v | [_], _, v => v
+  | t :: ts, 0, v => mkApp3 (mkConst ``Sum.inl [Level.zero, Level.zero]) t (sumType ts) v
+  | t :: ts, i + 1, v =>
+    mkApp3 (mkConst ``Sum.inr [Level.zero, Level.zero]) t (sumType ts) (injExpr ts i v)
+
+/-- The value of the chain whose fields have the codes and values `fs`, in order, as `chainStx`
+writes it: each value paired with the chain after it, and the last with the unit value. -/
+def chainExpr : List (Expr × Expr) → Expr
+  | [] => mkConst ``Unit.unit
+  | (c, v) :: fs =>
+    mkApp4 (mkConst ``Prod.mk [Level.zero, Level.zero]) (denoteE c)
+      (denoteE (chainCode (fs.map (·.1)))) v (chainExpr fs)
+
+/-- Whether the declaration `ci` is an attestation the handler writes, where `ctor` is the private
+constructor of `Ty.Stands` that admits a declared type (`standsDecl`). It is one when `ci` is a
+theorem whose statement does not name `ctor` and whose value names it once, as the whole value under
+its `fun` binders, applied to a type, a name, a chain, a representation and an isomorphism, where:
+
+* the type, put in weak head normal form, is `T as` for an inductive type `T` at universe level zero
+  that the handler covers (`refusal?`, `withParams`, `ctors`), applied to its parameters `as`;
+* the name, chain and representation are the code `codeWith` derives from `T`'s declaration at
+  `as`, with some instance of `HasCode` for each parameter's and field's type;
+* the isomorphism takes each constructor of `T`, applied to `as` and to its fields, to the
+  alternative `injExpr` and `chainExpr` build, holding each field carried through the isomorphism of
+  the instance whose code the representation holds for it.
+
+Lean's unifier finds those instances, and Lean's kernel then decides each equality, the type, the
+code and the image of every constructor, by its definitional equality. An isomorphism is fixed by
+its forward map, since its map back is that map's inverse, so the map back is not compared. Returns
+the type attested, printed, with `none` when the attestation is the handler's, or the reason it is
+not. The type is `none` when the attestation is refused before its type is read. -/
+def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String × Option String) := do
+  let .thmInfo v := ci | return (none, some "it is not a theorem")
+  if (Cone.exprRefs v.type []).contains ctor then
+    return (none, some "its statement names the constructor")
+  unless (Cone.exprRefs v.value []).count ctor == 1 do
+    return (none, some "its value does not name the constructor exactly once")
+  lambdaTelescope v.value fun _ body => do
+    unless body.isAppOfArity ctor 5 do
+      return (none, some "its value is not one application of the constructor under `fun` binders")
+    let #[α, n, ps, r, e] := body.getAppArgs | unreachable!
+    let ty := toString (← ppExpr α)
+    let fail (why : String) : MetaM (Option String × Option String) := return (some ty, some why)
+    let α' ← whnf α
+    let .const T us := α'.getAppFn | fail "the type is not an inductive type applied to its parameters"
+    let some (.inductInfo indVal) := (← getEnv).find? T
+      | fail "the type is not an inductive type applied to its parameters"
+    if let some why := refusal? indVal then
+      return ← fail s!"the handler does not cover `{T}`: {why}"
+    unless us.all (·.normalize == Level.zero) do
+      return ← fail "the type is not taken at universe level zero"
+    let as := α'.getAppArgs
+    unless as.size == indVal.numParams do
+      return ← fail "the type is not an inductive type applied to its parameters"
+    try
+      (withParams indVal fun xs _ _ => discard <| ctors indVal xs : TermElabM Unit).run'
+    catch ex => return ← fail (← ex.toMessageData.toString)
+    let cs ← (ctors indVal as : TermElabM _).run'
+    -- The code, with a metavariable for each instance, in the order `codeWith` asks for them.
+    let (derived, insts) ← (codeWith indVal as cs fun t => do
+      let i ← mkFreshExprMVar (mkApp (mkConst ``HasCode) t)
+      modify (·.push i)
+      return i : StateT (Array Expr) MetaM Expr).run #[]
+    let given := mkApp3 (mkConst ``Ty.decl) n ps r
+    unless ← isDefEq given derived do
+      return ← fail "its code is not the one the declaration fixes"
+    let derived ← instantiateMVars derived
+    let insts ← insts.mapM instantiateMVars
+    if derived.hasMVar || insts.any (·.hasMVar) then
+      return ← fail "its code does not fix an instance of `HasCode` for each of its parts"
+    let kernelEq (a b : Expr) : MetaM Bool := do
+      return Kernel.isDefEq (← getEnv) (← getLCtx) a b matches .ok true
+    unless ← kernelEq α (mkAppN (mkConst T us) as) do
+      return ← fail "Lean's kernel does not find the type to be its declaration applied to its parameters"
+    unless ← kernelEq given derived do
+      return ← fail "Lean's kernel does not find its code to be the one the declaration fixes"
+    -- Each constructor's fields, with the instance whose code the representation holds for each.
+    let mut k := as.size
+    let mut chains : Array (List (Name × Expr × Expr)) := #[]
+    for c in cs do
+      chains := chains.push <| (c.fields.toList.zip (insts.extract k (k + c.fields.size)).toList).map
+        fun ((x, t), i) => (x, t, i)
+      k := k + c.fields.size
+    let codeOf (t i : Expr) : Expr := mkApp2 (mkConst ``HasCode.code) t i
+    let alts := chains.toList.map fun fs => denoteE (chainCode (fs.map fun (_, t, i) => codeOf t i))
+    for h : j in [0:cs.length] do
+      let c := cs[j]
+      let fs := chains[j]!
+      let ok ← withLocalDeclsDND (fs.map fun (x, t, _) => (x, t)).toArray fun xs => do
+        let lhs := mkApp4 (mkConst ``Iso.to) α (denoteE given) e
+          (mkAppN (mkConst c.name us) (as ++ xs))
+        let parts := (fs.zip xs.toList).map fun ((_, t, i), x) =>
+          (codeOf t i, mkApp4 (mkConst ``Iso.to) t (denoteE (codeOf t i))
+            (mkApp2 (mkConst ``HasCode.iso) t i) x)
+        kernelEq lhs (injExpr alts j (chainExpr parts))
+      unless ok do
+        return ← fail s!"its isomorphism does not take `{c.name}` to alternative {j} holding its fields, each carried through its own type's isomorphism"
+    return (some ty, none)
 
 /-- Writes the code, the isomorphism, the proof that the code stands for the type, and the instance
 of `HasCode`, for the declaration named `declName`. -/
@@ -245,6 +373,11 @@ def mkHasCode (declName : Name) : CommandElabM Unit := do
   elabCommand (← `(command|
     instance $(mkIdent (`_root_ ++ instName)):ident $binders* : LeanIntent.HasCode $tStx :=
       ⟨@$(mkCIdent codeName) $args*, @$(mkCIdent isoName) $args*, @$(mkCIdent standsName) $args*⟩))
+  -- The audit's reading of what the handler wrote, so that no type the handler covers gets a code
+  -- the audit would refuse (`LeanIntent.CodeAudit`).
+  let (_, why?) ← liftTermElabM <| checkAttestation ctor (← getConstInfo standsName)
+  if let some why := why? then
+    throwError "LeanIntent.HasCode: the code written for `{.ofConstName declName}` fails the audit of declared types' codes: {why}"
 
 /-- The deriving handler of `HasCode`. -/
 def handler (declNames : Array Name) : CommandElabM Bool := do
