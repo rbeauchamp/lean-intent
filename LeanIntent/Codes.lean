@@ -171,9 +171,9 @@ inductive Ty where
 /-- The values of the `j`-th type of a recursive group, built from a base value `x : B` of its `i`-th
 type, or from the constructor `c` of the `j`-th type (of `N j`) with the data `d` of its fields and,
 for each of its `A j c` recursive fields `f`, a child at each position of `P j c f`, a value of the
-group's `S j c f`-th type. A child is a smaller value, so every value is a well-founded tree: each path down from it through
-its children is finite, though a node whose recursive field is a function can have infinitely many
-children. -/
+group's `S j c f`-th type. A child is a smaller value, so every value is a well-founded tree: each
+path down from it through its children is finite, though a node whose recursive field is a function
+can have infinitely many children. -/
 inductive MuVal (B : Type) (i : Nat) (N : Nat → Nat) (D : Nat → Nat → Type) (A : Nat → Nat → Nat)
     (P : Nat → Nat → Nat → Type) (S : Nat → Nat → Nat → Nat) : Nat → Type where
   /-- A value of the `i`-th type built by one of its constructors whose fields hold no value of the
