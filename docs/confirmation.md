@@ -4,7 +4,7 @@
 
 Modules: `LeanIntent/Confirmation.lean` (the decision and its theorems, which import no more of Lean than the rest of the core) and `LeanIntent/Confirmation/Read.lean` (reading the build, which imports all of Lean).
 
-**Complete in this version:** the deliverable and owners' log a project declares, the decision with its theorems, the reader a checker calls, and the rendering that prints what the log holds. Signatures are optional and tracked in #19; Regula's rule that adopts the check is tracked in Regula.
+**Complete in this version:** the deliverable and owners' log a project declares, the decision with its theorems, the reader a checker calls, and the rendering that prints what the log holds. Signatures are optional and tracked in #19. A project adopts the check in its own validation gate.
 
 A consequence counts as confirmed only when a declared owner confirmed it, or a party acting under a delegation that traces back to one; an agent marking its own specification confirmed would remove the one check no proof replaces. This serves every project that adopts the library: each declares its own owner or owners (one person, several or a team, by whatever names it chooses, on any forge or none), with its own agents, and an owner may delegate to another mind, human or AI, for any reason. The owner chose provenance, not cryptography: each answer records who gave it, under which delegation, and its source, committed and reviewed like any other change.
 
@@ -33,6 +33,8 @@ def sortingDeliverable : LeanIntent.Deliverable (List Int → List Int) where
 ```
 
 A raw string holds a statement's text unchanged, since a printed text has no control character but the line feed (`Statement.plain_print`). The log is therefore committed text in a module beside the record, reviewed like any change, and the check reads the same text from the build. A record and an explanation must be constants, since an answer names the record by its declared name. A deliverable's `answers` are `Attributed`, naming who gave each, and its explanation records who settled each thing (`Restatement`, `Settled`, [who settled each thing](who-settled.md)); the check compares those with the log.
+
+Once a deliverable's implementation exists, the project records it in a value of its own, which names the deliverable and which this check does not read, so recording or replacing it changes no confirmation ([the implementation of a deliverable](implementation.md)).
 
 `Read.answerStatement` writes the text of a new answer to one question of a deliverable, the restatement among them, holding the two texts it must hold:
 
@@ -123,7 +125,7 @@ An origin keeps who wrote a source's words, what they had read of the implementa
 ## What is trusted
 
 - That a statement's author made it, on its date, as its source says. Review of the change that commits it checks that. Accepted: a dishonest agent could invent an answer, which the history would show; signatures for a project that wants them are #19's.
-- That the modules given to `Read.check` are all the project's, and that the deliverables it finds are the current ones: a module left out hides what it declares, and a superseded record kept as a deliverable is asked about like any other. A constant whose type is not one `Read.check` looks for (`Deliverable`, `OwnersLog`, `Explanation`, `Attributed` or a list of those answers) once every definition is unfolded, such as a function returning a deliverable or a structure holding one, is not found, so it is not asked about. An opaque constant or an axiom of one of those types is found, and reading it is an error.
+- That the modules given to `Read.check` are all the project's, and that the deliverables it finds are the current ones: a module left out hides what it declares, and a superseded record kept as a deliverable is asked about like any other. A constant whose type is not one `Read.check` looks for (`Deliverable`, `OwnersLog`, `Explanation`, `Attributed` or a list of those answers) once every definition is unfolded, such as a function returning a deliverable or a structure holding one, is not found, so it is not asked about. An opaque constant or an axiom of one of those types is found, and reading it is an error, as is reading an unsafe constant of one, whose proofs could prove anything since an unsafe definition may refer to itself.
 - That a statement removed from the log by a commit is noticed in review: the check reads the log as committed, so removing a revocation restores what it revoked, which the history shows.
 - That `#render_intent`, `renderExplanation` and `answerText` print who settled each thing as the record holds it, whatever the log says; they read no log and say so, and only `Read.renderChecked` prints what the log holds. A project whose check passes holds no such value, among the constants `Read.check` finds, that the log contradicts; a term given straight to `answerText` is not a constant, and is printed as given.
 - That a consequence recorded as derived truly follows from the restatement: an agent could record a real fork as derived, which the committed history shows. Accepted on the owner's behalf, as the same kind of risk as an invented answer.

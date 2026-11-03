@@ -6,6 +6,8 @@ Module: `LeanIntent/Refinement.lean`.
 
 **Complete in this version:** the refinement link with its transfer theorems.
 
+A proof that an implementation fulfils the record binds the code a project runs only where the project says which constant that code is: [the implementation of a deliverable](implementation.md) holds the constant and the proof that it fulfils the deliverable's record together.
+
 ## Worked examples
 
 - [`LeanIntentExamples/Transfer.lean`](../LeanIntentExamples/Transfer.lean): a refinement link carries the record's guarantees to the mapping's image, not to the implementations themselves.

@@ -7,8 +7,8 @@ import LeanIntent.Render
 
 `LeanIntent.Confirmation` decides whether a project's deliverables are confirmed, given the texts of
 its owners' log and the current revision of each. This module reads both from Lean's environment,
-so a checker that reads only the declarations of a finished build (Regula's rule, for one) reads
-them through the library, and parses no source text. Each input is read through Lean:
+so a checker that reads only the declarations of a finished build (a project's own validation gate,
+for one) reads them through the library, and parses no source text. Each input is read through Lean:
 
 | Input | How it is read |
 |---|---|
@@ -33,7 +33,8 @@ a checker that refuses a process start can call this.
 recorded against any other build's text, an older revision's or a definition's former body's, names
 another text and does not count. A deliverable whose meaning reaches what cannot be printed fails
 with an error naming it, never a pass, as does one that is not a constructor's application once
-reduced, such as an opaque constant or an axiom.
+reduced, such as an opaque constant or an axiom, and every unsafe constant of the types read here,
+whose proofs could prove anything (`declaredWhere`).
 
 The modules given are the caller's, and should be every module of the project, as Lake lists them:
 a module left out hides what it declares, and an empty list finds no log. A constant whose type is
@@ -54,7 +55,10 @@ open Lean Meta LeanIntent.Render
 /-- The definitions, opaque constants and axioms of the modules `mods`, the current one included when
 it is listed, whose type, reduced by unfolding every definition, meets `test`, sorted by name; an
 error when a module given is not imported, since it would hide what it declares. An opaque constant
-or an axiom is found so that reading it is an error, never a value passed over. -/
+or an axiom is found so that reading it is an error, never a value passed over. A constant found that
+is unsafe is an error too: an unsafe definition may refer to itself, so the proofs it holds, a
+deliverable's `keeps` or an implementation's `fulfils`, can prove anything, and a safe declaration
+cannot refer to one, as Lean's kernel refuses (`type_checker::infer_constant`). -/
 def declaredWhere (mods : Array Name) (test : Expr → MetaM Bool) : MetaM (Array Name) := do
   let env ← getEnv
   for m in mods do
@@ -68,7 +72,10 @@ def declaredWhere (mods : Array Name) (test : Expr → MetaM Bool) : MetaM (Arra
     else acc
   let mut found := #[]
   for (c, ci) in candidates do
-    if ← withTransparency .all (do test (← whnf ci.type)) then found := found.push c
+    if ← withTransparency .all (do test (← whnf ci.type)) then
+      if ci.isUnsafe then
+        throwError "{c} is unsafe, so its proofs could prove anything, and it is not read"
+      found := found.push c
   return found.qsort Name.lt
 
 /-- The constants of the modules `mods` whose type reduces to an application of `head`. -/
