@@ -1,0 +1,4 @@
+interface:
+  display_name: "Intent First"
+  short_description: "Owner's words to a Lean intent record checked against their confirmed intent, then proved code"
+  default_prompt: "Use $intent-first to carry this Lean deliverable from my words to an intent record checked against my intent as I confirm it, and then to code proved against it."
