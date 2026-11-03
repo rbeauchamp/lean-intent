@@ -59,8 +59,9 @@ its fields' rules, and it has no projection but the identity, as `Ty.projs` reac
 
 The handler refuses, and so leaves not covered, every type it cannot represent this way: a recursive
 type each of whose constructors has a field that holds a value of a type of its group, for which the
-rule above fixes no empty value (a rose tree whose only constructor holds a list of trees, or the odd
-half of a mutual even and odd pair), and one whose recursive constructors build only finitely many
+rule above fixes no empty value, though it may have values (a rose tree whose only constructor holds
+a list of trees, or the odd half of a mutual even and odd pair; extending the rule to such a type is
+lean-intent #45), and one whose recursive constructors build only finitely many
 values because a type of its group they need has none (`Ty.grows`); a recursive field that is a
 function whose arguments depend on a field or on one another; a type whose values are
 constrained by proofs, indices or value parameters (an inductive family with indices, a group with
