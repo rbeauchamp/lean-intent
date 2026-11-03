@@ -675,6 +675,7 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
                   | 0 => pure #[]
                   | 1 => pure #[(mkIdent `y : Term)]
                   | n => (List.range n).toArray.mapM fun q => chainGet (mkIdent `y) q
+                let ys ← ys.mapM fun y => `(LeanIntent.Iso.inv LeanIntent.HasCode.iso $y)
                 let call ← `($(rel (toName l)) ($x $ys*))
                 `(matchAltExpr| | ⟨$(quote r), _⟩ => $call)
               if refs.any (·.2.1 > 0) then `(fun e $(mkIdent `y):ident => match e with $alts:matchAlt*)
@@ -686,7 +687,11 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
           | none => `(LeanIntent.Iso.inv_to LeanIntent.HasCode.iso $x)
           | some (l, n) => do
             let ys ← (List.range n).toArray.mapM fun _ => return (mkIdent (← mkFreshUserName `y) : Term)
-            ys.foldrM (fun y p => `(funext fun $(⟨y.raw⟩):ident => $p)) (← `($(rel (invToName l)) ($x $ys*)))
+            let ih ← `($(rel (invToName l)) ($x $ys*))
+            -- Cancel argument transport inside this field; data fields keep their own inverse laws.
+            let p ← if n == 0 then pure ih else
+              `(by simp only [LeanIntent.Iso.inv_to] <;> exact $ih)
+            ys.foldrM (fun y p => `(funext fun $(⟨y.raw⟩):ident => $p)) p
         let prf ← match fieldPrfs with
           | [] => `(rfl)
           | p :: ps => ps.foldlM (fun acc q => `(congr $acc $q)) (← `(congrArg $ctorFn $p))
@@ -717,11 +722,13 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
               algArgs := algArgs.push (← `($ih $(← fin r) ()))
               r := r + 1
             | some (_, 1) =>
-              algArgs := algArgs.push (← `(fun y => $ih $(← fin r) y))
+              algArgs := algArgs.push (← `(fun y => $ih $(← fin r)
+                (LeanIntent.Iso.to LeanIntent.HasCode.iso y)))
               r := r + 1
             | some (_, n) =>
               let ys ← (List.range n).toArray.mapM fun _ => return mkIdent (← mkFreshUserName `y)
-              algArgs := algArgs.push (← `(fun $ys* => $ih $(← fin r) $(← chainStx (ys.toList.map fun y => ⟨y.raw⟩))))
+              let coded ← ys.toList.mapM fun y => `(LeanIntent.Iso.to LeanIntent.HasCode.iso $(⟨y.raw⟩):term)
+              algArgs := algArgs.push (← `(fun $ys* => $ih $(← fin r) $(← chainStx coded)))
               r := r + 1
           let dPat : Term ← if datas.isEmpty then `(_) else pure d
           let ihPat : Term ← if refs.isEmpty then `(_) else pure ih
@@ -731,8 +738,11 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
             `(LeanIntent.Iso.to_inv LeanIntent.HasCode.iso $(← chainGet d q')))
           let kk := mkIdent `kk
           let pk ← if refs.isEmpty then `(funext fun e => e.elim0) else do
-            let alts ← refs.mapIdxM fun r _ => do
-              `(matchAltExpr| | ⟨$(quote r), _⟩ => $(rel toInvName) ($kk $(← fin r) $(mkIdent `y)))
+            let alts ← refs.mapIdxM fun r (_, n, _) => do
+              let ih ← `($(rel toInvName) ($kk $(← fin r) $(mkIdent `y)))
+              let p ← if n == 0 then pure ih else
+                `(by simp only [LeanIntent.Iso.to_inv] <;> exact $ih)
+              `(matchAltExpr| | ⟨$(quote r), _⟩ => $p)
             `(funext fun e => funext fun $(mkIdent `y):ident => match e with $alts:matchAlt*)
           let kkPat : Term ← if refs.isEmpty then `(_) else pure kk
           toInvAlts := toInvAlts.push (← `(matchAltExpr| | $(quote k), LeanIntent.MuVal.node ⟨$(quote cn), _⟩ $dPat $kkPat =>
