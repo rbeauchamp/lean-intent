@@ -15,16 +15,19 @@ reads them through the library, and parses no source text. Each input is read th
 | the project's deliverables | as `LeanIntent.Confirmation.Read.check` reads them: every definition, opaque constant or axiom of the modules given whose type reduces, unfolding every definition, to `LeanIntent.Deliverable _` |
 | the values that record implementations | every such constant of those modules whose type so reduces to `LeanIntent.Implementation _` |
 | the deliverable a value names | the second argument of that type, `d` of `@Implementation W d`, where it is a constant once its metadata is removed (`Expr.consumeMData`), and otherwise none |
-| the constant a value records | its value, reduced by `whnf` with every definition unfolded to `Implementation.mk`'s application, and that application's third argument, the subject, where it is a constant once its metadata is removed, and otherwise none; `whnf` reduces the head of a term and no argument, so the subject is read as the value holds it, never unfolded |
+| the constant a value records | its value, reduced by `Render.readWhnf` through the kernel to `Implementation.mk`'s application, and that application's third argument, the subject, where it is a constant once its metadata is removed, and otherwise none; kernel reduction leaves a constructor's arguments as they are, so the subject is read as the value holds it, never unfolded |
 | that constant's module | the module the environment records as declaring it (`Environment.getModuleIdxFor?`), or the module being elaborated when it is declared there |
 
 A value whose value does not reduce to the constructor's application, such as an opaque constant or
-an axiom, is an error naming it, never a pass: Lean's `whnf` unfolds only definitions
-(`Meta.getUnfoldableConst?`). So is an unsafe or partial value: `declaredIn` requires every definition
+an axiom, is an error naming it, never a pass: the kernel unfolds neither opaque constants nor
+axioms. So is an unsafe or partial value: `declaredIn` requires every definition
 it finds to have safety `safe`, by `Confirmation.Read.proofSafe_iff`. An unsafe or partial definition
 may refer to itself, so its proof could prove anything, while a safe one cannot refer to either,
 which Lean's kernel refuses. What a value's proof proves is fixed by its type and was checked by
 Lean's kernel when the value was declared, so nothing here reads a theorem's statement.
+Both its type and its value are reduced by the kernel itself, without elaborator unfolding helpers
+or caches. `Render.kernelReduction_result` proves transport of that kernel result, including errors;
+that kernel reduction preserves the declared value's type is trusted with Lean's kernel.
 
 The modules given are the caller's, and should be every module of the project, as Lake lists them,
 the same list given to `LeanIntent.Confirmation.Read.check`: a module left out hides what it
@@ -61,10 +64,10 @@ def constOf? (e : Expr) : Option Name :=
 the deliverable its type names and the constant its subject is, each where it is a constant. An
 error when its value does not reduce to `Implementation.mk`'s application. -/
 def entryOf (decl : Name) : MetaM Entry := do
-  let t ← withTransparency .all (whnf (← getConstInfo decl).type)
+  let t ← readWhnf (← getConstInfo decl).type
   unless t.isAppOfArity ``Implementation 2 do
     throwError "the type of {decl} is not `LeanIntent.Implementation` applied to a deliverable"
-  let args ← withTransparency .all (ctorArgs (← Confirmation.Read.constOf decl) ``Implementation.mk 4)
+  let args ← ctorArgs (← Confirmation.Read.constOf decl) ``Implementation.mk 4
   let subject ← match constOf? args[2]! with
     | some c => pure (some ⟨← moduleOf c, c⟩)
     | none => pure none

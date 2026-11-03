@@ -36,6 +36,11 @@ with an error naming it, never a pass, as does one that is not a constructor's a
 reduced, such as an opaque constant or an axiom, and every unsafe or partial constant of the types
 read here, whose proofs could prove anything (`declaredWhere`).
 
+Types and values are reduced by `Render.readWhnf`, through the kernel's own reduction, so the
+constructor arguments come from the admitted declaration, never an elaborator unfolding helper.
+`Render.kernelReduction_result` preserves the kernel request's result; the kernel's reduction
+semantics remain trusted.
+
 The modules given are the caller's, and should be every module of the project, as Lake lists them:
 a module left out hides what it declares, and an empty list finds no log. A constant whose type is
 not one of these once unfolded, such as a function returning a deliverable or a structure holding
@@ -93,7 +98,7 @@ def declaredWhere (mods : Array Name) (test : Expr → MetaM Bool) : MetaM (Arra
     else acc
   let mut found := #[]
   for (c, ci) in candidates do
-    if ← withTransparency .all (do test (← whnf ci.type)) then
+    if ← test (← readWhnf ci.type) then
       unless proofSafe ci do
         throwError "{c} is unsafe or partial, so its proofs could prove anything, and it is not read"
       found := found.push c
@@ -169,7 +174,7 @@ def explanationClaims (ex : Name) : MetaM Bool := do
 
 /-- The answers the constant `decl` holds, of type `LeanIntent.Attributed W` or a list of them. -/
 def attributedOf (decl : Name) : MetaM (Array (Question × Verdict × Answerer)) := do
-  let t ← withTransparency .all (whnf (← getConstInfo decl).type)
+  let t ← readWhnf (← getConstInfo decl).type
   let e ← constOf decl
   (if t.getAppFn.isConstOf ``Attributed then pure #[e] else listElems e) >>= (·.mapM keptOf)
 
@@ -186,7 +191,7 @@ def undeclaredIn (mods decls : Array Name) (revs : Array Revision) : MetaM (List
   let answers ← declaredWhere mods fun t => do
     if t.getAppFn.isConstOf ``Attributed then return true
     unless t.isAppOfArity ``List 1 do return false
-    return (← whnf t.appArg!).getAppFn.isConstOf ``Attributed
+    return (← readWhnf t.appArg!).getAppFn.isConstOf ``Attributed
   let strayAnswers ← answers.filterM fun a =>
     return (← attributedOf a).any fun x => !kept.contains x
   return (explanations ++ strayAnswers).toList.map toString
