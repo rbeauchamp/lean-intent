@@ -355,9 +355,9 @@ structure Finding where
   why : String
   carriers : Array (Name × String)
 
-/-- What an audit found: the declarations it audited, `first :: rest`, the attestations it refuses, and the refusal of `decide`, if any, with, for a refusal at a name outside
-the modules that can name the constructor, the axioms other than Lean's three that the name rests
-on. -/
+/-- What an audit found: the declarations it audited, `first :: rest`, the attestations it
+refuses, and the refusal of `decide`, if any, with, for a refusal at a name outside the modules
+that can name the constructor, the axioms other than Lean's three that the name rests on. -/
 structure Outcome where
   first : Name
   rest : List Name
