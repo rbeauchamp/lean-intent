@@ -506,7 +506,9 @@ mapping its argument back and its result forth (`Iso.arrow`). A type the project
 declares stands for itself through the code and isomorphism its declaration fixes: the last
 constructor, which admits them, is private, and the deriving handler of `LeanIntent.Declared`, which
 reads them from the declaration, is the only code of the library that applies it. Lean's privacy
-binds names only, so that nothing else applies it is trusted (`LeanIntent.Declared`). -/
+binds names only, so that nothing else applies it is decided for a declaration by the audit of
+declared types' codes (`LeanIntent.CodeAudit`), and trusted where the audit is not run
+(`LeanIntent.Declared`). -/
 inductive Ty.Stands : (α : Type) → (t : Ty) → Iso α t.denote → Prop
   | builtin {α : Type} (t : Ty) (h : α = t.denote) : t.builtin = true → Ty.Stands α t (Iso.ofEq h)
   | list {α : Type} {t : Ty} {e : Iso α t.denote} :

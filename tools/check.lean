@@ -12,9 +12,10 @@ Run from the repository's top level as
 
 where `lean` is elan's, which runs the Lean that `lean-toolchain` names. It is not run through
 `lake env`, so that it reads the project's configuration before Lake loads it. The checks exit with
-status `0` when every rule holds, `1` when a rule rejects the project, and another non-zero status,
-through an uncaught error, when they cannot run. Every input is read through the system that owns
-it, never by reading source text by hand:
+status `0` when every rule holds and `1` when a rule rejects the project, after printing each
+rejection to standard output. When they cannot run they end through an uncaught error, which Lean
+prints to standard error and also ends with status `1`. Every input is read through the system that
+owns it, never by reading source text by hand:
 
 * the project's Lean files, from Git's index (`git ls-files`); the library's are every one of them
   outside `tools/`, which holds this program;
@@ -26,7 +27,11 @@ it, never by reading source text by hand:
 * the axioms each declaration rests on, from Lean (`collectAxioms`) over the environment Lean
   imports from the built modules;
 * the compiled code of each declaration and what it uses, from Lean (`Lean.IR.findEnvDecl`,
-  `Lean.IR.collectUsedDecls`) over that environment.
+  `Lean.IR.collectUsedDecls`) over that environment;
+* the attestations of declared types' codes that the library's declarations depend on, from the
+  library's own audit (`LeanIntent.CodeAudit.audit`) over the environment Lean imports from the
+  built modules, run by `tools/codes.lean` in a process of its own, since this program is not
+  built against the library.
 
 The rules:
 
@@ -56,6 +61,12 @@ The rules:
   is not bound to the C function it lists, as a new Lean release might make it. It sees calls by
   name: it does not see a closure called through a value held in a reference, such as Lean's table
   of elaborators, or code of a project that a text's term elaborates.
+* `CODES`: the audit of declared types' codes (`LeanIntent.CodeAudit`) accepts every constant the
+  library's modules declare, its worked examples included: no declaration they depend on attests a
+  declared type's code with a code or isomorphism other than the one the deriving handler writes
+  from the type's declaration, and none rests on an axiom other than Lean's three. `tools/codes.lean`
+  says what it prints and when it fails; the rule fails rather than passing when the library's
+  modules declare no constant.
 
 The rules read what the build produced, so they hold only if no code the build runs was written to
 defeat them: elaborating a Lean file runs the metaprograms it invokes.
@@ -225,6 +236,23 @@ def build (files : Array String) : IO (Array Rejection) := do
     return #[]
   return #[{ rule := "LEAN-BUILD", message :=
     s!"lake build --wfail of the library's Lean files failed; a file that is not a module of the workspace is an unknown target:\n{out}" }]
+
+/-- `CODES` for the library's modules `mods`, built into the directory `libDir`, by the status of
+`tools/codes.lean`: no rejection for `0`; for `1`, a refusal, one rejection for each line it printed
+to standard output, or, when it printed none, one rejection carrying its standard error; and for
+any other status, `2` when it could not run, an error carrying its standard output and error. -/
+def checkCodes (libDir : System.FilePath) (mods : Array Name) : IO (Array Rejection) := do
+  let args := #["--run", "tools/codes.lean"] ++ mods.map (·.toString)
+  let o ← IO.Process.output { cmd := "lean", args, env := #[("LEAN_PATH", some libDir.toString)] }
+  match o.exitCode with
+  | 0 => return #[]
+  | 1 =>
+    let lines := ((o.stdout.splitOn "\n").filter (· ≠ "")).toArray
+    if lines.isEmpty then
+      return #[{ rule := "CODES", message :=
+        s!"tools/codes.lean exited with status 1 and printed no reason; its standard error:\n{o.stderr}" }]
+    return lines.map fun l => { rule := "CODES", message := l }
+  | c => throw <| IO.userError s!"tools/codes.lean could not run (status {c}):\n{o.stdout}{o.stderr}"
 
 /-- The axioms that the constant `c` of `env` rests on, as Lean collects them. -/
 def axiomsOf (env : Environment) (c : Name) : IO (Array Name) :=
@@ -575,6 +603,7 @@ def check : IO (Array Rejection) := do
   let built ← build files
   unless built.isEmpty do
     return built
+  let codes ← checkCodes pkg.leanLibDir mods
   initSearchPath (← findSysroot) [pkg.leanLibDir]
   let env ← importModules (mods.map fun m => { module := m }) {}
   let idxs := mods.filterMap env.getModuleIdx?
@@ -590,7 +619,7 @@ def check : IO (Array Rejection) := do
           compiled := compiled.push c
   if audited == 0 then
     errs := errs.push { rule := "AXIOMS", message := "the library's modules declare no constant" }
-  return errs ++ checkProcess env compiled
+  return errs ++ checkProcess env compiled ++ codes
 
 end Check
 
