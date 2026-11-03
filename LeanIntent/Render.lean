@@ -119,9 +119,12 @@ printed text to the same term, binder names, which Lean's kernel ignores, and me
 they do not, the text, a rendering or an answer's, is refused. So what the owner reads is what Lean
 reads, for every term shown, though only as checked for that term and not as a theorem.
 
-The rendering reads the explanation through Lean's own reduction to weak head normal form, so a
+The rendering reads the explanation through Lean's kernel reduction to weak head normal form, so a
 record, list or gloss built by any definition is read, as long as it reduces to its constructors;
-a gloss must reduce to string literals. A statement is refused, and with it the rendering, when it
+a gloss must reduce to string literals. `kernelReduction` ties each result to that exact kernel
+request by its type, without the elaborator's auxiliary unfolding rules or reduction cache;
+`kernelReduction_result` proves that this adds no refusal or replacement of a kernel result.
+A statement is refused, and with it the rendering, when it
 has free or meta variables, when the printer refuses it (`LeanIntent.Print.Printable` says which
 terms it prints), when a part of its gloss is empty, or when Lean does not elaborate its printed
 form back to it.
@@ -299,16 +302,41 @@ def Reader.print (R : Reader) (e : Expr) : MetaM String := do
 
 /-! ## Reading an explanation -/
 
+/-- A reduction result tied to the kernel request for this environment, local context and term.
+The kernel's reduction semantics are trusted, not proved by this result's provenance. Unlike
+`Meta.whnf`, this request cannot consult smart-unfolding helpers or elaborator extension state. -/
+def kernelReduction (env : Environment) (lctx : LocalContext) (e : Expr) :
+    Except Kernel.Exception { result : Expr // Kernel.whnf env lctx e = .ok result } :=
+  match Kernel.whnf env lctx e with
+  | .ok result => .ok ⟨result, rfl⟩
+  | .error ex => .error ex
+
+/-- Erasing the provenance proof preserves every success and every error of the kernel request.
+This is a transport theorem, not a proof of the external kernel's reduction algorithm. -/
+theorem kernelReduction_result (env : Environment) (lctx : LocalContext) (e : Expr) :
+    (kernelReduction env lctx e).map Subtype.val = Kernel.whnf env lctx e := by
+  unfold kernelReduction
+  generalize Kernel.whnf env lctx e = result
+  cases result <;> rfl
+
+/-- Read weak head normal form through the kernel, with no elaborator reduction fallback.
+The expression must be kernel-ready: declared values have no metavariables, and generic renderings
+supply their free variables through the current local context. -/
+def readWhnf (e : Expr) : MetaM Expr := do
+  match kernelReduction (← getEnv) (← getLCtx) e with
+  | .ok result => return result.val
+  | .error _ => throwError "Lean's kernel could not reduce{indentExpr e}"
+
 /-- The arguments of `e`, which must reduce to the constructor `ctor` applied to `n` arguments. -/
 def ctorArgs (e : Expr) (ctor : Name) (n : Nat) : MetaM (Array Expr) := do
-  let e ← whnf e
+  let e ← readWhnf e
   unless e.isAppOfArity ctor n do
     throwError "expected {.ofConstName ctor} applied to {n} arguments, found{indentExpr e}"
   return e.getAppArgs
 
 /-- The elements of a list. -/
 partial def listElems (e : Expr) : MetaM (Array Expr) := do
-  let e ← whnf e
+  let e ← readWhnf e
   if e.isAppOfArity ``List.cons 3 then
     return #[e.getArg! 1] ++ (← listElems (e.getArg! 2))
   else if e.isAppOfArity ``List.nil 1 then
@@ -317,7 +345,7 @@ partial def listElems (e : Expr) : MetaM (Array Expr) := do
 
 /-- The string a string literal is. -/
 def strLit (e : Expr) : MetaM String := do
-  match ← whnf e with
+  match ← readWhnf e with
   | .lit (.strVal s) => return s
   | e => throwError "expected a string literal, found{indentExpr e}"
 
@@ -337,14 +365,14 @@ def readIdent (e : Expr) : MetaM Ident := do
 
 /-- The verdict `e` reduces to. -/
 def readVerdict (e : Expr) : MetaM Verdict := do
-  let e ← whnf e
+  let e ← readWhnf e
   if e.isConstOf ``Verdict.confirmed then return .confirmed
   if e.isConstOf ``Verdict.declined then return .declined
   throwError "expected a verdict, found{indentExpr e}"
 
 /-- The answerer `e` reduces to; refused when a decision on the owner's behalf gives no reason. -/
 def readAnswerer (e : Expr) : MetaM Answerer := do
-  let e ← whnf e
+  let e ← readWhnf e
   if e.isAppOfArity ``Answerer.owner 1 then
     return .owner (← readIdent e.appArg!)
   if e.isAppOfArity ``Answerer.onBehalf 3 then
@@ -357,7 +385,7 @@ def readAnswerer (e : Expr) : MetaM Answerer := do
 
 /-- The standing of the record's restatement that `e` reduces to. -/
 def readRestatement (e : Expr) : MetaM Restatement := do
-  let e ← whnf e
+  let e ← readWhnf e
   if e.isConstOf ``Restatement.unconfirmed then return .unconfirmed
   if e.isAppOfArity ``Restatement.confirmed 1 then return .confirmed (← readIdent e.appArg!)
   throwError "expected whether a restatement is confirmed, found{indentExpr e}"
@@ -370,7 +398,7 @@ def readDerived : (s : Restatement) → MetaM (Settled s)
 
 /-- The status `e` reduces to, of a consequence of a record whose restatement stands as `s`. -/
 def readSettled (s : Restatement) (e : Expr) : MetaM (Settled s) := do
-  let e ← whnf e
+  let e ← readWhnf e
   if e.isAppOfArity ``Settled.answered 3 then
     let a := e.getAppArgs
     return .answered (← readAnswerer a[1]!) (← readVerdict a[2]!)
@@ -766,7 +794,7 @@ def definitions (R : Reader) (roots : List Name) (shown : NameSet) : MetaM Strin
 
 /-- The kind of a consequence, `e` reduced to its constructor, and what it is shown as. -/
 def kindWords (e : Expr) : MetaM (Expr × String) := do
-  let kind ← whnf e
+  let kind ← readWhnf e
   if kind.isConstOf ``Consequence.Kind.entailment then
     return (kind, "an entailment: every subject that meets the record satisfies it")
   else if kind.isConstOf ``Consequence.Kind.possibility then
@@ -1025,13 +1053,13 @@ def answerText (ex : Name) (a : Expr) : MetaM String := do
   let answerer ← readAnswerer attributed[2]!
   let ans ← ctorArgs attributed[1]! ``Answer.mk 3
   let c ← ctorArgs ans[1]! ``Consequence.mk 4
-  let aus := (← whnf attributed[1]!).getAppFn.constLevels!
-  let cus := (← whnf ans[1]!).getAppFn.constLevels!
-  let name ← whnf c[1]!
+  let aus := (← readWhnf attributed[1]!).getAppFn.constLevels!
+  let cus := (← readWhnf ans[1]!).getAppFn.constLevels!
+  let name ← readWhnf c[1]!
   unless name matches .lit (.strVal _) do
     throwError "expected a string literal, found{indentExpr name}"
   let (kind, shownAs) ← kindWords c[2]!
-  let verdict ← whnf ans[2]!
+  let verdict ← readWhnf ans[2]!
   let attribution := answerer.says (← readVerdict verdict)
   let term := mkApp3 (.const ``Answer.mk aus) ans[0]!
     (mkApp4 (.const ``Consequence.mk cus) c[0]! name kind c[3]!) verdict
