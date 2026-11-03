@@ -2,7 +2,7 @@
 
 **The adequacy obligations O1 to O5**, each computed from the record by a goal former whose correctness theorem is proved, so an assistant obtains each obligation from the library instead of writing a weaker one by hand: the record is well formed (O1), its hypotheses and then the whole record have a model (O2), each property can fail (O3), a subject that does nothing fails it (O4, by what doing nothing means for its shape), and any two subjects that meet it are equal or differ only in a stated freedom (O5), which is part of the restatement the owner confirms, a fork they decide when it changes what they get, or else a decision made on the owner's behalf.
 
-Modules: `LeanIntent/Obligations.lean`, and `LeanIntent/Progress.lean` for the progress theorem. A record generic in a world's types has [a document of its own](generic-records.md), and so has the obligation that every input a precondition-postcondition pair admits can be served ([pairs](pairs.md)).
+Modules: `LeanIntent/Obligations.lean`, and `LeanIntent/Progress.lean` for the progress theorem. A record generic in a world's types has [a document of its own](generic-records.md), and so have the obligation that every input a precondition-postcondition pair admits can be served ([pairs](pairs.md)) and the check of whether a trivial witness meets a pair ([trivial witnesses](trivial-witnesses.md)).
 
 **Complete in this version:** the five obligations with their goal formers and correctness theorems, and the progress theorem (the obligations refuse no record with content and a sound shape).
 

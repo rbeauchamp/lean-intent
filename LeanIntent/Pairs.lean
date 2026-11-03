@@ -42,9 +42,10 @@ What the obligation does not establish:
 
 * That the pair asks for the work it is meant to ask for. The second goal lets the subject depend on
   the input, so a subject that fixes its answer to each input in advance, such as a table or a
-  script, can serve every input. That no such trivial witness meets a pair is not checked here. The
-  pair whose only input is trivial asks one subject of the class to meet the whole property, and its
-  obligation gives that of every pair of the property whose precondition admits an input
+  script, can serve every input. Whether a trivial witness of a closed class fixed by the subject's
+  type meets a pair is checked by `LeanIntent.TrivialWitnesses`, for the types it covers, not here.
+  The pair whose only input is trivial asks one subject of the class to meet the whole property, and
+  its obligation gives that of every pair of the property whose precondition admits an input
   (`OPair.of_whole`), but not in general the other way
   (`LeanIntentExamples.Pairs.perWorld_not_whole`).
 * That the pair can fail. A pair whose precondition admits an input and whose postcondition every
