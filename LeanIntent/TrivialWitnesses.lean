@@ -41,12 +41,12 @@ the class (`witnesses W`) holds:
   (`Witness.timed_meets_iff`), which is when a table of scripts, one fixed for each input in
   advance, does (`Witness.timed_meets_iff_script`). A clock part is a component of an argument of
   any covered type, the argument itself or a component of a side of a pair or of a field of a
-  declared type with one constructor, read as its value or, for a list or an array, as its length
-  or size. The class reads as a clock each clock part whose reading does not determine the
-  arguments, such as the length of an agent's history or the time field, of any type, of a structure
-  that also holds what it sees; and, by the project's declaration, each that is a value of type
-  `LeanIntent.Clock α`, such as the only argument of a policy of type `Clock Nat → Act`, every
-  subject of which is a script.
+  declared type with one constructor that is not recursive, nested or mutual, read as its value or,
+  for a list or an array, as its length or size. The class reads as a clock each clock part whose
+  reading does not determine the arguments, such as the length of an agent's history or the time
+  field, of any type, of a structure that also holds what it sees; and, by the project's
+  declaration, each that is a value of type `LeanIntent.Clock α`, such as the only argument of a
+  policy of type `Clock Nat → Act`, every subject of which is a script.
 
 `Sig.mem_witnesses_iff` states the class apart from the list that computes it. `Pair.MetTrivially`
 states, over strategies from the pair's inputs to subjects and apart from the class, that some

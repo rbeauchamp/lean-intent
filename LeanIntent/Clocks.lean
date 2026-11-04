@@ -80,7 +80,7 @@ mutual
 
 /-- Every component of a value of type `t` reached without applying a function, with its type: the
 value itself, then the components of each side of a pair, or of each field of a declared type with
-one constructor. -/
+one constructor that is not recursive, nested or mutual, whose representation is a chain of fields. -/
 def Ty.components : (t : Ty) → List (Σ c, Ty.Proj NoSource t c)
   | .prod a b =>
     ⟨_, .self (.prod a b)⟩ :: ((Ty.components a).map fun p => ⟨p.1, .fst b p.2⟩) ++
@@ -458,11 +458,11 @@ def Ty.namesClock : Ty → Bool
 mutual
 
 /-- Whether a value of the code holds a `LeanIntent.Clock` where no clock part reaches it: inside a
-list, an array, an option, a sum, a function, or a declared type with several constructors. The
-clock parts reach through pairs and the fields of every declared type with one constructor,
-`LeanIntent.Clock` included, and a `LeanIntent.Clock` they reach is a declaration the class reads.
-A parameter of a declared type is not a part of its values except through the fields that hold it,
-which are read instead. -/
+list, an array, an option, a sum, a function, a declared type with several constructors, or a
+recursive, nested or mutual type (a `Ty.mu`). The clock parts reach through pairs and the fields of
+every other declared type with one constructor, `LeanIntent.Clock` included, and a
+`LeanIntent.Clock` they reach is a declaration the class reads. A parameter of a declared type is
+not a part of its values except through the fields that hold it, which are read instead. -/
 def Ty.strayClock : Ty → Bool
   | .prod a b => Ty.strayClock a || Ty.strayClock b
   | .decl _ _ r => Ty.fieldStrayClock r
