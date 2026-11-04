@@ -20,8 +20,8 @@ constructor, such as a structure, each of any covered type; with a reading of th
 `ArgClock.read` reads it from a tuple of arguments. A part that does not exist, such as the element
 of a list, a side of a sum, a field of a type with several constructors, a field of a recursive,
 nested or mutual type (whose representation is a `Ty.mu`, not a chain of fields) or what a function
-returns, has no such path, so Lean refuses to elaborate it and no declaration can name it. `ArgClock.all`
-lists every clock part (`ArgClock.mem_all`), from every component of each argument
+returns, has no such path, so Lean refuses to elaborate it and no declaration can name it.
+`ArgClock.all` lists every clock part (`ArgClock.mem_all`), from every component of each argument
 (`Ty.components`, `Ty.mem_components`) and every reading of each (`ClockRead.all`,
 `ClockRead.mem_all`).
 
@@ -46,11 +46,10 @@ lists every clock part (`ArgClock.mem_all`), from every component of each argume
   instance can sit in a module the verdicts do not import, or be passed for one pair.
 * A value of type `LeanIntent.Clock α` in an argument where no clock part reaches, such as inside a
   list, an option, a sum, a declared type with several constructors, a recursive type or a
-  function, is a declaration
-  the class cannot read: `Ty.strayClock` finds it, and the trivial-witness check refuses every
-  verdict about such a type rather than ignore the declaration. It looks only in the fields of
-  values, never in a declared type's parameters, which hold no value except through the fields that
-  use them.
+  function, is a declaration the class cannot read: `Ty.strayClock` finds it, and the trivial-witness
+  check refuses every verdict about such a type rather than ignore the declaration. It looks only in
+  the fields of values, never in a declared type's parameters, which hold no value except through
+  the fields that use them.
 -/
 
 namespace LeanIntent
