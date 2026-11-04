@@ -21,8 +21,8 @@ The decision, given what a build shows of the project (`entry`, as `LeanIntent.I
 would read it), finds nothing (`implemented`), and lists the deliverable with the value and the
 program's module and name (`implemented_listed`). Each change below is refused by name:
 
-* no value recording the implementation (`unimplemented_refused`), and no deliverable
-  (`noDeliverable_refused`);
+* no value recording the implementation, nor any declaring it awaited (`unimplemented_refused`),
+  and no deliverable (`noDeliverable_refused`);
 * a second value recording another implementation of the same deliverable, whichever constant it
   records (`several_refused`);
 * a value whose type names a deliverable the project does not declare, or a term in place of a
@@ -67,20 +67,20 @@ def program : Constant := ⟨`LeanIntentExamples.Implementation, ``sortProgram�
 /-- What the build shows of `sortingImplementation`. -/
 def entry : Entry := ⟨``sortingImplementation, some ``sortingDeliverable, some program⟩
 
-theorem implemented : findings [``sortingDeliverable] [entry] = [] := by
+theorem implemented : findings [``sortingDeliverable] [entry] [] = [] := by
   decide +kernel
 
 theorem implemented_listed :
-    (report [``sortingDeliverable] [entry]).implementations =
+    (report [``sortingDeliverable] [entry] []).implementations =
       [(``sortingDeliverable, ``sortingImplementation, program)] := by
   decide +kernel
 
 theorem unimplemented_refused :
-    findings [``sortingDeliverable] [] = [.unimplemented ``sortingDeliverable] := by
+    findings [``sortingDeliverable] [] [] = [.unimplemented ``sortingDeliverable] := by
   decide +kernel
 
 theorem noDeliverable_refused :
-    findings [] [entry] = [.noDeliverable, .untied ``sortingImplementation] := by
+    findings [] [entry] [] = [.noDeliverable, .untied ``sortingImplementation] := by
   decide +kernel
 
 /-- A second value, recording `sort` as the implementation of the same deliverable. -/
@@ -89,29 +89,31 @@ def second : Entry :=
     some ⟨`LeanIntentExamples.Sorting, ``sort⟩⟩
 
 theorem several_refused :
-    findings [``sortingDeliverable] [entry, second] =
+    findings [``sortingDeliverable] [entry, second] [] =
       [.several ``sortingDeliverable [``sortingImplementation, `secondImplementation]] := by
   decide +kernel
 
 theorem untied_refused :
-    findings [``sortingDeliverable] [entry, { second with deliverable := some `otherDeliverable }] =
+    findings [``sortingDeliverable]
+      [entry, { second with deliverable := some `otherDeliverable }] [] =
       [.untied `secondImplementation] := by
   decide +kernel
 
 theorem termDeliverable_refused :
-    findings [``sortingDeliverable] [entry, { second with deliverable := none }] =
+    findings [``sortingDeliverable] [entry, { second with deliverable := none }] [] =
       [.untied `secondImplementation] := by
   decide +kernel
 
 theorem notConstant_refused :
-    findings [``sortingDeliverable] [{ entry with subject := none }] =
+    findings [``sortingDeliverable] [{ entry with subject := none }] [] =
       [.notConstant ``sortingImplementation] := by
   decide +kernel
 
 /-- Two deliverables, each implemented by its own value, recording the same constant. -/
 theorem oneConstant_accepted :
     findings [``sortingDeliverable, `otherDeliverable]
-      [entry, { entry with name := `otherImplementation, deliverable := some `otherDeliverable }] =
+      [entry, { entry with name := `otherImplementation, deliverable := some `otherDeliverable }]
+      [] =
       [] := by
   decide +kernel
 

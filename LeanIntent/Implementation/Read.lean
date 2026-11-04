@@ -5,10 +5,11 @@ import LeanIntent.Confirmation.Read
 /-!
 # Reading a project's implementations from the finished build
 
-`LeanIntent.Implementation` decides whether each deliverable of a project names its implementation,
-given what the build shows of its deliverables and of its values of `Implementation d`. This module
-reads both from Lean's environment, so a gate that reads only the declarations of a finished build
-reads them through the library, and parses no source text. Each input is read through Lean:
+`LeanIntent.Implementation` decides whether each deliverable of a project names its implementation
+or is declared to await one, given what the build shows of its deliverables, of its values of
+`Implementation d` and of its values of `AwaitingImplementation d`. This module reads all three from
+Lean's environment, so a gate that reads only the declarations of a finished build reads them
+through the library, and parses no source text. Each input is read through Lean:
 
 | Input | How it is read |
 |---|---|
@@ -17,11 +18,14 @@ reads them through the library, and parses no source text. Each input is read th
 | the deliverable a value names | the second argument of that type, `d` of `@Implementation W d`, where it is a constant once its metadata is removed (`Expr.consumeMData`), and otherwise none |
 | the constant a value records | its value, reduced by `Render.readWhnf` through the kernel to `Implementation.mk`'s application, and that application's third argument, the subject, where it is a constant once its metadata is removed, and otherwise none; kernel reduction leaves a constructor's arguments as they are, so the subject is read as the value holds it, never unfolded |
 | that constant's module | the module the environment records as declaring it (`Environment.getModuleIdxFor?`), or the module being elaborated when it is declared there |
+| the values that declare a deliverable awaiting its implementation | every such constant of those modules whose type so reduces to `LeanIntent.AwaitingImplementation _` |
+| the deliverable such a value names | the second argument of that type, as for an implementation |
+| the reason it gives | its value, reduced by `Render.readWhnf` to `AwaitingImplementation.mk`'s application, and that application's third argument, reduced by the kernel to a string literal (`Render.strLit`); anything else is an error naming the value |
 
-A value whose value does not reduce to the constructor's application, such as an opaque constant or
-an axiom, is an error naming it, never a pass: the kernel unfolds neither opaque constants nor
-axioms. So is an unsafe or partial value: `declaredIn` requires every definition
-it finds to have safety `safe`, by `Confirmation.Read.proofSafe_iff`. An unsafe or partial definition
+A value of either kind whose value does not reduce to its constructor's application, such as an
+opaque constant or an axiom, is an error naming it, never a pass: the kernel unfolds neither opaque
+constants nor axioms. So is an unsafe or partial value of either kind: `declaredIn` requires every
+definition it finds to have safety `safe`, by `Confirmation.Read.proofSafe_iff`. An unsafe or partial definition
 may refer to itself, so its proof could prove anything, while a safe one cannot refer to either,
 which Lean's kernel refuses. What a value's proof proves is fixed by its type and was checked by
 Lean's kernel when the value was declared, so nothing here reads a theorem's statement.
@@ -31,10 +35,11 @@ that kernel reduction preserves the declared value's type is trusted with Lean's
 
 The modules given are the caller's, and should be every module of the project, as Lake lists them,
 the same list given to `LeanIntent.Confirmation.Read.check`: a module left out hides what it
-declares, so a value in it records nothing and its deliverable is refused as unimplemented, and a
-deliverable in it is not asked about. A constant whose type is not one of these once unfolded, such
-as a function returning a value of `Implementation d` or a structure holding one, is not found, so
-it records nothing.
+declares, so a value in it records nothing and its deliverable is refused as unimplemented, unless a
+module given declares it awaiting its implementation, and a deliverable in it is not asked about. A
+constant whose type is not one of these once unfolded, such as a function returning a value of
+`Implementation d` or of `AwaitingImplementation d`, or a structure holding one, is not found, so it
+records nothing.
 -/
 
 namespace LeanIntent.Implementation.Read
@@ -73,14 +78,30 @@ def entryOf (decl : Name) : MetaM Entry := do
     | none => pure none
   return ⟨decl, constOf? t.appArg!, subject⟩
 
+/-- What the build shows of the value `decl`, a constant whose type reduces to
+`AwaitingImplementation d`: the deliverable its type names, where that is a constant, and the reason
+it gives. An error when its value does not reduce to `AwaitingImplementation.mk`'s application, or
+its reason to a string literal. -/
+def awaitingEntryOf (decl : Name) : MetaM AwaitingEntry := do
+  let t ← readWhnf (← getConstInfo decl).type
+  unless t.isAppOfArity ``AwaitingImplementation 2 do
+    throwError
+      "the type of {decl} is not `LeanIntent.AwaitingImplementation` applied to a deliverable"
+  let args ← ctorArgs (← Confirmation.Read.constOf decl) ``AwaitingImplementation.mk 4
+  let reason ← try strLit args[2]! catch e =>
+    throwError "the reason {decl} gives is not read as a string literal: {e.toMessageData}"
+  return ⟨decl, constOf? t.appArg!, reason⟩
+
 /-- **What a gate reads**, from the finished build: the report on the implementations of the project
-whose modules are `mods`. It is `Implementation.report` of the project's deliverables and the entries
-of its values of `Implementation d`, so its findings are empty exactly when each deliverable has
-exactly one value recording its implementation, each value names one of them and records a constant,
-and there is at least one deliverable (`Implementation.findings_eq_nil_iff`). -/
+whose modules are `mods`. It is `Implementation.report` of the project's deliverables and the
+entries of its values of `Implementation d` and of `AwaitingImplementation d`, so its findings are
+empty exactly when there is at least one deliverable, each has exactly one value recording its
+implementation or exactly one value declaring it awaiting one, and not both, each value names one
+of them, and each implementation records a constant (`Implementation.findings_eq_nil_iff`). -/
 def check (mods : Array Name) : MetaM Report := do
   let ds ← declaredIn mods ``Deliverable
   let vs ← (← declaredIn mods ``Implementation).mapM entryOf
-  return report ds.toList vs.toList
+  let as ← (← declaredIn mods ``AwaitingImplementation).mapM awaitingEntryOf
+  return report ds.toList vs.toList as.toList
 
 end LeanIntent.Implementation.Read
