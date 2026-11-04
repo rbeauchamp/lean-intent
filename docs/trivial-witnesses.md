@@ -12,7 +12,7 @@ The pair obligation ([pairs](pairs.md)) asks that each input a pair's preconditi
 
 ## The class
 
-A witness is a strategy: the subject an implementation offers at each input of the pair. For a pair about subjects of a covered type `W` (`LeanIntent.Covered`: built-in types, function types, and the structures and inductive types a project declares, as the [degenerate check](degenerate-subjects.md) covers them, recursive, nested and mutual declared types following #23), of code `a₁ → … → aₙ → b`, the class `witnesses W` holds these members (`LeanIntent.Witness`), each with what it meets stated over strategies:
+A witness is a strategy: the subject an implementation offers at each input of the pair. For a pair about subjects of a covered type `W` (`LeanIntent.Covered`: built-in types, function types, and the structures and inductive types a project declares, as the [degenerate check](degenerate-subjects.md) covers them), of code `a₁ → … → aₙ → b`, the class `witnesses W` holds these members (`LeanIntent.Witness`), each with what it meets stated over strategies:
 
 | Member | The strategies it stands for | Meets the pair exactly when | Theorem |
 |---|---|---|---|

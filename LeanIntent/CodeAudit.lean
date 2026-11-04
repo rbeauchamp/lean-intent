@@ -65,11 +65,14 @@ What the theorems do not reach, and what is trusted:
   the one the handler derives from the type's declaration, including every attestation of a type
   `Ty` builds in, such as `Bool` or a definition that reduces to it, which already has a code the
   handler does not write (`Declared.builtinHeads`): argued from its code, which takes the
-  derivation from the handler's own functions and leaves each equality to Lean's kernel. The handler
-  runs it on what it writes and fails rather than write a code it refuses, so the two agree on every
-  type the handler covers. That the handler reads the declaration in order stays trusted, as
-  `LeanIntent.Declared` states: the audit derives the code through the same functions, not a second
-  reading.
+  derivation from the handler's own functions and leaves each equality to Lean's kernel. For a
+  recursive type, the code is re-derived through the handler's own reading of its group and the
+  isomorphism is read by what its maps reduce to at every constructor, by Lean's `whnf` or its
+  kernel, which fixes them by structural recursion over the group (`Declared.checkRecMaps`). The
+  handler runs it on what it writes and fails rather than write a code it refuses, so the two agree
+  on every type the handler covers. That the handler reads the declaration in order stays trusted,
+  as `LeanIntent.Declared` states: the audit derives the code through the same functions, not a
+  second reading.
 * That a declaration whose dependencies name the constructor only in attestations and rest on no
   axiom but Lean's three proves `Ty.Stands` of a declared type's code only for a code and
   isomorphism equal to those of one of those attestations: argued from Lean's logic, in which the
