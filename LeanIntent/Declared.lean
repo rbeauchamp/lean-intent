@@ -441,7 +441,7 @@ def builtinHeads : MetaM (Array Name) := do
 to that type's trees, is the map the handler writes, read constructor by constructor: `none` when
 it is, and otherwise the reason it is not. Starting from `f` for the `i`-th type, it checks, for
 every constructor of every type of the group the maps reach, that the map applied to the constructor
-and its fields is, by Lean's kernel:
+and its fields reduces, by Lean's `whnf` or else by its kernel, to a value that is, by Lean's kernel:
 
 * for a base constructor of the `i`-th type, the base value holding the constructor's alternative
   of the base, with each field carried through its own type's isomorphism;
@@ -483,22 +483,11 @@ def checkRecMaps (group : Array (Expr × Array GCtor)) (i : Nat) (f : Expr)
         let some inst ← instOf t | return some s!"the type `{t}` of a field of `{c.name}` has no code"
         codes := codes.push (codeOf t inst)
     baseAlts := baseAlts.push (denoteE (chainCode codes.toList))
-  -- A map applied to a constructor, reduced to a base value or a node: by `whnf`; where that stops
-  -- short, as it can at a recursive field that is a function, by an equation Lean proves for the
-  -- map's head constant whose left side is the application, since a proved equation serves the
-  -- argument above as well as a reduction does; and otherwise by Lean's kernel.
+  -- A map applied to a constructor, reduced to a base value or a node: by `whnf`, and where that
+  -- stops short, as it can at a recursive field that is a function, by Lean's kernel.
   let reduce (e : Expr) : MetaM Expr := do
     let w ← whnf e
     if w.isAppOf ``MuVal.base || w.isAppOf ``MuVal.node then return w
-    if let .const fn _ := e.getAppFn then
-      if let some eqs ← (try getEqnsFor? fn catch _ => pure none) then
-        for eq in eqs do
-          let (_, _, ty) ← forallMetaTelescopeReducing (← inferType (← mkConstWithFreshMVarLevels eq))
-          if let some (_, l, rhs) := ty.eq? then
-            if ← isDefEq l e then
-              let rhs ← whnfR (← instantiateMVars rhs)
-              if !rhs.hasMVar && (rhs.isAppOf ``MuVal.base || rhs.isAppOf ``MuVal.node) then
-                return rhs
     match Kernel.whnf (← getEnv) (← getLCtx) e with
     | .ok k => return k
     | .error _ => return w
