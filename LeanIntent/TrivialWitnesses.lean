@@ -39,12 +39,14 @@ the class (`witnesses W`) holds:
   subject that reads only `k` (`Sig.Fn.ReadsOnly`), which is a function of `k`'s reading
   (`ArgClock.readsOnly_iff_script`). It meets the pair exactly when such a strategy does
   (`Witness.timed_meets_iff`), which is when a table of scripts, one fixed for each input in
-  advance, does (`Witness.timed_meets_iff_script`). The class reads as a clock each number,
-  `Fin (n + 1)`, list's length or array's size inside an argument, through pairs and the fields of
-  declared types with one constructor, whose reading does not determine the arguments, such as the
-  length of an agent's history or the time field of a structure that also holds what it sees; and,
-  by the project's declaration, each that lies in a value of type `LeanIntent.Clock`, such as the
-  only argument of a policy of type `Clock → Act`, every subject of which is a script.
+  advance, does (`Witness.timed_meets_iff_script`). A clock part is a component of an argument of
+  any covered type, the argument itself or a component of a side of a pair or of a field of a
+  declared type with one constructor, read as its value or, for a list or an array, as its length
+  or size. The class reads as a clock each clock part whose reading does not determine the
+  arguments, such as the length of an agent's history or the time field, of any type, of a structure
+  that also holds what it sees; and, by the project's declaration, each that is a value of type
+  `LeanIntent.Clock α`, such as the only argument of a policy of type `Clock Nat → Act`, every
+  subject of which is a script.
 
 `Sig.mem_witnesses_iff` states the class apart from the list that computes it. `Pair.MetTrivially`
 states, over strategies from the pair's inputs to subjects and apart from the class, that some
@@ -73,13 +75,12 @@ exactly when no trivial witness meets the pair (`reported_eq_nil_iff`).
 ## What the class does not hold
 
 * A script of timed actions whose clock is a part whose reading determines the arguments, such as
-  the only argument of a policy of type `Nat → Act`, unless the part lies in a `LeanIntent.Clock`:
-  the type alone cannot tell such a part from what the subject sees, and reads it as what it sees.
-* A script whose clock is a number or a length the clock parts do not reach: inside a list's
-  elements, an option, a sum, a declared type with several constructors, a recursive type or a
-  function, or a value of another type, such as an `Int` or a machine integer. Such a clock is
-  brought into the class by stating the pair over a type that holds it as a `LeanIntent.Clock` the
-  clock parts reach.
+  the only argument of a policy of type `Nat → Act`, unless the part is a `LeanIntent.Clock α`: the
+  type alone cannot tell such a part from what the subject sees, and reads it as what it sees.
+* A script whose clock the clock parts do not reach: inside a list's elements, an option, a sum, a
+  declared type with several constructors, a recursive type or what a function returns, or a reading
+  of a component other than its value, a list's length and an array's size. Such a clock is brought
+  into the class by stating the pair over a type that holds it where the clock parts reach.
 * A witness that does not read one part of an argument and reads the rest, such as one field of a
   structure or one side of a pair, other than a whole argument (`.blind i`) or a script of timed
   actions, which reads only its clock.
@@ -141,7 +142,7 @@ def blinds (σ : Sig) : List (Witness σ) :=
   if 2 ≤ σ.args.length then (List.finRange σ.args.length).map .blind else []
 
 /-- The clock parts the class reads as clocks: each whose reading does not determine the arguments,
-and each the project declared its clock by the type `LeanIntent.Clock` (`ArgClock.InClock`). -/
+and each the project declared its clock by the type `LeanIntent.Clock α` (`ArgClock.InClock`). -/
 def clocks (σ : Sig) : List (ArgClock σ.args) :=
   (ArgClock.all σ.args).filter fun k => !k.determines || decide k.InClock
 
@@ -156,7 +157,7 @@ def witnesses (σ : Sig) : List (Witness σ) :=
 
 /-- The clock parts the class reads as clocks, apart from the list that computes them: those whose
 reading does not determine the arguments, since two tuples of them read the same there and differ,
-and those that lie in a value of type `LeanIntent.Clock`. -/
+and those that are values of type `LeanIntent.Clock α`. -/
 theorem mem_clocks_iff {σ : Sig} (k : ArgClock σ.args) :
     k ∈ σ.clocks ↔ (∃ xs ys, xs ≠ ys ∧ k.read xs = k.read ys) ∨ k.InClock := by
   simp only [clocks, List.mem_filter, ArgClock.mem_all, true_and, Bool.or_eq_true,
@@ -172,7 +173,7 @@ theorem mem_blinds_iff {σ : Sig} (t : Witness σ) :
   · simp [h]
 
 /-- The scripts of timed actions, apart from the list that computes them: one on each clock part
-whose reading does not determine the arguments, and on each that lies in a `LeanIntent.Clock`. -/
+whose reading does not determine the arguments, and on each that is a `LeanIntent.Clock α`. -/
 theorem mem_timeds_iff {σ : Sig} (t : Witness σ) :
     t ∈ σ.timeds ↔
       ∃ k, ((∃ xs ys, xs ≠ ys ∧ k.read xs = k.read ys) ∨ k.InClock) ∧ t = .timed k := by
@@ -182,7 +183,7 @@ theorem mem_timeds_iff {σ : Sig} (t : Witness σ) :
 /-- The class, apart from the list that computes it: any subject, a table, the member that does not
 read the argument at each position of a function of at least two arguments, one subject of each
 member of the degenerate class, and the script of timed actions on each clock part whose reading does
-not determine the arguments or that lies in a `LeanIntent.Clock`. -/
+not determine the arguments or that is a `LeanIntent.Clock α`. -/
 theorem mem_witnesses_iff {σ : Sig} (t : Witness σ) :
     t ∈ σ.witnesses ↔
       t = .vacuous ∨ t = .table ∨ (2 ≤ σ.args.length ∧ ∃ i, t = .blind i) ∨
@@ -237,14 +238,15 @@ not reading that argument. -/
 def Witness.BlindTo (i : Nat) (w : W) : Prop := (c.iso.to w).Ignores i
 
 /-- `w` reads only the clock part `k` of its arguments: the function of `W`'s code that the
-isomorphism takes it to reads only `k` (`Sig.Fn.ReadsOnly`). The isomorphism takes a number, a
-`Fin (n + 1)` and a list's length or an array's size to themselves, and a declared type's fields to
-its representation's, so this is the subject itself reading only that part. -/
+isomorphism takes it to reads only `k` (`Sig.Fn.ReadsOnly`). The isomorphism takes each component
+of an argument through a bijection of its own type, a list's length and an array's size to
+themselves, and a declared type's fields to its representation's, so this is the subject itself
+reading only that part. -/
 def Witness.TimedBy (k : ArgClock c.sig.args) (w : W) : Prop := (c.iso.to w).ReadsOnly k
 
 /-- The script of timed actions on the clock part `k` that takes the action `s n` whenever `k` reads
 `n`, carried back to `W` (`ArgClock.script`). -/
-def Witness.script (k : ArgClock c.sig.args) (s : Nat → c.sig.out.denote) : W :=
+def Witness.script (k : ArgClock c.sig.args) (s : k.out.denote → c.sig.out.denote) : W :=
   c.iso.inv (k.script s)
 
 /-- The member `t` meets the pair `q`: for `.vacuous`, every subject meets it; for `.table`, at each
@@ -365,7 +367,7 @@ theorem Witness.timed_meets_iff (q : Pair W) (k : ArgClock c.sig.args) :
     fun ⟨s, hs, h⟩ x hx => ⟨s x, hs x, h x hx⟩⟩
 
 /-- Where a clock part's reading determines the arguments, as the only argument of a policy of type
-`Clock → Act` does, `.timed k` meets the pair exactly when each input the precondition admits is
+`Clock Nat → Act` does, `.timed k` meets the pair exactly when each input the precondition admits is
 served by some subject: every subject is a script on `k`. -/
 theorem Witness.timed_meets_iff_served (q : Pair W) {k : ArgClock c.sig.args}
     (hk : Function.Injective k.read) :
@@ -378,11 +380,12 @@ timed actions on `k` fixed for that input in advance, which takes the action `sc
 reads `n`. -/
 theorem Witness.timed_meets_iff_script (q : Pair W) (k : ArgClock c.sig.args) :
     (Witness.timed k).Meets q ↔
-      ∃ sc : q.Input → Nat → c.sig.out.denote,
+      ∃ sc : q.Input → k.out.denote → c.sig.out.denote,
         ∀ x, q.pre x → q.post x (Witness.script k (sc x)) := by
   constructor
   · intro h
-    have hc : ∀ x, ∃ f : Nat → c.sig.out.denote, q.pre x → q.post x (Witness.script k f) :=
+    have hc : ∀ x, ∃ f : k.out.denote → c.sig.out.denote,
+        q.pre x → q.post x (Witness.script k f) :=
       fun x => by
         by_cases hx : q.pre x
         · obtain ⟨w, hw, hp⟩ := h x hx
@@ -495,7 +498,7 @@ theorem Witness.fixed_mem {d : Degenerate c.sig} (hd : d ∈ degenerate W) :
   (Sig.mem_witnesses_iff _).mpr (.inr (.inr (.inr (.inl ⟨d, hd, rfl⟩))))
 
 /-- The script of timed actions on each clock part whose reading does not determine the arguments,
-or that lies in a `LeanIntent.Clock`, is in the class. -/
+or that is a `LeanIntent.Clock α`, is in the class. -/
 theorem Witness.timed_mem {k : ArgClock c.sig.args}
     (hk : (∃ xs ys, xs ≠ ys ∧ k.read xs = k.read ys) ∨ k.InClock) :
     Witness.timed k ∈ witnesses W :=
@@ -510,8 +513,8 @@ every input, and apart from the class: every strategy meets it; a table from its
 the output type, offering at each input the constant function at the value it gives, meets it; for a
 function of at least two arguments, a strategy whose every subject does not read one same argument
 meets it; one subject of a member of the degenerate class, offered at every input, meets it; or, for
-a clock part of the arguments whose reading does not determine them or that lies in a
-`LeanIntent.Clock`, a table of scripts of timed actions on it, offering at each input the script
+a clock part of the arguments whose reading does not determine them or that is a
+`LeanIntent.Clock α`, a table of scripts of timed actions on it, offering at each input the script
 that takes, whenever the part reads `n`, the action it gives that input and `n`, meets it. -/
 def Pair.MetTrivially (q : Pair W) : Prop :=
   (∀ s : q.Input → W, ∀ x, q.pre x → q.post x (s x)) ∨
@@ -521,7 +524,7 @@ def Pair.MetTrivially (q : Pair W) : Prop :=
       (∀ x, Witness.BlindTo i (s x)) ∧ ∀ x, q.pre x → q.post x (s x)) ∨
     (∃ d ∈ degenerate W, ∃ w, d.Is w ∧ ∀ x, q.pre x → q.post x w) ∨
     ∃ k : ArgClock c.sig.args, ((∃ xs ys, xs ≠ ys ∧ k.read xs = k.read ys) ∨ k.InClock) ∧
-      ∃ sc : q.Input → Nat → c.sig.out.denote,
+      ∃ sc : q.Input → k.out.denote → c.sig.out.denote,
         ∀ x, q.pre x → q.post x (Witness.script k (sc x))
 
 /-- The class lists every trivial witness: some trivial witness meets the pair exactly when some
