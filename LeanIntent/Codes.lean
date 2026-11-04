@@ -38,20 +38,30 @@ denotes, which is isomorphic to the type of the field's arguments, not in genera
 the group does not grow, so that it may have finitely many values, it denotes its base values alone;
 the deriving handler refuses such a type. `Ty.ref` denotes the unit type.
 
+A recursive type with no constructor whose fields hold no value of a type of its group has no base
+of its own. Its representation is `Ty.muAt b g r j i`, the `i`-th type of its group with the base
+`b` of the group's `j`-th type, its *root*, and `g` and `r` as above with the root's other
+constructors: it denotes the trees of the group at its `i`-th type, each a node, rooted at `j`, where
+it grows from the root's base values (`Ty.growsAt`), and otherwise the unit type, which the deriving
+handler refuses too.
+
 For each code this module computes:
 
 * `Ty.empty`, the empty value of the type: zero, the empty string, list or array, `none`, `false`
   and the unit value, componentwise for a pair, the left side's for a sum, for a declared type, its
   first constructor applied to its fields' empty values, for a recursive one its first base
-  constructor applied to its fields' empty values, zero for `Fin (n + 1)` and for a machine type, the
-  character of code zero for `Char`, and for a function the constant function at the empty value of
-  its result;
+  constructor applied to its fields' empty values, for a recursive one without a base of its own the
+  node of the first of its constructors whose recursive fields hold types that get their empty values
+  in an earlier round, applied to its other fields' empty values and to those types' empty values
+  (`Ty.IsMuEmpty`, `Ty.empty_muAt`), zero for `Fin (n + 1)` and for a machine type, the character of
+  code zero for `Char`, and for a function the constant function at the empty value of its result;
 * `Ty.Small`, the rule that fixes the values at which the class takes constant subjects: a number, a
   string, a list or an array only its empty value; the unit type, `Bool`, `Fin (n + 1)` and a machine
   type every value; an option, a pair or a sum every value built from values its components' rules
   admit; a declared type each constructor applied to each combination of values its fields' rules
   admit, and a recursive one each of its base constructors so applied, by analogy with `List`, whose
-  only constant is `[]`, and `Nat`, whose only constant is `0`; and a function type every function
+  only constant is `[]`, and `Nat`, whose only constant is `0`, so that a recursive one without a base
+  of its own has its empty value as its only constant; and a function type every function
   where it has finitely many, and otherwise the constant function at each value its result's rule
   admits. The rule is fixed here, with the class, so that no record chooses which constants it is
   checked against.
@@ -59,8 +69,9 @@ For each code this module computes:
   every value (`Ty.exists_list_of_finite`) and the rule admits each (`Ty.small_of_finite`), and when
   it fails, the type has infinitely many (`Ty.infinite`). A function type has finitely many exactly
   when its result has one value (`Ty.unique`), or its argument and its result have finitely many. A
-  recursive type whose group grows has infinitely many (`Ty.mu_infinite`): each type the narrowing
-  in `Ty.grows` keeps has a constructor that holds one of them, so it has values of every depth.
+  recursive type whose group grows has infinitely many (`Ty.mu_infinite`, `Ty.muAt_infinite`): each
+  type the narrowing in `Ty.growsAt` keeps has a constructor that holds one of them, so it has values
+  of every depth.
 * `Ty.count`, the number of constants the class would list one by one, and `Ty.part`, the list of
   them where `Ty.count` is at most `Ty.listBound`, 255 (`Ty.mem_part_iff`). A machine type and a
   function type count as above the bound whatever their values, a bit vector of any width included. So
@@ -167,6 +178,13 @@ inductive Ty where
   types of the group its recursive fields hold, as `ref l`. Its values are the trees `MuVal`
   builds. -/
   | mu (base group refs : Ty) (i : Nat)
+  /-- The `i`-th type of a group of recursive, nested or mutual types a project declares, a type with
+  no constructor whose fields hold no value of a type of the group (`LeanIntent.Declared`). Its trees
+  are those of `mu` with the base of the group's `root`-th type: `base` is the representation of
+  that type's constructors whose fields hold no value of a type of the group, `group` and `refs` are
+  as for `mu` with the `root`-th type's other constructors, and the `i`-th type's values are the
+  trees of the group at `i`, each a node. -/
+  | muAt (base group refs : Ty) (root i : Nat)
   deriving DecidableEq
 
 /-- The values of the `j`-th type of a recursive group, built from a base value `x : B` of its `i`-th
@@ -240,15 +258,20 @@ def growsStep (r : Ty) (h p : List Bool) : List Bool :=
       (List.range (r.muA j c)).all (fun f => h.getD (r.muS j c f) false) &&
         (List.range (r.muA j c)).any fun f => p.getD (r.muS j c f) false
 
-/-- Whether the `i`-th type of the group whose recursive fields `r` lists has values of every depth:
-the types found to have a value, narrowed as many rounds as the group has types and one more, are
-unchanged by one more round and hold the `i`-th type. Each type they hold then has a constructor that
-holds one of them inside a value of its own (`Ty.mu_infinite`). `r` holds only numbers of types, never
-a field's code, so Lean evaluates it alike for every type parameter. -/
-def grows (r : Ty) (i : Nat) : Bool :=
-  let h := r.inhabited i
+/-- Whether the `i`-th type of the group whose recursive fields `r` lists, with the base values of its
+`j`-th type, has values of every depth: the types found to have a value from those base values,
+narrowed as many rounds as the group has types and one more, are unchanged by one more round and
+hold the `i`-th type. Each type they hold then has a constructor that holds one of them inside a
+value of its own (`Ty.muTy_infinite`). `r` holds only numbers of types, never a field's code, so Lean
+evaluates it alike for every type parameter. -/
+def growsAt (r : Ty) (j i : Nat) : Bool :=
+  let h := r.inhabited j
   let p := iter (r.growsStep h) (r.items + 1) h
   p.getD i false && r.growsStep h p == p
+
+/-- Whether the `i`-th type of the group whose recursive fields `r` lists, with its own base values,
+has values of every depth (`growsAt`; `Ty.mu_infinite`). -/
+def grows (r : Ty) (i : Nat) : Bool := r.growsAt i i
 
 /-- The type a code denotes, at the path `p` into it: `den t []` is the type `t` denotes, and a path
 `k :: p` into a chain is the path `p` into its `k`-th item. A group's type `mu b g r i` denotes the
@@ -275,12 +298,185 @@ the paths `[j, c, 1, f]`; where the group does not grow (`Ty.grows`), it has onl
   | ref _, _ => Unit
   | mu b g r i, [] => MuVal (den b []) i (fun j => bif r.grows i then r.muN j else 0)
       (fun j c => den g [j, c, 0]) r.muA (fun j c f => den g [j, c, 1, f]) r.muS i
+  | muAt b g r j i, [] => bif r.growsAt j i then
+      MuVal (den b []) j r.muN (fun l c => den g [l, c, 0]) r.muA (fun l c f => den g [l, c, 1, f])
+        r.muS i
+    else Unit
   | _, _ :: _ => Unit
 
 /-- The type a code denotes: the type it stands for when it is built only from those `Ty` builds in,
 and otherwise one isomorphic to it. It is reducible, so that Lean's simplifier sees the type through
 the code. -/
 @[reducible] def denote (t : Ty) : Type := t.den []
+
+/-- The trees of the group with the base `b`, data and arguments `g` and recursive fields `r`, whose
+types have the constructors `N` counts. -/
+@[reducible] def muTy (b g r : Ty) (i : Nat) (N : Nat → Nat) : Nat → Type :=
+  MuVal (b.den []) i N (fun j c => g.den [j, c, 0]) r.muA (fun j c f => g.den [j, c, 1, f]) r.muS
+
+theorem getD_range_map (n j : Nat) (F : Nat → Bool) :
+    ((List.range n).map F).getD j false = (decide (j < n) && F j) := by
+  rw [List.getD_eq_getElem?_getD, List.getElem?_map]
+  by_cases h : j < n
+  · simp [h]
+  · simp [h]
+
+/-! ## The empty value of a type of a recursive group
+
+The types of a group get their empty values in rounds, from the base values of its `j`-th type, its
+*root*: in each round, the root and each type with a constructor whose recursive fields all hold
+types that got theirs in an earlier round, so in the first round each type with a constructor that
+has no recursive field (`marks`). A type's empty value is the first such constructor of the first
+round that reaches it, in declaration order, applied to the empty values of its other fields and,
+at each position of each recursive field, to the empty value of the type that field holds
+(`muEmptyAt`); the root's is its base's empty value. `IsMuEmpty` states this apart from
+the functions that compute it, and `muEmptyAt_isMuEmpty` proves they agree. -/
+
+/-- The types of the group whose recursive fields `r` lists found to have a value after `n` rounds,
+from the base values of its `j`-th type: `inhabitedStep` applied `n` times to no type. -/
+def marks (r : Ty) (j : Nat) : Nat → List Bool
+  | 0 => List.replicate r.items false
+  | n + 1 => r.inhabitedStep j (r.marks j n)
+
+theorem iter_succ (f : List Bool → List Bool) : (n : Nat) → (a : List Bool) →
+    iter f (n + 1) a = f (iter f n a)
+  | 0, _ => rfl
+  | n + 1, a => iter_succ f n (f a)
+
+/-- `inhabited` is `marks` after as many rounds as the group has types and one more. -/
+theorem inhabited_eq_marks (r : Ty) (j : Nat) : r.inhabited j = r.marks j (r.items + 1) := by
+  suffices h : ∀ n, iter (r.inhabitedStep j) n (List.replicate r.items false) = r.marks j n from
+    h _
+  intro n
+  induction n with
+  | zero => rfl
+  | succ n ih => rw [iter_succ, ih]; rfl
+
+theorem getD_replicate_false (n l : Nat) : (List.replicate n false).getD l false = false := by
+  simp only [List.getD_eq_getElem?_getD, List.getElem?_replicate]
+  split <;> rfl
+
+/-- A round of `inhabitedStep` from more types marks more types. -/
+theorem inhabitedStep_mono {r : Ty} {j : Nat} {h h' : List Bool}
+    (hh : ∀ l, h.getD l false = true → h'.getD l false = true) {l : Nat}
+    (hl : (r.inhabitedStep j h).getD l false = true) : (r.inhabitedStep j h').getD l false = true := by
+  simp only [inhabitedStep, getD_range_map, Bool.and_eq_true, decide_eq_true_eq, Bool.or_eq_true,
+    beq_iff_eq, List.any_eq_true, List.mem_range, List.all_eq_true] at hl ⊢
+  refine ⟨hl.1, ?_⟩
+  rcases hl.2 with e | ⟨c, hc, hall⟩
+  · exact .inl e
+  · exact .inr ⟨c, hc, fun f hf => hh _ (hall f hf)⟩
+
+/-- A type marked after `n` rounds is marked after `n + 1`. -/
+theorem marks_succ {r : Ty} {j : Nat} : (n : Nat) → {l : Nat} →
+    (r.marks j n).getD l false = true → (r.marks j (n + 1)).getD l false = true
+  | 0, _, h => by rw [marks, getD_replicate_false] at h; exact absurd h Bool.false_ne_true
+  | n + 1, _, h => inhabitedStep_mono (fun _ => marks_succ n) h
+
+/-- A type marked after `n` rounds is marked after every later round. -/
+theorem marks_mono {r : Ty} {j n m l : Nat} (hnm : n ≤ m)
+    (h : (r.marks j n).getD l false = true) : (r.marks j m).getD l false = true := by
+  induction hnm with
+  | refl => exact h
+  | step _ ih => exact marks_succ _ ih
+
+/-- A round of `growsStep` keeps only types `p` marks. -/
+theorem growsStep_le {r : Ty} {h p : List Bool} {l : Nat}
+    (hl : (r.growsStep h p).getD l false = true) : p.getD l false = true := by
+  simp only [growsStep, getD_range_map, Bool.and_eq_true] at hl
+  exact hl.2.1
+
+theorem iter_growsStep_le {r : Ty} {h : List Bool} {l : Nat} : (k : Nat) → (q : List Bool) →
+    (iter (r.growsStep h) k q).getD l false = true → q.getD l false = true
+  | 0, _, hq => hq
+  | k + 1, q, hq => growsStep_le (iter_growsStep_le k (r.growsStep h q) hq)
+
+/-- A type that grows from the base values of the `j`-th type is marked after as many rounds as the
+group has types and one more. -/
+theorem marks_of_growsAt {r : Ty} {j i : Nat} (h : r.growsAt j i = true) :
+    (r.marks j (r.items + 1)).getD i false = true := by
+  simp only [growsAt, Bool.and_eq_true] at h
+  rw [← inhabited_eq_marks]
+  exact iter_growsStep_le _ _ h.1
+
+/-- The first constructor of the `l`-th type whose recursive fields all hold types `h` marks. -/
+def firstFill (r : Ty) (h : List Bool) (l : Nat) : Option Nat :=
+  (List.range (r.muN l)).find? fun c =>
+    (List.range (r.muA l c)).all fun f => h.getD (r.muS l c f) false
+
+/-- The first number `n` below `k` such that the `l`-th type is marked after `n + 1` rounds. -/
+def firstRound (r : Ty) (j k l : Nat) : Option Nat :=
+  (List.range k).find? fun n => (r.marks j (n + 1)).getD l false
+
+theorem firstFill_lt {r : Ty} {h : List Bool} {l c : Nat} (hc : r.firstFill h l = some c) :
+    c < r.muN l :=
+  List.mem_range.mp (List.mem_of_find?_eq_some hc)
+
+theorem firstFill_spec {r : Ty} {h : List Bool} {l c : Nat} (hc : r.firstFill h l = some c) :
+    ∀ f, f < r.muA l c → h.getD (r.muS l c f) false = true := by
+  unfold firstFill at hc
+  have := List.find?_some hc
+  simp only [List.all_eq_true, List.mem_range] at this
+  exact this
+
+theorem firstFill_ne_none {r : Ty} {j n l : Nat} (hl : l ≠ j)
+    (h : (r.marks j (n + 1)).getD l false = true) : r.firstFill (r.marks j n) l ≠ none := by
+  simp only [marks, inhabitedStep, getD_range_map, Bool.and_eq_true, Bool.or_eq_true, beq_iff_eq,
+    List.any_eq_true, List.mem_range] at h
+  obtain ⟨c, hc, hall⟩ := h.2.resolve_left hl
+  intro e
+  have := List.find?_eq_none.mp e c (List.mem_range.mpr hc)
+  exact absurd hall (by simpa using this)
+
+theorem firstRound_lt {r : Ty} {j k l n : Nat} (hn : r.firstRound j k l = some n) : n < k :=
+  List.mem_range.mp (List.mem_of_find?_eq_some hn)
+
+theorem firstRound_spec {r : Ty} {j k l n : Nat} (hn : r.firstRound j k l = some n) :
+    (r.marks j (n + 1)).getD l false = true := by
+  unfold firstRound at hn
+  have := List.find?_some hn
+  exact this
+
+theorem firstRound_ne_none {r : Ty} {j k l : Nat} (h : (r.marks j (k + 1)).getD l false = true) :
+    r.firstRound j (k + 1) l ≠ none := fun e =>
+  absurd h (by simpa using List.find?_eq_none.mp e k (List.mem_range.mpr (Nat.lt_succ_self k)))
+
+/-- The empty value of the `l`-th type of the group with the base `b`, data and arguments `g` and
+recursive fields `r`, rooted at its `j`-th type, given that the type is marked after `k` rounds, from
+the empty value `be` of the base and those `de` of the constructors' other fields: for the root, its
+base value at `be`; for another type, the node of the first constructor of the round that first
+marks it (`firstRound`, `firstFill`), holding `de` of that constructor and, at each position of each
+recursive field, the empty value of the type the field holds. -/
+def muEmptyAt {b g r : Ty} {j : Nat} (be : b.den []) (de : (l c : Nat) → g.den [l, c, 0]) :
+    (k l : Nat) → (r.marks j k).getD l false = true → muTy b g r j r.muN l
+  | 0, _, h => absurd h (by rw [marks, getD_replicate_false]; exact Bool.false_ne_true)
+  | k + 1, l, h =>
+    if hl : l = j then hl ▸ MuVal.base be
+    else
+      match hn : r.firstRound j (k + 1) l with
+      | none => absurd hn (firstRound_ne_none h)
+      | some n =>
+        match hc : r.firstFill (r.marks j n) l with
+        | none => absurd hc (firstFill_ne_none hl (firstRound_spec hn))
+        | some c =>
+          .node ⟨c, firstFill_lt hc⟩ (de l c) fun f _ =>
+            muEmptyAt be de k (r.muS l c f)
+              (marks_mono (Nat.le_of_lt_succ (firstRound_lt hn)) (firstFill_spec hc f f.2))
+
+/-- `muAtEmpty`, for the value `x` of whether the type grows. -/
+def muAtEmptyOf {b g r : Ty} {j i : Nat} (be : b.den []) (de : (l c : Nat) → g.den [l, c, 0]) :
+    (x : Bool) → r.growsAt j i = x → (bif x then muTy b g r j r.muN i else Unit)
+  | true, h => muEmptyAt be de (r.items + 1) i (marks_of_growsAt h)
+  | false, _ => ()
+
+/-- The empty value of the type `muAt b g r j i` denotes, from the empty value `be` of the base and
+those `de` of the constructors' other fields: `muEmptyAt` after as many rounds as the group has types
+and one more where the type grows (`marks_of_growsAt`), and otherwise the unit value. -/
+def muAtEmpty {b g r : Ty} {j i : Nat} (be : b.den []) (de : (l c : Nat) → g.den [l, c, 0]) :
+    (bif r.growsAt j i then muTy b g r j r.muN i else Unit) :=
+  muAtEmptyOf be de _ rfl
+
+mutual
 
 /-- The empty value of a type: the value a subject that returns nothing returns. -/
 def empty : (t : Ty) → t.denote
@@ -300,6 +496,19 @@ def empty : (t : Ty) → t.denote
   | arrow _ b => fun _ => b.empty
   | ref _ => ()
   | mu b _ _ _ => .base b.empty
+  | muAt b g _ _ _ => muAtEmpty b.empty fun l c => g.pathEmpty l [c, 0]
+
+/-- The empty value of the code a path `k :: p` reaches into a chain. -/
+def pathEmpty : (t : Ty) → (k : Nat) → (p : List Nat) → t.den (k :: p)
+  | prod a _, 0, [] => a.empty
+  | prod a _, 0, q :: p => a.pathEmpty q p
+  | prod _ b, n + 1, p => b.pathEmpty n p
+  | unit, _, _ | ref _, _, _ => ()
+  | bool, _, _ | nat, _, _ | int, _, _ | string, _, _ | list _, _, _ | array _, _, _
+  | option _, _, _ | sum _ _, _, _ | decl _ _ _, _, _ | fin _, _, _ | atom _, _, _
+  | arrow _ _, _, _ | mu _ _ _ _, _, _ | muAt _ _ _ _ _, _, _ => ()
+
+end
 
 /-- The values the degenerate class takes constant subjects at one by one, as a list: every value
 `Small` admits where `count` is at most `listBound` (`mem_part_iff`). A machine type or a function
@@ -321,6 +530,7 @@ def part : (t : Ty) → List t.denote
   | arrow _ b => [fun _ => b.empty]
   | ref _ => [()]
   | mu b _ _ _ => b.part.map .base
+  | muAt b g r j i => [(muAt b g r j i).empty]
 
 /-- Whether the type has exactly one value: the unit type, `Fin 1` and a bit vector of width zero; a
 pair of two such types; a declared type whose representation is one; and a function to such a type. -/
@@ -333,6 +543,7 @@ def unique : Ty → Bool
   | arrow _ b => b.unique
   | ref _ => true
   | mu b _ r i => !r.grows i && b.unique
+  | muAt _ _ r j i => !r.growsAt j i
   | _ => false
 
 /-- Whether the type has finitely many values: the unit type, `Bool`, `Fin (n + 1)` and a machine
@@ -356,6 +567,7 @@ def finite : Ty → Bool
   | arrow a b => b.unique || (a.finite && b.finite)
   | ref _ => true
   | mu b _ r i => !r.grows i && b.finite
+  | muAt _ _ r j i => !r.growsAt j i
 
 /-- The rule that fixes which values of a type the degenerate class takes constant subjects at,
 written apart from `part`: a number, a string, a list or an array only at its empty value; the unit
@@ -382,6 +594,7 @@ def Small : (t : Ty) → t.denote → Prop
   | arrow a b, f => (arrow a b).finite = true ∨ ∃ v, b.Small v ∧ f = fun _ => v
   | ref _, _ => True
   | mu b _ _ _, x => ∃ y, x = .base y ∧ b.Small y
+  | muAt b g r j i, x => x = (muAt b g r j i).empty
 
 /-- The largest number of constant subjects the class lists one by one, for one type. `UInt8`, the
 smallest machine type the library's plan names too large to enumerate, has one value more, and a
@@ -408,31 +621,14 @@ def count : Ty → Nat
   | arrow _ _ => listBound + 1
   | ref _ => 1
   | mu b _ _ _ => b.count
+  | muAt _ _ _ _ _ => 1
 
 /-! ## The values of a recursive group -/
 
 /-- A value of the type a code denotes at a path: the empty value of the code the path reaches. -/
-def denEmpty : (t : Ty) → (p : List Nat) → t.den p
-  | unit, _ => ()
-  | prod a _, 0 :: p => denEmpty a p
-  | prod _ b, (n + 1) :: p => denEmpty b (n :: p)
-  | ref _, _ => ()
-  | t, [] => t.empty
-  | bool, _ :: _ | nat, _ :: _ | int, _ :: _ | string, _ :: _ | list _, _ :: _ | array _, _ :: _
-  | option _, _ :: _ | sum _ _, _ :: _ | decl _ _ _, _ :: _ | fin _, _ :: _ | atom _, _ :: _
-  | arrow _ _, _ :: _ | mu _ _ _ _, _ :: _ => ()
-
-/-- The trees of the group with the base `b`, data and arguments `g` and recursive fields `r`, whose
-types have the constructors `N` counts. -/
-@[reducible] def muTy (b g r : Ty) (i : Nat) (N : Nat → Nat) : Nat → Type :=
-  MuVal (b.den []) i N (fun j c => g.den [j, c, 0]) r.muA (fun j c f => g.den [j, c, 1, f]) r.muS
-
-theorem getD_range_map (n j : Nat) (F : Nat → Bool) :
-    ((List.range n).map F).getD j false = (decide (j < n) && F j) := by
-  rw [List.getD_eq_getElem?_getD, List.getElem?_map]
-  by_cases h : j < n
-  · simp [h]
-  · simp [h]
+def denEmpty (t : Ty) : (p : List Nat) → t.den p
+  | [] => t.empty
+  | k :: p => t.pathEmpty k p
 
 /-- Where the group does not grow, its `i`-th type has only its base values. -/
 theorem eq_base_of_not_grows {b g r : Ty} {i : Nat} (h : r.grows i = false) (x : (mu b g r i).denote) :
@@ -483,20 +679,21 @@ theorem exists_injective_of_le {α : Type} (d : α → Nat) (v : Nat → α) (hv
   · exact h
   · exact absurd (congrArg d e) (Nat.ne_of_gt (hlt n m h))
 
-/-- Where the group grows, its `i`-th type has infinitely many values: each type the narrowing in
-`grows` keeps has a constructor with a recursive field that holds such a type, so a value of any
-depth along those fields is built, and the depths give an injection from `Nat`. -/
-theorem muTy_infinite {b g r : Ty} {i : Nat} (hg : r.grows i = true) :
-    ∃ f : Nat → muTy b g r i r.muN i, Function.Injective f := by
+/-- Where the group grows from the base values of its `o`-th type, its `i`-th type has infinitely
+many values: each type the narrowing in `growsAt` keeps has a constructor with a recursive field that
+holds such a type, so a value of any depth along those fields is built, and the depths give an
+injection from `Nat`. -/
+theorem muTy_infinite {b g r : Ty} {o i : Nat} (hg : r.growsAt o i = true) :
+    ∃ f : Nat → muTy b g r o r.muN i, Function.Injective f := by
   classical
-  simp only [grows, Bool.and_eq_true, beq_iff_eq] at hg
+  simp only [growsAt, Bool.and_eq_true, beq_iff_eq] at hg
   obtain ⟨hpi, hfix⟩ := hg
-  generalize hp : iter (r.growsStep (r.inhabited i)) (r.items + 1) (r.inhabited i) = p at hpi hfix
+  generalize hp : iter (r.growsStep (r.inhabited o)) (r.items + 1) (r.inhabited o) = p at hpi hfix
   -- Each type `p` marks has a constructor whose recursive fields hold types with a value, one of
   -- them a type `p` marks.
   have hstep : ∀ j, p.getD j false = true → ∃ c, ∃ hc : c < r.muN j, ∃ f, ∃ hf : f < r.muA j c,
       p.getD (r.muS j c f) false = true ∧
-        ∀ f' : Fin (r.muA j c), Nonempty (muTy b g r i r.muN (r.muS j c f')) := by
+        ∀ f' : Fin (r.muA j c), Nonempty (muTy b g r o r.muN (r.muS j c f')) := by
     intro j hj
     rw [← hfix] at hj
     simp only [growsStep, getD_range_map, Bool.and_eq_true, decide_eq_true_eq, List.any_eq_true,
@@ -509,7 +706,7 @@ theorem muTy_infinite {b g r : Ty} {i : Nat} (hg : r.grows i = true) :
     if hj : p.getD j false = true then (hstep j hj).choose_spec.choose_spec.choose else 0
   have hC : ∀ j (hj : p.getD j false = true), C j < r.muN j ∧ F j < r.muA j (C j) ∧
       p.getD (r.muS j (C j) (F j)) false = true ∧
-        ∀ f' : Fin (r.muA j (C j)), Nonempty (muTy b g r i r.muN (r.muS j (C j) f')) := by
+        ∀ f' : Fin (r.muA j (C j)), Nonempty (muTy b g r o r.muN (r.muS j (C j) f')) := by
     intro j hj
     have eC : C j = (hstep j hj).choose := by simp only [C, hj, ↓reduceDIte]
     have eF : F j = (hstep j hj).choose_spec.choose_spec.choose := by
@@ -519,17 +716,17 @@ theorem muTy_infinite {b g r : Ty} {i : Nat} (hg : r.grows i = true) :
       (hstep j hj).choose_spec.choose_spec.choose_spec.choose_spec.1,
       (hstep j hj).choose_spec.choose_spec.choose_spec.choose_spec.2⟩
   -- The depth of a value along the chosen fields.
-  let depth : {j : Nat} → muTy b g r i r.muN j → Nat := fun v =>
+  let depth : {j : Nat} → muTy b g r o r.muN j → Nat := fun v =>
     MuVal.rec (motive := fun _ _ => Nat) (fun _ => 0)
       (fun {j} c _ _ ih => if h : c.val = C j ∧ F j < r.muA j c then
         1 + ih ⟨F j, h.2⟩ (g.denEmpty [j, c, 1, F j]) else 0) v
-  let tr : {j j' : Nat} → j = j' → muTy b g r i r.muN j → muTy b g r i r.muN j' := fun e v => e ▸ v
-  have depth_cast : ∀ {j j' : Nat} (e : j = j') (v : muTy b g r i r.muN j), depth (tr e v) = depth v := by
+  let tr : {j j' : Nat} → j = j' → muTy b g r o r.muN j → muTy b g r o r.muN j' := fun e v => e ▸ v
+  have depth_cast : ∀ {j j' : Nat} (e : j = j') (v : muTy b g r o r.muN j), depth (tr e v) = depth v := by
     intro j j' e v
     subst e
     rfl
   -- A value of each type `p` marks of depth at least `m`.
-  let chain : (m : Nat) → (j : Nat) → p.getD j false = true → muTy b g r i r.muN j :=
+  let chain : (m : Nat) → (j : Nat) → p.getD j false = true → muTy b g r o r.muN j :=
     fun m => Nat.rec (fun j hj => .node ⟨C j, (hC j hj).1⟩ (g.denEmpty [j, C j, 0])
         fun f _ => Classical.choice ((hC j hj).2.2.2 f))
       (fun _ ih j hj => .node ⟨C j, (hC j hj).1⟩ (g.denEmpty [j, C j, 0]) fun f _ =>
@@ -552,9 +749,9 @@ theorem muTy_infinite {b g r : Ty} {i : Nat} (hg : r.grows i = true) :
       omega
   exact exists_injective_of_le depth (fun m => chain m i hpi) fun m => hdepth m i hpi
 
-theorem muTy_infinite_of_eq {b g r : Ty} {i : Nat} {N : Nat → Nat} (e : N = r.muN)
-    (h : ∃ f : Nat → muTy b g r i r.muN i, Function.Injective f) :
-    ∃ f : Nat → muTy b g r i N i, Function.Injective f := by
+theorem muTy_infinite_of_eq {b g r : Ty} {o i : Nat} {N : Nat → Nat} (e : N = r.muN)
+    (h : ∃ f : Nat → muTy b g r o r.muN i, Function.Injective f) :
+    ∃ f : Nat → muTy b g r o N i, Function.Injective f := by
   subst e
   exact h
 
@@ -563,9 +760,184 @@ theorem mu_infinite {b g r : Ty} {i : Nat} (h : r.grows i = true) :
     ∃ f : Nat → (mu b g r i).denote, Function.Injective f :=
   muTy_infinite_of_eq (funext fun j => by simp [h]) (muTy_infinite h)
 
+/-- The trees of the `k`-th type of the group with the base `b` of its `j`-th type, the data and
+arguments `g` and the recursive fields `r`, of which `muAt b g r j i` denotes the `i`-th where it
+grows (`denote_muAt`). -/
+@[reducible] def MuAtOf (b g r : Ty) (j k : Nat) : Type := muTy b g r j r.muN k
+
+theorem denote_muAt {b g r : Ty} {j i : Nat} (h : r.growsAt j i = true) :
+    (muAt b g r j i).denote = MuAtOf b g r j i := by
+  show (bif r.growsAt j i then MuAtOf b g r j i else Unit) = _
+  rw [h]
+  rfl
+
+/-- Where the type `muAt b g r j i` does not grow, it denotes the unit type. -/
+theorem muAt_eq_of_not_grows {b g r : Ty} {j i : Nat} (h : r.growsAt j i = false)
+    (x y : (muAt b g r j i).denote) : x = y := by
+  revert x y
+  show ∀ x y : (bif r.growsAt j i then MuAtOf b g r j i else Unit), x = y
+  rw [h]
+  exact fun x y => Subsingleton.elim (α := Unit) x y
+
+/-- Where it grows, the type `muAt b g r j i` has infinitely many values (`muTy_infinite`). -/
+theorem muAt_infinite {b g r : Ty} {j i : Nat} (h : r.growsAt j i = true) :
+    ∃ f : Nat → (muAt b g r j i).denote, Function.Injective f := by
+  rw [denote_muAt h]
+  exact muTy_infinite h
+
+/-! ## What the empty value of a type of a recursive group is -/
+
+/-- The `l`-th type of the group whose recursive fields `r` lists is ready after `n` rounds, from the
+base values of its `j`-th type: after `n + 1` rounds, the root and each type with a constructor
+whose recursive fields all hold types ready after `n`, and after none, no type. It is stated apart
+from `marks`, which computes it (`marks_iff_ready`). -/
+def Ready (r : Ty) (j : Nat) : Nat → Nat → Prop
+  | 0, _ => False
+  | n + 1, l => l < r.items ∧ (l = j ∨ ∃ c < r.muN l, ∀ f < r.muA l c, r.Ready j n (r.muS l c f))
+
+theorem marks_iff_ready {r : Ty} {j : Nat} : (n l : Nat) →
+    ((r.marks j n).getD l false = true ↔ r.Ready j n l)
+  | 0, l => by rw [marks, getD_replicate_false]; simp [Ready]
+  | n + 1, l => by
+      simp only [marks, inhabitedStep, getD_range_map, Bool.and_eq_true, decide_eq_true_eq,
+        Bool.or_eq_true, beq_iff_eq, List.any_eq_true, List.mem_range, List.all_eq_true, Ready,
+        marks_iff_ready n]
+
+theorem ready_mono {r : Ty} {j n m l : Nat} (hnm : n ≤ m) (h : r.Ready j n l) : r.Ready j m l :=
+  (marks_iff_ready m l).mp (marks_mono hnm ((marks_iff_ready n l).mpr h))
+
+/-- `v` is the empty value of the `l`-th type of the group with the base `b`, data and arguments `g`
+and recursive fields `r`, rooted at its `j`-th type, from the empty value `be` of the base and those
+`de` of the constructors' other fields: the root's base value at `be`; or, for another type that is
+ready first after `n + 1` rounds (`Ready`), the node of the first of its constructors whose recursive
+fields all hold types ready after `n` rounds, holding `de` of that constructor and, at each position
+of each recursive field, the empty value of the type that field holds. It is stated apart from
+`muEmptyAt`, which computes it (`muEmptyAt_isMuEmpty`), and it fixes the value
+(`IsMuEmpty.unique`). -/
+inductive IsMuEmpty {b g r : Ty} {j : Nat} (be : b.den []) (de : (l c : Nat) → g.den [l, c, 0]) :
+    (l : Nat) → muTy b g r j r.muN l → Prop
+  /-- The root's empty value is its base value at `be`. -/
+  | root : IsMuEmpty be de j (.base be)
+  /-- Another type's empty value is the node of the first constructor of its round. -/
+  | node {l : Nat} (n : Nat) (c : Fin (r.muN l))
+      (kids : (f : Fin (r.muA l c)) → g.den [l, c, 1, f] → muTy b g r j r.muN (r.muS l c f)) :
+      l ≠ j → r.Ready j (n + 1) l → ¬ r.Ready j n l →
+      (∀ f < r.muA l c, r.Ready j n (r.muS l c f)) →
+      (∀ c' < c.val, ¬ ∀ f < r.muA l c', r.Ready j n (r.muS l c' f)) →
+      (∀ (f : Fin (r.muA l c)) p, IsMuEmpty be de (r.muS l c f) (kids f p)) →
+      IsMuEmpty be de l (.node c (de l c) kids)
+
+/-- `muEmptyAt` computes the empty value `IsMuEmpty` states. -/
+theorem muEmptyAt_isMuEmpty {b g r : Ty} {j : Nat} (be : b.den [])
+    (de : (l c : Nat) → g.den [l, c, 0]) : (k l : Nat) → (h : (r.marks j k).getD l false = true) →
+      IsMuEmpty be de l (muEmptyAt be de k l h)
+  | 0, _, h => absurd h (by rw [marks, getD_replicate_false]; exact Bool.false_ne_true)
+  | k + 1, l, h => by
+      unfold muEmptyAt
+      split
+      · next hl => subst hl; exact .root
+      · next hl =>
+        split
+        · next hn => exact absurd hn (firstRound_ne_none h)
+        · next n hn =>
+          split
+          · next hc => exact absurd hc (firstFill_ne_none hl (firstRound_spec hn))
+          · next c hc =>
+            refine .node n _ _ hl ((marks_iff_ready _ _).mp (firstRound_spec hn)) ?_ ?_ ?_ ?_
+            · intro hr
+              unfold firstRound at hn
+              rw [List.find?_range_eq_some] at hn
+              cases n with
+              | zero => exact hr
+              | succ m =>
+                have hm := hn.2.2 m (Nat.lt_succ_self m)
+                rw [(marks_iff_ready _ _).mpr hr] at hm
+                exact absurd hm (by decide)
+            · exact fun f hf => (marks_iff_ready _ _).mp (firstFill_spec hc f hf)
+            · intro c' hc' hall
+              unfold firstFill at hc
+              rw [List.find?_range_eq_some] at hc
+              have hn' := hc.2.2 c' hc'
+              have hall' : ((List.range (r.muA l c')).all fun f =>
+                  (r.marks j n).getD (r.muS l c' f) false) = true := by
+                simp only [List.all_eq_true, List.mem_range]
+                exact fun f hf => (marks_iff_ready _ _).mpr (hall f hf)
+              rw [hall'] at hn'
+              exact absurd hn' (by decide)
+            · exact fun f _ => muEmptyAt_isMuEmpty be de k _ _
+
+/-- `IsMuEmpty` fixes the empty value: a type of the group has at most one. -/
+theorem IsMuEmpty.unique {b g r : Ty} {j : Nat} {be : b.den []} {de : (l c : Nat) → g.den [l, c, 0]}
+    {l : Nat} {v w : muTy b g r j r.muN l} (hv : IsMuEmpty be de l v)
+    (hw : IsMuEmpty be de l w) : v = w := by
+  induction hv with
+  | root =>
+    cases hw with
+    | root => rfl
+    | node _ _ _ hl => exact absurd rfl hl
+  | node n c kids hl hr hnr hf hleast _ ih =>
+    cases hw with
+    | root => exact absurd rfl hl
+    | node n' c' kids' _ hr' hnr' hf' hleast' hk' =>
+      have hn : n = n' := by
+        rcases Nat.lt_trichotomy n n' with h | h | h
+        · exact absurd (ready_mono h hr) hnr'
+        · exact h
+        · exact absurd (ready_mono h hr') hnr
+      subst hn
+      have hc : c = c' := by
+        rcases Nat.lt_trichotomy c.val c'.val with h | h | h
+        · exact absurd hf (hleast' c.val h)
+        · exact Fin.ext h
+        · exact absurd hf' (hleast c'.val h)
+      subst hc
+      have : kids = kids' := funext fun f => funext fun p => ih f p (hk' f p)
+      subst this
+      rfl
+
+/-- Where the type `muAt b g r j i` grows, its empty value is the one `IsMuEmpty` states of the
+group's `i`-th type, from the empty values of the base and of the constructors' other fields. -/
+theorem empty_muAt {b g r : Ty} {j i : Nat} (h : r.growsAt j i = true) :
+    IsMuEmpty b.empty (fun l c => g.denEmpty [l, c, 0]) i
+      (cast (denote_muAt h) (muAt b g r j i).empty) := by
+  have key : ∀ (x : Bool) (hx : r.growsAt j i = x) (hxt : x = true),
+      HEq (muAtEmptyOf b.empty (fun l c => g.pathEmpty l [c, 0]) x hx)
+        (muEmptyAt (r := r) b.empty (fun l c => g.denEmpty [l, c, 0]) (r.items + 1) i
+          (marks_of_growsAt h)) := by
+    intro x hx hxt
+    subst hxt
+    rfl
+  have e : cast (denote_muAt h) (muAt b g r j i).empty = muEmptyAt (r := r) b.empty
+      (fun l c => g.denEmpty [l, c, 0]) (r.items + 1) i (marks_of_growsAt h) :=
+    eq_of_heq ((cast_heq _ _).trans (key _ rfl h))
+  rw [e]
+  exact muEmptyAt_isMuEmpty _ _ _ _ _
+
+theorem denote_mu_of_grows {b g r : Ty} {i : Nat} (h : r.grows i = true) :
+    (mu b g r i).denote = MuAtOf b g r i i := by
+  show MuVal _ i (fun j => bif r.grows i then r.muN j else 0) _ _ _ _ i = _
+  rw [h]
+  rfl
+
+/-- Where the type `mu b g r i` grows, its empty value is the one `IsMuEmpty` states: the base value
+at its base's empty value, its own root's. So every recursive type a project declares gets its
+empty value by the one rule `IsMuEmpty` states (`empty_muAt`). -/
+theorem empty_mu {b g r : Ty} {i : Nat} (h : r.grows i = true) :
+    IsMuEmpty b.empty (fun l c => g.denEmpty [l, c, 0]) i
+      (cast (denote_mu_of_grows h) (mu b g r i).empty) := by
+  have e : ∀ (N : Nat → Nat), N = r.muN → ∀ (h' : MuVal (b.den []) i N (fun j c => g.den [j, c, 0])
+      r.muA (fun j c f => g.den [j, c, 1, f]) r.muS i = MuAtOf b g r i i),
+      cast h' (MuVal.base b.empty) = (MuVal.base b.empty : MuAtOf b g r i i) := by
+    intro N hN h'
+    subst hN
+    rfl
+  have e' := e (fun j => bif r.grows i then r.muN j else 0) (funext fun j => by simp [h])
+    (denote_mu_of_grows h)
+  exact e' ▸ .root
+
 theorem count_pos : (t : Ty) → 0 < t.count
-  | unit | bool | nat | int | string | list _ | array _ | fin _ | atom _ | arrow _ _ | ref _ => by
-      simp [count, listBound]
+  | unit | bool | nat | int | string | list _ | array _ | fin _ | atom _ | arrow _ _ | ref _
+  | muAt _ _ _ _ _ => by simp [count, listBound]
   | mu b _ _ _ => count_pos b
   | option a => by simp [count]; omega
   | prod a b => Nat.mul_pos (count_pos a) (count_pos b)
@@ -613,6 +985,7 @@ theorem mem_part_iff : (t : Ty) → t.count ≤ listBound → (x : t.denote) →
         exact ⟨y, rfl, (mem_part_iff b h y).mp hy⟩
       · rintro ⟨y, rfl, hy⟩
         exact ⟨y, (mem_part_iff b h y).mpr hy, rfl⟩
+  | muAt _ _ _ _ _, _, x => by simp [part, Small]
 
 theorem length_flatMap_map {α β γ : Type} (l : List α) (m : List β) (g : α → β → γ) :
     (l.flatMap fun x => m.map (g x)).length = l.length * m.length := by
@@ -638,6 +1011,7 @@ theorem length_part_le : (t : Ty) → t.part.length ≤ t.count
   | atom _ | arrow _ _ => by simp [part, count, listBound]
   | ref _ => by simp [part, count]
   | mu b _ _ _ => by simpa [part, count] using length_part_le b
+  | muAt _ _ _ _ _ => by simp [part, count]
 
 /-- The rule admits the empty value of every type. -/
 theorem small_empty : (t : Ty) → t.Small t.empty
@@ -657,6 +1031,7 @@ theorem small_empty : (t : Ty) → t.Small t.empty
   | arrow _ b => .inr ⟨_, small_empty b, rfl⟩
   | ref _ => trivial
   | mu b _ _ _ => ⟨_, rfl, small_empty b⟩
+  | muAt _ _ _ _ _ => rfl
 
 /-- The empty value of every type is in its part. -/
 theorem empty_mem_part : (t : Ty) → t.empty ∈ t.part
@@ -673,6 +1048,7 @@ theorem empty_mem_part : (t : Ty) → t.empty ∈ t.part
   | fin n => by simp [part]
   | ref _ => by simp [part, empty]
   | mu b _ _ _ => List.mem_map.mpr ⟨_, empty_mem_part b, rfl⟩
+  | muAt _ _ _ _ _ => List.mem_singleton_self _
 
 /-- No type's part is empty. -/
 theorem part_ne_nil (t : Ty) : t.part ≠ [] := List.ne_nil_of_mem (empty_mem_part t)
@@ -702,6 +1078,7 @@ theorem small_of_finite : (t : Ty) → t.finite = true → ∀ x, t.Small x
       simp [finite] at h
       obtain ⟨y, rfl⟩ := eq_base_of_not_grows h.1 x
       exact ⟨y, rfl, small_of_finite b h.2 y⟩
+  | muAt _ _ _ _ _, h, _ => muAt_eq_of_not_grows (by simpa [finite] using h) _ _
 
 /-- A type with finitely many values, no more than the class lists, has every one in its part. -/
 theorem mem_part_of_finite {t : Ty} (hc : t.count ≤ listBound) (h : t.finite = true)
@@ -763,6 +1140,9 @@ theorem exists_ne : (t : Ty) → t.unique = false → ∃ x y : t.denote, x ≠ 
         exact ⟨.base x, .base y, fun e => hxy (MuVal.base.inj e)⟩
       · obtain ⟨f, hf⟩ := mu_infinite (b := b) hg
         exact ⟨f 0, f 1, fun e => absurd (hf e) (by decide)⟩
+  | muAt b g _ _ _, h => by
+      obtain ⟨f, hf⟩ := muAt_infinite (b := b) (g := g) (by simpa [unique] using h)
+      exact ⟨f 0, f 1, fun e => absurd (hf e) (by decide)⟩
 
 /-- A type for which `finite` fails has infinitely many values: an injection from `Nat`. -/
 theorem infinite : (t : Ty) → t.finite = false → ∃ f : Nat → t.denote, Function.Injective f
@@ -818,6 +1198,7 @@ theorem infinite : (t : Ty) → t.finite = false → ∃ f : Nat → t.denote, F
         obtain ⟨f, hf⟩ := infinite b h
         exact ⟨fun n => .base (f n), fun m n e => hf (MuVal.base.inj e)⟩
       · exact mu_infinite hg
+  | muAt _ _ _ _ _, h => muAt_infinite (by simpa [finite] using h)
 
 /-- A type with exactly one value has only its empty value. -/
 theorem eq_empty_of_unique : (t : Ty) → t.unique = true → (x : t.denote) → x = t.empty
@@ -836,6 +1217,7 @@ theorem eq_empty_of_unique : (t : Ty) → t.unique = true → (x : t.denote) →
       simp [unique] at h
       obtain ⟨y, rfl⟩ := eq_base_of_not_grows h.1 x
       exact congrArg MuVal.base (eq_empty_of_unique b h.2 y)
+  | muAt _ _ _ _ _, h, _ => muAt_eq_of_not_grows (by simpa [unique] using h) _ _
 
 /-- A type all of whose values `f` carries injectively into a list has a list of its values. -/
 theorem exists_list_of_injective {α β : Type} (f : α → β) (hf : Function.Injective f)
@@ -927,6 +1309,8 @@ theorem exists_list_of_finite : (t : Ty) → t.finite = true → ∃ l : List t.
       refine ⟨l.map .base, fun x => ?_⟩
       obtain ⟨y, rfl⟩ := eq_base_of_not_grows h.1 x
       exact List.mem_map.mpr ⟨y, hl y, rfl⟩
+  | muAt b g r j i, h => ⟨[(muAt b g r j i).empty], fun _ =>
+      List.mem_singleton.mpr (muAt_eq_of_not_grows (by simpa [finite] using h) _ _)⟩
   | atom k, _ => k.exists_list
   | arrow a b, h => by
       simp only [finite, Bool.or_eq_true, Bool.and_eq_true] at h
@@ -959,6 +1343,7 @@ def builtin : Ty → Bool
   | arrow a b => a.builtin && b.builtin
   | ref _ => false
   | mu _ _ _ _ => false
+  | muAt _ _ _ _ _ => false
 
 /-- The trees of the `k`-th type of the group with the base `b`, the data and arguments `g` and the
 recursive fields `r`, of which `mu b g r i` denotes the `i`-th (`denote_mu`). -/
@@ -967,17 +1352,21 @@ recursive fields `r`, of which `mu b g r i` denotes the `i`-th (`denote_mu`). -/
 
 theorem denote_mu (b g r : Ty) (i : Nat) : (mu b g r i).denote = MuOf b g r i i := rfl
 
-/-- A way to build a value of the `j`-th type of `G` from each constructor `c` of the group's `j`-th
-type, with the data of its other fields and a value of `G` for each child. -/
-@[reducible] def MuAlg (g r : Ty) (i : Nat) (G : Nat → Type) : Type :=
-  (j : Nat) → (c : Fin (bif r.grows i then r.muN j else 0)) → g.den [j, c, 0] →
+/-- A way to build a value of the `j`-th type of `G` from each of the `N j` constructors `c` of the
+group's `j`-th type, with the data of its other fields and a value of `G` for each child. -/
+@[reducible] def MuAlgOf (g r : Ty) (N : Nat → Nat) (G : Nat → Type) : Type :=
+  (j : Nat) → (c : Fin (N j)) → g.den [j, c, 0] →
     ((f : Fin (r.muA j c)) → g.den [j, c, 1, f] → G (r.muS j c f)) → G j
 
-/-- The fold of a tree of the group: `base` on a base value, and `alg` on a node, given the folds of
-its children. The deriving handler of `LeanIntent.Declared` writes the map from a tree back to the
-type a project declares as one. -/
-def muFold {b g r : Ty} {i : Nat} (G : Nat → Type) (base : b.denote → G i) (alg : MuAlg g r i G) :
-    {k : Nat} → MuOf b g r i k → G k
+/-- `MuAlgOf` for the constructors of the trees `mu b g r i` denotes. -/
+@[reducible] def MuAlg (g r : Ty) (i : Nat) (G : Nat → Type) : Type :=
+  MuAlgOf g r (fun j => bif r.grows i then r.muN j else 0) G
+
+/-- The fold of a tree of the group, with the base values of its `i`-th type: `base` on a base
+value, and `alg` on a node, given the folds of its children. The deriving handler of
+`LeanIntent.Declared` writes the map from a tree back to the type a project declares as one. -/
+def muFold {b g r : Ty} {i : Nat} {N : Nat → Nat} (G : Nat → Type) (base : b.denote → G i)
+    (alg : MuAlgOf g r N G) : {k : Nat} → muTy b g r i N k → G k
   | _, .base x => base x
   | _, .node c d k => alg _ c d fun f x => muFold G base alg (k f x)
 
