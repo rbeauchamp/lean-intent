@@ -21,13 +21,16 @@ sees, meets both, and each report names it.
 An agent with a clock acts at two steps, each on what it sees there, and its record asks it to
 follow every readable course, one in which what it sees at each step is the action it needs then.
 Its subject type `Fin 2 → Bool → Bool` takes two arguments, so the verdicts of its pairs are also
-about, for each, the member that does not read it. Each readable course alone is followed by a
-script of timed actions, which reads its clock and not what it sees, so the per-course pair is met
-by the member that does not read the second argument (`perCourse_witnesses`), as a timed script
-solves every feasible goal; no constant follows the course that needs `true` and then `false`, so
-the table does not meet it. No timed script follows every readable course, so that member does not
-meet the pair whose only input is trivial, while the agent that ignores its clock and does what it
-sees does (`wholeCourse_witnesses`).
+about, for each, the member that does not read it, and about the script of timed actions on its
+first argument, a `Fin 2` whose reading does not determine the arguments, last in the class. Each
+readable course alone is followed by a script of timed actions, which reads its clock and not what
+it sees, so the per-course pair is met by the member that does not read the second argument and by
+the script on the first (`perCourse_witnesses`), as a timed script solves every feasible goal; no
+constant follows the course that needs `true` and then `false`, so the table does not meet it. No
+timed script follows every readable course, so neither member meets the pair whose only input is
+trivial, while the agent that ignores its clock and does what it sees does
+(`wholeCourse_witnesses`). `LeanIntentExamples.Clocks` shows the scripts whose clock sits inside an
+argument or is the subject's only argument.
 -/
 
 namespace LeanIntentExamples.TrivialWitnesses
@@ -128,14 +131,16 @@ theorem zigzag_not_constant {a : Clocked} (h : Witness.Constant a) : ¬ Follows 
   exact Bool.false_ne_true ((hf 1).symm.trans (hf 0))
 
 /-- The per-course pair is met by the members that do not read the clock and that do not read what
-the agent sees, the latter a script of timed actions fixed to each course, and by the agent that
-does what it sees; not by the table, by a constant or by every agent. -/
+the agent sees, the latter a script of timed actions fixed to each course, by the agent that does
+what it sees, and by the script on the clock; not by the table, by a constant or by every agent. -/
 theorem perCourse_witnesses :
-    WitnessVerdicts perCourse [false, false, true, true, false, false, true] := by
+    WitnessVerdicts perCourse [false, false, true, true, false, false, true, true] := by
   refine ⟨fun h => ?_, fun h => ?_,
     fun _ hv => ⟨fun _ s => s, fun _ _ => rfl, fun t => (hv t).symm⟩,
     fun v _ => ⟨fun t _ => v.need t, fun _ _ _ => rfl, fun _ => rfl⟩,
-    fun ⟨_, e, h⟩ => ?_, fun ⟨_, e, h⟩ => ?_, ⟨_, rfl, fun _ hv t => (hv t).symm⟩, trivial⟩
+    fun ⟨_, e, h⟩ => ?_, fun ⟨_, e, h⟩ => ?_, ⟨_, rfl, fun _ hv t => (hv t).symm⟩,
+    fun v _ => ⟨fun t _ => v.need t, fun _ _ e => congrArg v.need (Fin.ext e), fun _ => rfl⟩,
+    trivial⟩
   · exact Bool.false_ne_true (h (fun _ _ => false) allTrue (fun _ => rfl) 0)
   · obtain ⟨a, ha, hf⟩ := h zigzag fun _ => rfl
     exact zigzag_not_constant ha hf
@@ -144,11 +149,10 @@ theorem perCourse_witnesses :
   · subst e
     exact Bool.false_ne_true (h allFalse (fun _ => rfl) 0).symm
 
-/-- No agent that does not read what it sees follows every readable course: at the first step it
-takes one action whether it sees `true` or `false`. -/
-theorem timed_not_whole {a : Clocked} (hb : Witness.BlindTo 1 a)
+/-- No agent that takes one action at the first step whether it sees `true` or `false`, as one that
+does not read what it sees does, follows every readable course. -/
+theorem timed_not_whole {a : Clocked} (e : a 0 true = a 0 false)
     (h : ∀ v, Readable v → Follows a v) : False := by
-  have e : a 0 true = a 0 false := hb (0 : Fin 2) true false
   have ht : a 0 true = true := h allTrue (fun _ => rfl) 0
   have hf : a 0 false = false := h allFalse (fun _ => rfl) 0
   exact Bool.false_ne_true (hf.symm.trans (e.symm.trans ht))
@@ -157,14 +161,20 @@ theorem timed_not_whole {a : Clocked} (hb : Witness.BlindTo 1 a)
 sees, and by no script of timed actions, table or constant. -/
 theorem wholeCourse_witnesses :
     WitnessVerdicts (Pair.whole clocked followsReadable)
-      [false, false, true, false, false, false, true] := by
+      [false, false, true, false, false, false, true, false] := by
   have hNoTimed : ¬ (Witness.blind ⟨1, by decide⟩ : Witness (Covered.sig (W := Clocked))).Meets
       (Pair.whole clocked followsReadable) := fun h => by
     obtain ⟨a, hb, hf⟩ := h PUnit.unit trivial
-    exact timed_not_whole hb (hf fun _ hd => nomatch hd)
+    exact timed_not_whole (hb (0 : Fin 2) true false) (hf fun _ hd => nomatch hd)
+  have hNoScript : ¬ (Witness.timed (.here (.fin 1)) : Witness (Covered.sig (W := Clocked))).Meets
+      (Pair.whole clocked followsReadable) := fun h => by
+    obtain ⟨a, hk, hf⟩ := h PUnit.unit trivial
+    exact timed_not_whole (hk ((0 : Fin 2), true, ()) ((0 : Fin 2), false, ()) rfl)
+      (hf fun _ hd => nomatch hd)
   refine ⟨fun h => ?_, fun h => hNoTimed (Witness.blind_meets_of_table _ h),
     fun _ _ => ⟨fun _ s => s, fun _ _ => rfl, fun _ v hv t => (hv t).symm⟩, hNoTimed,
-    fun ⟨_, e, h⟩ => ?_, fun ⟨_, e, h⟩ => ?_, ⟨_, rfl, fun _ _ _ v hv t => (hv t).symm⟩, trivial⟩
+    fun ⟨_, e, h⟩ => ?_, fun ⟨_, e, h⟩ => ?_, ⟨_, rfl, fun _ _ _ v hv t => (hv t).symm⟩,
+    hNoScript, trivial⟩
   · exact Bool.false_ne_true
       (h (fun _ _ => false) PUnit.unit trivial (fun _ hd => nomatch hd) allTrue (fun _ => rfl) 0)
   · subst e
