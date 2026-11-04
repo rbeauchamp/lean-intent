@@ -155,12 +155,13 @@ function is a function of more arguments. -/
   | .atom k => ⟨[], .atom k⟩
   | .ref l => ⟨[], .ref l⟩
   | .mu b g r i => ⟨[], .mu b g r i⟩
+  | .muAt b g r j i => ⟨[], .muAt b g r j i⟩
 
 /-- A type's denotation and that of the subject's code `ofTy` computes from it are one type. -/
 def flat : (t : Ty) → Iso t.denote (ofTy t).denote
   | .arrow a b => (Iso.refl a.denote).arrow (flat b)
   | .unit | .bool | .nat | .int | .string | .list _ | .array _ | .option _ | .prod _ _ | .sum _ _
-  | .decl _ _ _ | .fin _ | .atom _ | .ref _ | .mu _ _ _ _ => Iso.refl _
+  | .decl _ _ _ | .fin _ | .atom _ | .ref _ | .mu _ _ _ _ | .muAt _ _ _ _ _ => Iso.refl _
 
 /-- The output of a subject's code is never a function, so a code computed from a type holds every
 argument a function takes, and with them its projections. -/
@@ -168,7 +169,7 @@ theorem out_ofTy_ne_arrow : (t : Ty) → (a b : Ty) → (ofTy t).out ≠ .arrow 
   | .arrow _ r, a, b => out_ofTy_ne_arrow r a b
   | .unit, _, _ | .bool, _, _ | .nat, _, _ | .int, _, _ | .string, _, _ | .list _, _, _
   | .array _, _, _ | .option _, _, _ | .prod _ _, _, _ | .sum _ _, _, _ | .decl _ _ _, _, _
-  | .fin _, _, _ | .atom _, _, _ | .ref _, _, _ | .mu _ _ _ _, _, _ => nofun
+  | .fin _, _, _ | .atom _, _, _ | .ref _, _, _ | .mu _ _ _ _, _, _ | .muAt _ _ _ _ _, _, _ => nofun
 
 end Sig
 
