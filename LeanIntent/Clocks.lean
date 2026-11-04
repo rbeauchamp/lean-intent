@@ -18,8 +18,9 @@ itself, a component of one side of a pair, or a component of a field of a declar
 constructor, such as a structure, each of any covered type; with a reading of that component
 (`ClockRead`): its value, of its own type, or, for a list or an array, its length or size, a number.
 `ArgClock.read` reads it from a tuple of arguments. A part that does not exist, such as the element
-of a list, a side of a sum, a field of a type with several constructors or what a function returns,
-has no such path, so Lean refuses to elaborate it and no declaration can name it. `ArgClock.all`
+of a list, a side of a sum, a field of a type with several constructors, a field of a recursive,
+nested or mutual type (whose representation is a `Ty.mu`, not a chain of fields) or what a function
+returns, has no such path, so Lean refuses to elaborate it and no declaration can name it. `ArgClock.all`
 lists every clock part (`ArgClock.mem_all`), from every component of each argument
 (`Ty.components`, `Ty.mem_components`) and every reading of each (`ClockRead.all`,
 `ClockRead.mem_all`).
@@ -44,7 +45,8 @@ lists every clock part (`ArgClock.mem_all`), from every component of each argume
   a type, and not an instance or an attribute, is a choice of the agent that implemented it: an
   instance can sit in a module the verdicts do not import, or be passed for one pair.
 * A value of type `LeanIntent.Clock α` in an argument where no clock part reaches, such as inside a
-  list, an option, a sum, a declared type with several constructors or a function, is a declaration
+  list, an option, a sum, a declared type with several constructors, a recursive type or a
+  function, is a declaration
   the class cannot read: `Ty.strayClock` finds it, and the trivial-witness check refuses every
   verdict about such a type rather than ignore the declaration. It looks only in the fields of
   values, never in a declared type's parameters, which hold no value except through the fields that
@@ -450,6 +452,8 @@ def Ty.namesClock : Ty → Bool
   | .sum a b => a.namesClock || b.namesClock
   | .arrow a b => a.namesClock || b.namesClock
   | .decl n _ r => decide (n = Clock.codeName) || r.namesClock
+  | .ref _ => false
+  | .mu b g r _ => b.namesClock || g.namesClock || r.namesClock
 
 mutual
 
@@ -465,8 +469,8 @@ def Ty.strayClock : Ty → Bool
   | t => t.namesClock
 
 /-- Whether a chain of fields holds a `LeanIntent.Clock` where no clock part reaches it. A
-representation that is not a chain, that of a type with several constructors, holds one wherever it
-names one. -/
+representation that is not a chain, that of a type with several constructors or of a recursive,
+nested or mutual type (a `Ty.mu`), holds one wherever it names one. -/
 def Ty.fieldStrayClock : Ty → Bool
   | .prod a rest => Ty.strayClock a || Ty.fieldStrayClock rest
   | r => r.namesClock
