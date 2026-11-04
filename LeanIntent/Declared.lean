@@ -84,8 +84,8 @@ the logic cannot refer to the constructors of an arbitrary type. The audit of de
 (`LeanIntent.CodeAudit`) decides the second for a declaration: it reads every attestation the
 declaration depends on with `checkAttestation`, which re-derives the code through `codeWith` and the
 isomorphism by where it takes each constructor, and compares them by Lean's kernel; for a recursive
-type, the code through `readGroup` and `recCodeWith`, and the isomorphism by the equations its maps
-meet at every constructor of the group (`checkRecMaps`). The handler runs
+type, the code through `readGroup` and `recCodeWith`, and the isomorphism by what its maps reduce
+to at every constructor of the group (`checkRecMaps`). The handler runs
 `checkAttestation` on what it writes and fails rather than write a code the audit would refuse, so
 the two agree on every type the handler covers. The first stays trusted: the audit derives the code
 through the same functions, not by a second reading of the declaration.
