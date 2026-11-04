@@ -33,9 +33,10 @@ codes for a function of several); in `r` it is the chain of the types of the gro
 fields hold, `ref l` for the `l`-th. `r` holds only those numbers, never a field's code, so whether the
 group grows (`Ty.grows`) evaluates alike whatever its type parameters are. It denotes the trees of
 `MuVal`: a base value, or a constructor with the data of its other fields and a child at each position
-of each recursive field, the positions being the values of the field's arguments. Where the group
-does not grow, so that it may have finitely many values, it denotes its base values alone; the deriving
-handler refuses such a type. `Ty.ref` denotes the unit type.
+of each recursive field, the positions being the values of the type its arguments' code in `g`
+denotes, which is isomorphic to the type of the field's arguments, not in general the same. Where
+the group does not grow, so that it may have finitely many values, it denotes its base values alone;
+the deriving handler refuses such a type. `Ty.ref` denotes the unit type.
 
 For each code this module computes:
 
