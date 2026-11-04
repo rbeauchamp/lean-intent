@@ -21,8 +21,8 @@ The decision, given what a build shows of the project (`entry`, as `LeanIntent.I
 would read it), finds nothing (`implemented`), and lists the deliverable with the value and the
 program's module and name (`implemented_listed`). Each change below is refused by name:
 
-* no value recording the implementation (`unimplemented_refused`), and no deliverable
-  (`noDeliverable_refused`);
+* no value recording the implementation, nor any declaring it awaited (`unimplemented_refused`),
+  and no deliverable (`noDeliverable_refused`);
 * a second value recording another implementation of the same deliverable, whichever constant it
   records (`several_refused`);
 * a value whose type names a deliverable the project does not declare, or a term in place of a
