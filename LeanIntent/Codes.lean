@@ -920,8 +920,8 @@ theorem denote_mu_of_grows {b g r : Ty} {i : Nat} (h : r.grows i = true) :
   rfl
 
 /-- Where the type `mu b g r i` grows, its empty value is the one `IsMuEmpty` states: the base value
-at its base's empty value, its own root's. So every recursive type a project declares gets its
-empty value by the one rule `IsMuEmpty` states (`empty_muAt`). -/
+at its base's empty value, its own root's. So every recursive type the deriving handler codes gets
+its empty value by the one rule `IsMuEmpty` states (`empty_muAt`). -/
 theorem empty_mu {b g r : Ty} {i : Nat} (h : r.grows i = true) :
     IsMuEmpty b.empty (fun l c => g.denEmpty [l, c, 0]) i
       (cast (denote_mu_of_grows h) (mu b g r i).empty) := by

@@ -72,8 +72,11 @@ declaration alone, read in declaration order, and none depends on another type's
 The handler refuses, and so leaves not covered, every type it cannot represent this way: a recursive
 type with no value, because each of its constructors has a field that holds a value of a type of its
 group that has none (`Ty.inhabited`), and one whose recursive constructors build only finitely many
-values because a type of its group they need has none (`Ty.grows`, `Ty.growsAt`); a recursive field
-that is a function whose arguments depend on a field or on one another; a type whose values are
+values because a type of its group they need has none (`Ty.grows`, `Ty.growsAt`), though it may
+have values, with a base constructor of its own or without one, as `I` of the mutual group
+`I | mk (o : O)`, `O | o0 | back (i : I) (c : C)`, `C | mkc (c : C)`, whose one value is `mk o0`
+(`docs/degenerate-subjects.md` states why); a recursive field that is a function whose arguments
+depend on a field or on one another; a type whose values are
 constrained by proofs, indices or value parameters (an inductive family with indices, a group with
 a type nested through an inductive family with indices, a parameter that is not a type of `Type`, a
 field that depends on an earlier field or whose type is not a type of `Type`, such as a proof), from
