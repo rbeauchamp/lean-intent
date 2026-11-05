@@ -31,14 +31,19 @@ names is listed as run by no executable, as a library function is, and an execut
 as running no deliverable (`library_listed`); so is every deliverable of a project that declares no
 executable (`noExecutable_listed`).
 
-The reader counts a declaration of the build's IR as an implementation's compiled code by its name
-(`Execution.isCompiledCodeOf`, given the names of the environment's constants), and the last
-section states, over literal names, what it counts: the copy reduce-arity makes of the
-implementation (`redArg_counted`), its specialization (`specialization_counted`) and a lambda lifted
-out of its code (`lambda_counted`), but not a lambda lifted out of a constant of the project named
-under it (`helperLambda_not_counted`), a specialization of another function made inside it
-(`specializationInside_not_counted`), or a constant of the project named like the compiler's copy
-(`constantNamedRedArg_not_counted`).
+The reader counts as an implementation's compiled code only the implementation and the copies
+reduce-arity makes of it (`Execution.isCompiledCodeOf`, given the names of the environment's
+constants), and the last section states, over literal names, what it counts: the copy reduce-arity
+makes of the implementation, through which a polymorphic implementation or one taking a proof is
+called (`redArg_counted`), and a copy of that copy (`redArgOfRedArg_counted`); but not a closed term
+extracted from the implementation, which the compiler shares with `main` where `main` holds the same
+term (`sharedClosedTerm_not_counted`), a closed term extracted from its copy
+(`closedTermOfRedArg_not_counted`), a constant of the project named like the compiler's copy
+(`constantNamedRedArg_not_counted`), a specialization of another function made inside it
+(`specializationInside_not_counted`), a specialization of the implementation itself or its copy
+(`specialization_not_counted`, `specializationRedArg_not_counted`), whose remedy is
+`@[nospecialize]`, or a lambda lifted out of it, reached where a caller inlined it
+(`lambda_not_counted`), whose remedy is `@[noinline]`.
 -/
 
 namespace LeanIntentExamples.Execution
@@ -131,38 +136,51 @@ theorem noExecutable_listed :
 
 /-! ## Which compiled declarations are the implementation's code -/
 
-/-- Reduce-arity's copy of `c`, which no constant is named, is `c`'s compiled code: the nearest
-proper prefix of `c._redArg` that is a constant is `c`. -/
+/-- Reduce-arity's copy of `c`, which no constant is named, is `c`'s compiled code. -/
 theorem redArg_counted : isCompiledCodeOf [`c, `main].contains `c `c._redArg = true := by
   decide +kernel
 
-/-- A specialization of `c` made while compiling `main` is `c`'s compiled code: the prefixes of
-`c._at_.main.spec_0` are `c._at_.main`, `c._at_` and `c`, and only `c` is a constant. -/
-theorem specialization_counted :
-    isCompiledCodeOf [`c, `main].contains `c `c._at_.main.spec_0 = true := by
+/-- So is reduce-arity's copy of that copy. -/
+theorem redArgOfRedArg_counted :
+    isCompiledCodeOf [`c, `main].contains `c `c._redArg._redArg = true := by
   decide +kernel
 
-/-- A lambda lifted out of `c`'s code, which `main` reaches where it inlined `c`, is `c`'s compiled
-code, so `c`'s code runs. -/
-theorem lambda_counted : isCompiledCodeOf [`c, `main].contains `c `c._lam_0 = true := by
+/-- A closed term extracted from `c`, which the compiler shares with `main` where `main` holds the
+same term, is not `c`'s compiled code, so `main` reaching it does not reach `c`. -/
+theorem sharedClosedTerm_not_counted :
+    isCompiledCodeOf [`c, `main].contains `c `c._closed_0 = false := by
   decide +kernel
 
-/-- A lambda lifted out of the project's constant `c.helper` is not `c`'s compiled code: the nearest
-proper prefix of `c.helper._lam_0` that is a constant is `c.helper`. -/
-theorem helperLambda_not_counted :
-    isCompiledCodeOf [`c, `c.helper].contains `c `c.helper._lam_0 = false := by
-  decide +kernel
-
-/-- A specialization of `f` made while compiling `c` is not `c`'s compiled code: the prefixes of
-`f._at_.c.spec_0` are `f._at_.c`, `f._at_` and `f`, and the nearest that is a constant is `f`. -/
-theorem specializationInside_not_counted :
-    isCompiledCodeOf [`f, `c].contains `c `f._at_.c.spec_0 = false := by
+/-- Nor is a closed term extracted from `c`'s reduce-arity copy. -/
+theorem closedTermOfRedArg_not_counted :
+    isCompiledCodeOf [`c, `main].contains `c `c._redArg._closed_0 = false := by
   decide +kernel
 
 /-- A constant of the project named `c._redArg` is not `c`'s compiled code, since it is a constant
 of the environment. -/
 theorem constantNamedRedArg_not_counted :
     isCompiledCodeOf [`c, `c._redArg].contains `c `c._redArg = false := by
+  decide +kernel
+
+/-- A specialization of `f` made while compiling `c` is not `c`'s compiled code. -/
+theorem specializationInside_not_counted :
+    isCompiledCodeOf [`f, `c].contains `c `f._at_.c.spec_0 = false := by
+  decide +kernel
+
+/-- A specialization of `c` made while compiling `main` is not counted either, since this library
+reads no record of its origin: the project marks `c` `@[nospecialize]`. -/
+theorem specialization_not_counted :
+    isCompiledCodeOf [`c, `main].contains `c `c._at_.main.spec_0 = false := by
+  decide +kernel
+
+/-- Nor is reduce-arity's copy of such a specialization. -/
+theorem specializationRedArg_not_counted :
+    isCompiledCodeOf [`c, `main].contains `c `c._at_.main.spec_0._redArg = false := by
+  decide +kernel
+
+/-- A lambda lifted out of `c`'s code, which `main` reaches where it inlined `c`, is not counted:
+the project marks `c` `@[noinline]`. -/
+theorem lambda_not_counted : isCompiledCodeOf [`c, `main].contains `c `c._lam_0 = false := by
   decide +kernel
 
 end LeanIntentExamples.Execution

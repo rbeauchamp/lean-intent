@@ -19,7 +19,7 @@ text:
 | the executables | the names and root modules the caller gives, which `LeanIntent.Execution.lakeExecutables` reads from the project's Lake configuration |
 | an executable's entry point | the constant `main` of the environment Lean imports from the executable's root module alone (`importModules`), which holds that module and what it imports and nothing else; Lean's code generator writes the program's entry point for the module of those that declares `main`, and two of them cannot both declare it |
 | what each declaration's code calls | `irRefs`: the declarations that the IR the build stored for it, as Lean finds it (`IR.findEnvDecl`), calls (`IR.Expr.fap`) or makes a closure of (`IR.Expr.pap`), collected by `bodyRefs`, a match over every constructor of the IR's syntax with no wildcard; none for a declaration with no stored IR or stored as `extern` |
-| the implementation's compiled code | `isCompiledCodeOf` (`LeanIntent.Execution.Code`) over the names the environment holds a constant of (`Environment.contains`): the implementation, and each declaration the environment holds no constant of whose nearest proper name prefix that is a constant is the implementation |
+| the implementation's compiled code | `isCompiledCodeOf` (`LeanIntent.Execution.Code`) over the names the environment holds a constant of (`Environment.contains`): the implementation, and each declaration with stored IR that the environment holds no constant of and whose name is that of the implementation's compiled code followed by `_redArg`, the copy reduce-arity makes; no other declaration |
 | which declarations can lead to the implementation | those of the modules whose imports reach the module that declares it (`importersOf`, over the imports Lean records of each module, `ModuleData.imports`), a declaration's module being the one Lean attributes it to (`importedModuleOf`, through `Environment.getModuleIdxFor?`) |
 | whether `main` reaches the implementation | `Execution.reach` from `main` over what the walk recorded of each declaration reached, with fuel `2 ^ 64` (`reachesIn`); the implementation is asked for by its module and its name, so a constant of the same name in another module is not it |
 
@@ -62,47 +62,47 @@ The reading relies on these facts about Lean v4.35.0, read from its source:
 
 ## The implementation's compiled code
 
-The compiler makes declarations of its own from a declaration's code, and names each after the
-declaration it was made from, as Lean's own code relates them by their names
-(`Lean/Compiler/LCNF/PublicDeclsExt.lean` 34-41, `Lean/Compiler/MetaAttr.lean` 48-60):
+The implementation's compiled code is the implementation `c` and the copies reduce-arity makes of
+it (`Execution.isCompiledCodeOf`), and nothing else the compiler makes. Where a declaration has a
+parameter its body does not use, reduce-arity names a copy of its body over the parameters it uses
+by the declaration's name followed by `_redArg`, and makes the declaration an `@[inline]` wrapper
+that calls it, checking no attribute first (`Lean/Compiler/LCNF/ReduceArity.lean` 156-205, lines
+172 and 197). The mono phase keeps every parameter, erased type parameters included
+(`Lean/Compiler/LCNF/ToMono.lean` 139 and 393), so a polymorphic implementation, or one taking a
+proof, is called only through `c._redArg`, and calling that runs `c`'s code. Line 172 is the one
+place in Lean's source that makes such a name. The walk counts a declaration as `c`'s copy only
+where the environment holds no constant of its name, so a constant of the project named like it
+is not counted (`Execution.isCompiledCodeOf_const`), and only where its IR is stored.
 
-* reduce-arity names its copy of `c` `c._redArg` and makes `c` an `@[inline]` wrapper that calls
-  it, checking no attribute first (`Lean/Compiler/LCNF/ReduceArity.lean` 156-205, lines 172 and
-  197); the mono phase keeps every parameter, erased type parameters included
-  (`Lean/Compiler/LCNF/ToMono.lean` 139 and 393), so a polymorphic implementation, or one taking a
-  proof, is called through `c._redArg`;
-* the boxed variant of `c` is `c._boxed` (`Lean/Compiler/LCNF/Types.lean` 356-357), a lambda
-  lifted out of `c`'s code is `c._lam_i` (`Lean/Compiler/LCNF/LambdaLifting.lean` 82-86), and a
-  closed term extracted from it is `c._closed_i` (`Lean/Compiler/LCNF/ExtractClosed.lean` 227 and
-  246);
-* a specialization of `o` made while compiling `caller` is `o._at_.caller.spec_i`
-  (`Lean/Compiler/LCNF/Specialize.lean` 315-318), where `o` is the declaration whose application
-  heads the key under which the specialization cache records it (`Specialize.lean` 398-418).
+No other declaration the compiler makes is counted, and a reach only through one of them is
+refused, although the program may run the implementation's code. `docs/execution.md` names the
+remedy for each:
 
-So each specialization the cache records with a key whose head is the implementation's compiled
-code is compiled code of it by its name: the nearest proper prefix of `o._at_.caller.spec_i` that is
-a constant is `o` where `o` is one, and `o`'s own otherwise, unless the project declares a constant
-whose name begins with `o._at_`, which can only leave a specialization uncounted. The cache itself
-(`specCacheExt`, `Specialize.lean` 30-45) is not read: Lean declares it private to its module, so a
-library outside Lean's module system cannot name it. A constant of the environment other than the
-implementation is never counted (`Execution.isCompiledCodeOf_const`).
+* a closed term extracted from `c`'s code, `c._closed_i`, which the compiler caches and shares with
+  every later declaration that holds the same term (`Lean/Compiler/LCNF/ExtractClosed.lean`
+  216-233), so a declaration that reaches it need not run `c`;
+* a lambda lifted out of `c`'s code, reached where a caller inlined `c`: an implementation inlined
+  where it is called;
+* a specialization of `c` made at a caller, `c._at_.caller.spec_i`
+  (`Lean/Compiler/LCNF/Specialize.lean` 315-318). The compiler records its origin in a cache that
+  Lean declares private to its module (`Specialize.lean` 30), so this library reads no record of it,
+  and the remedy is `@[nospecialize]` on the implementation, under which the compiler specializes
+  none of its parameters (`Lean/Compiler/LCNF/SpecInfo.lean` 197-198).
 
-The walk refuses these, although the program runs the implementation, and `docs/execution.md` says
-how a project removes each refusal: an implementation inlined where it is called, with no
-declaration the compiler made of it left reached; one that `implemented_by` or a `csimp` theorem
-replaces, whose callers' IR calls the replacement; and one reached only through a module
-initializer, since `main`'s IR does not call the initializers. An `@[extern]` implementation is
-reached where it is called, and its code in another language is trusted.
+Also refused: an implementation that `implemented_by` or a `csimp` theorem replaces, whose callers'
+IR calls the replacement, and one reached only through a module initializer, since `main`'s IR does
+not call the initializers. An `@[extern]` implementation is reached where it is called, and its code
+in another language is trusted.
 
 What it trusts: that the IR the build stored is the IR it emitted as C, both written by the same
 `lean` run, and that the C compiler and Lean's runtime run that code; that an IR body calls only
-declarations of modules its own module's imports reach, on which pruning rests; and the naming
-above, read at Lean v4.35.0 and to be read again at each upgrade of the toolchain, with the project
-naming no constant as the compiler names what it makes: an implementation named `f._at_` would count
-the specializations of `f` as its compiled code. Also trusted: the kernel's reduction, as
-`LeanIntent.Implementation.Read` trusts it; that the executables given are the project's, each with
-the root module Lake builds it from; and that the modules given are all the project's, as the other
-readers trust. An executable whose root module Lean cannot import is an error.
+declarations of modules its own module's imports reach, on which pruning rests; and that a
+declaration the environment holds no constant of, named as reduce-arity names its copy of `c`, is
+that copy, read at Lean v4.35.0 (`ReduceArity.lean` 172) and to be read again at each upgrade of the
+toolchain. Also trusted: the kernel's reduction, as `LeanIntent.Implementation.Read` trusts it; that
+the executables given are the project's, each with the root module Lake builds it from; and that the
+modules given are all the project's, as the other readers trust. An executable whose root module
+Lean cannot import is an error.
 -/
 
 namespace LeanIntent.Execution.Read
@@ -196,7 +196,8 @@ def importedModuleOf (env : Environment) (n : Name) : Option Name :=
 declarations each one's stored IR calls or makes a closure of (`irRefs`), followed only through
 declarations of modules whose imports reach `c`'s (`importersOf`), since no other can call it. The
 declarations are found by a walk from `main` that records what each one's IR calls, and `c` too for
-each that is `c`'s compiled code (`isCompiledCodeOf`, over the environment's constants), and the
+each other declaration with stored IR that is `c`'s compiled code (`isCompiledCodeOf`, over the
+environment's constants: a reduce-arity copy of `c`), and the
 verdict is `Execution.reach` over that record. An error when more declarations are reached than
 `2 ^ 64`. -/
 def reachesIn (c : Implementation.Constant) : CoreM Bool := do
@@ -204,7 +205,8 @@ def reachesIn (c : Implementation.Constant) : CoreM Bool := do
   unless importedModuleOf env c.name == some c.module do return false
   let up := importersOf env c.module
   let code (n : Name) : List Name :=
-    if n != c.name && isCompiledCodeOf (env.contains ·) c.name n then [c.name] else []
+    if n != c.name && isCompiledCodeOf (env.contains ·) c.name n && (IR.findEnvDecl env n).isSome
+    then [c.name] else []
   let mut table : Std.HashMap Name (List Name) := {}
   let mut work := [`main]
   repeat
