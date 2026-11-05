@@ -169,7 +169,7 @@ theorem wholeCourse_witnesses :
       (Pair.whole clocked followsReadable) := fun h => by
     obtain ⟨a, hb, hf⟩ := h PUnit.unit trivial
     exact timed_not_whole (hb (0 : Fin 2) true false) (hf fun _ hd => nomatch hd)
-  have hNoScript : ¬ (Witness.timed ⟨_, .here (.self _), .value _⟩ :
+  have hNoScript : ¬ (Witness.timed ⟨_, .here (.self _), .value⟩ :
       Witness (Covered.sig (W := Clocked))).Meets (Pair.whole clocked followsReadable) := fun h => by
     obtain ⟨a, hk, hf⟩ := h PUnit.unit trivial
     exact timed_not_whole (hk ((0 : Fin 2), true, ()) ((0 : Fin 2), false, ()) rfl)

@@ -41,16 +41,18 @@ the class (`witnesses W`) holds:
   (`Witness.timed_meets_iff`), which is when a table of scripts, one fixed for each input in
   advance, does (`Witness.timed_meets_iff_script`). A clock part is a component of an argument of
   any covered type reached through its data: the argument itself, or a component of a side of a
-  pair or of a field of a declared type whose values all have one shape, a structure, a recursive
-  type whose values are all base values, or a type of a recursive group that is not its root and has
-  one constructor, whose fields are its data and its children of the group, such as a rose tree's
-  label and children; read as its value or, as a number, as the length of a list, the size of an
-  array or the length of a tree of a type of the group shaped as a list. The class reads as a clock
-  each clock part whose reading does not determine the arguments, such as the length of an agent's
-  history, the time field, of any type, of a structure that also holds what it sees, or a rose
-  tree's label; and, by the project's
-  declaration, each that is a value of type `LeanIntent.Clock α`, such as the only argument of a
-  policy of type `Clock Nat → Act`, every subject of which is a script.
+  pair or of a field of a value of a type whose values all have one shape, taken at the place the
+  value's denotation has (`Place.view`), so the same whether it is presented as a declared type, a
+  bare recursive code or a tree of its group: a structure, a recursive type whose values are all base
+  values, or a type of a recursive group that is not its root and has one constructor, whose fields
+  are its data and its children of the group, such as a rose tree's label and children; read as its
+  value or, as a number, as the length of a list, the size of an array or the length of a tree of a
+  type of the group shaped as a list, such as a history a project declares with `nil` and
+  `cons`. The class reads as a clock each clock part whose reading does not determine the
+  arguments, such as the length of an agent's history, the time field, of any type, of a structure
+  that also holds what it sees, or a rose tree's label; and, by the project's declaration, each that
+  is a value of type `LeanIntent.Clock α`, such as the only argument of a policy of type
+  `Clock Nat → Act`, every subject of which is a script.
 
 `Sig.mem_witnesses_iff` states the class apart from the list that computes it. `Pair.MetTrivially`
 states, over strategies from the pair's inputs to subjects and apart from the class, that some
@@ -247,8 +249,8 @@ def Witness.BlindTo (i : Nat) (w : W) : Prop := (c.iso.to w).Ignores i
 isomorphism takes it to reads only `k` (`Sig.Fn.ReadsOnly`). The isomorphism takes each component
 of an argument through a bijection of its own type, a list's length and an array's size to
 themselves, a declared type's fields to its representation's, and a recursive type's constructors,
-their fields and their children to its trees' nodes, data and children, so this is the subject
-itself reading only that part. -/
+their fields and their children to its trees' nodes, data and children, and so the length of a type
+shaped as a list to its tree's, so this is the subject itself reading only that part. -/
 def Witness.TimedBy (k : ArgClock c.sig.args) (w : W) : Prop := (c.iso.to w).ReadsOnly k
 
 /-- The script of timed actions on the clock part `k` that takes the action `s n` whenever `k` reads

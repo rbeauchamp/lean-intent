@@ -41,6 +41,13 @@ follow them, each of a type whose class held no script of timed actions before t
   option of itself: that field holds all of the link, so the type alone reads it as what the agent
   sees, and nothing inside the option, which has two constructors, is a clock part, so the class
   holds no script (`link_clocks`).
+* An agent that sees a history of a type the project declares, `History`, with the constructors
+  `nil` and `cons (head : Bool) (tail : History)`. Its code is a declared type over a recursive
+  type that grows, so its values view as the trees of its group (`LeanIntent.Place.view`), a type
+  shaped as a list, and the history is read by its length, which does not determine it, since the
+  heads may differ. The pair that asks the agent to answer each input bit on the empty history and
+  its negation on the history that saw `false` once is met by the script on the length alone, which
+  the check reports (`history_witnesses`, `history_length_reported`).
 
 A `LeanIntent.Clock` inside a list, where no clock part reaches, is a declaration the class cannot
 read, and no verdict about such a type can be proved (`stray_refused`).
@@ -107,7 +114,7 @@ theorem perCourseH_witnesses : WitnessVerdicts perCourseH [false, false, false, 
 
 /-- The check reports the script on the history's length for the per-course pair. -/
 theorem perCourseH_script_reported :
-    Witness.timed ⟨_, .here (.self _), .length .bool⟩ ∈
+    Witness.timed ⟨.code (.list .bool), .here (.self _), .count (.length .bool)⟩ ∈
       reported Historied [false, false, false, false, true] :=
   (mem_reported perCourseH_witnesses _).mpr
     ⟨Witness.timed_mem (.inl ⟨([true], ()), ([false], ()),
@@ -119,7 +126,7 @@ table or constant follows every readable course, since at the first step the his
 the history `[false]` have one length. -/
 theorem wholeCourseH_witnesses :
     WitnessVerdicts (Pair.whole historied followsReadableH) [false, false, false, false, false] := by
-  have hNoScript : ¬ (Witness.timed ⟨_, .here (.self _), .length .bool⟩ :
+  have hNoScript : ¬ (Witness.timed ⟨.code (.list .bool), .here (.self _), .count (.length .bool)⟩ :
       Witness (Covered.sig (W := Historied))).Meets (Pair.whole historied followsReadableH) :=
     fun h => by
       obtain ⟨a, hk, hf⟩ := h PUnit.unit trivial
@@ -224,7 +231,7 @@ theorem tick_witnesses :
 
 /-- The check reports the script on the time for the pair. -/
 theorem tick_script_reported :
-    Witness.timed ⟨_, .here (.field _ _ (.head _ (.self _))), .value _⟩ ∈
+    Witness.timed ⟨_, .here (.fields rfl (.step (.decl _ _ _) (.head _ (.self _)))), .value⟩ ∈
       reported (TickView → Bool) [false, false, false, false, false, true, false] :=
   (mem_reported tick_witnesses _).mpr
     ⟨Witness.timed_mem (.inl ⟨(((0 : UInt64), false, ()), ()), (((0 : UInt64), true, ()), ()),
@@ -289,7 +296,8 @@ open LeanIntentExamples.WithoutBase in
 /-- The clock part on a rose tree's label: the data of the one constructor of `Rose`, the group's
 type `0`, which is not the group's root `List Rose`. -/
 abbrev roseLabel : ArgClock (Covered.sig (W := Rose → Bool)).args :=
-  ⟨_, .here (.field _ _ (.muAt rfl (.data (by decide) rfl (.head _ (.self _))))), .value _⟩
+  ⟨_, .here (.fields rfl (.step (.decl _ _ _) (.step (.muAt rfl)
+    (.data (by decide) rfl (.head _ (.self _)))))), .value⟩
 
 open LeanIntentExamples.WithoutBase in
 /-- The label of a rose tree is what the clock part on it reads of the tree's code. -/
@@ -348,6 +356,47 @@ open LeanIntentExamples.WithoutBase in
 type alone reads it as what the agent sees; and `Option Link` has two constructors, so no clock part
 reaches inside it. So the class of `Link → Bool` holds no script of timed actions. -/
 theorem link_clocks : (Covered.sig (W := Link → Bool)).clocks = [] := rfl
+
+/-! ## An agent that sees a history of a type the project declares -/
+
+/-- What an agent has seen, newest first: nothing, or what it saw last and what it saw before. -/
+inductive History where
+  | nil
+  | cons (head : Bool) (tail : History)
+  deriving LeanIntent.HasCode
+
+/-- The pair that asks, for each input bit `b`, that the agent answer `b` on the empty history and
+its negation on the history that saw `false` once. -/
+def historyPair : Pair (History → Bool) :=
+  ⟨Bool, fun _ => True, fun b a => a .nil = b ∧ a (.cons false .nil) = !b⟩
+
+/-- The clock part on a history's length: the number of `cons` nodes along its tails, a count of the
+tree of its group that the history's code views as (`LeanIntent.Place.view`). -/
+abbrev historyLength : ArgClock (Covered.sig (W := History → Bool)).args :=
+  ⟨.code (HasCode.code History), .here (.self _), .count (.treeLength rfl)⟩
+
+/-- The pair is met by the script on the history's length fixed to each input bit, and by no other
+member: not by every agent, the table or a constant. -/
+theorem history_witnesses :
+    WitnessVerdicts historyPair [false, false, false, false, true] := by
+  refine ⟨fun h => ?_, fun h => ?_, fun ⟨_, e, h⟩ => ?_, fun ⟨_, e, h⟩ => ?_,
+    fun b _ => ⟨Witness.script historyLength fun n => if n = 0 then b else !b,
+      (Witness.timedBy_iff_script _ _).mpr ⟨_, rfl⟩, rfl, rfl⟩, trivial⟩
+  · exact Bool.false_ne_true (h (fun _ => false) true trivial).1
+  · obtain ⟨a, ⟨v, rfl⟩, h0, h1⟩ := h true trivial
+    exact Bool.false_ne_true (h1.symm.trans h0)
+  · subst e
+    exact Bool.false_ne_true (h true trivial).1
+  · subst e
+    exact Bool.false_ne_true (h false trivial).1.symm
+
+/-- The check reports the script on the history's length for the pair: the length does not
+determine the history, whose heads may differ. -/
+theorem history_length_reported :
+    Witness.timed historyLength ∈ reported (History → Bool) [false, false, false, false, true] :=
+  (mem_reported history_witnesses _).mpr
+    ⟨Witness.timed_mem (.inl ((ArgClock.determines_eq_false_iff _).mp rfl)),
+      history_witnesses.2.2.2.2.1⟩
 
 /-! ## A clock the class cannot read -/
 
