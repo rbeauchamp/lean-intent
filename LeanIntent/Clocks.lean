@@ -19,8 +19,9 @@ constructor, such as a structure, each of any covered type; with a reading of th
 (`ClockRead`): its value, of its own type, or, for a list or an array, its length or size, a number.
 `ArgClock.read` reads it from a tuple of arguments. A part that does not exist, such as the element
 of a list, a side of a sum, a field of a type with several constructors, a field of a recursive,
-nested or mutual type (whose representation is a `Ty.mu`, not a chain of fields) or what a function
-returns, has no such path, so Lean refuses to elaborate it and no declaration can name it.
+nested or mutual type (whose representation is a `Ty.mu` or a `Ty.muAt`, not a chain of fields) or
+what a function returns, has no such path, so Lean refuses to elaborate it and no declaration can
+name it.
 `ArgClock.all` lists every clock part (`ArgClock.mem_all`), from every component of each argument
 (`Ty.components`, `Ty.mem_components`) and every reading of each (`ClockRead.all`,
 `ClockRead.mem_all`).
@@ -453,14 +454,15 @@ def Ty.namesClock : Ty → Bool
   | .decl n _ r => decide (n = Clock.codeName) || r.namesClock
   | .ref _ => false
   | .mu b g r _ => b.namesClock || g.namesClock || r.namesClock
+  | .muAt b g r _ _ => b.namesClock || g.namesClock || r.namesClock
 
 mutual
 
 /-- Whether a value of the code holds a `LeanIntent.Clock` where no clock part reaches it: inside a
 list, an array, an option, a sum, a function, a declared type with several constructors, or a
-recursive, nested or mutual type (a `Ty.mu`). The clock parts reach through pairs and the fields of
-every other declared type with one constructor, `LeanIntent.Clock` included, and a
-`LeanIntent.Clock` they reach is a declaration the class reads. A parameter of a declared type is
+recursive, nested or mutual type (a `Ty.mu` or a `Ty.muAt`). The clock parts reach through pairs
+and the fields of every other declared type with one constructor, `LeanIntent.Clock` included, and
+a `LeanIntent.Clock` they reach is a declaration the class reads. A parameter of a declared type is
 not a part of its values except through the fields that hold it, which are read instead. -/
 def Ty.strayClock : Ty → Bool
   | .prod a b => Ty.strayClock a || Ty.strayClock b
@@ -469,7 +471,7 @@ def Ty.strayClock : Ty → Bool
 
 /-- Whether a chain of fields holds a `LeanIntent.Clock` where no clock part reaches it. A
 representation that is not a chain, that of a type with several constructors or of a recursive,
-nested or mutual type (a `Ty.mu`), holds one wherever it names one. -/
+nested or mutual type (a `Ty.mu` or a `Ty.muAt`), holds one wherever it names one. -/
 def Ty.fieldStrayClock : Ty → Bool
   | .prod a rest => Ty.strayClock a || Ty.fieldStrayClock rest
   | r => r.namesClock
