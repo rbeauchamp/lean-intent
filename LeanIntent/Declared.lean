@@ -47,6 +47,10 @@ writes:
   of the chain of the codes of its fields that hold no value of the group and the chain of the codes
   of its recursive fields' arguments; and `r` the same chain with, for each constructor, the types of
   the group its recursive fields hold (`LeanIntent.Codes`);
+* for a type with no constructor of the first kind, the representation `Ty.muAt b g r j i` instead,
+  where `j` is its *root* (`rootOf`), the first type of the group, in the order of the recursor's
+  motives, that it reaches and that has such a constructor, `b` is the representation of the root's
+  constructors of that kind, and `g` and `r` list the root's other constructors;
 * the map from each type of the group to its trees (`instHasCodeT.to0`, …), by structural recursion
   over the group, and the map back, the fold (`Ty.muFold`) of the map from base values
   (`instHasCodeT.baseInv`) and of the map from each other constructor (`instHasCodeT.alg`);
@@ -56,15 +60,23 @@ writes:
 So a recursive type's empty value is its first base constructor applied to its fields' empty
 values, the class takes constants at each base constructor applied to each combination of values of
 its fields' rules, and it has no projection but the identity, as `Ty.projs` reaches into no field of
-`Ty.mu`. The code, base and group are functions of the declaration alone, read in declaration order.
+`Ty.mu`. A recursive type without a base of its own, such as a rose tree whose only constructor
+holds a list of trees, or the odd half of a mutual even and odd pair, takes its empty value by the
+same rounds, from the types its constructors hold: the first of its constructors whose recursive
+fields hold types that get their empty values in an earlier round, applied to its other fields'
+empty values and to those types' empty values (`Ty.IsMuEmpty`, `Ty.empty_muAt`), and the class
+takes that value as its only constant. The code, base, root and group are functions of the
+declaration alone, read in declaration order, and none depends on another type's instance of
+`HasCode` but its fields' types'.
 
 The handler refuses, and so leaves not covered, every type it cannot represent this way: a recursive
-type each of whose constructors has a field that holds a value of a type of its group, for which the
-rule above fixes no empty value, though it may have values (a rose tree whose only constructor holds
-a list of trees, or the odd half of a mutual even and odd pair; extending the rule to such a type is
-lean-intent #45), and one whose recursive constructors build only finitely many
-values because a type of its group they need has none (`Ty.grows`); a recursive field that is a
-function whose arguments depend on a field or on one another; a type whose values are
+type with no value, because each of its constructors has a field that holds a value of a type of its
+group that has none (`Ty.inhabited`), and one whose recursive constructors build only finitely many
+values because a type of its group they need has none (`Ty.grows`, `Ty.growsAt`), though it may
+have values, with a base constructor of its own or without one, as `I` of the mutual group
+`I | mk (o : O)`, `O | o0 | back (i : I) (c : C)`, `C | mkc (c : C)`, whose one value is `mk o0`
+(`docs/degenerate-subjects.md` states why); a recursive field that is a function whose arguments
+depend on a field or on one another; a type whose values are
 constrained by proofs, indices or value parameters (an inductive family with indices, a group with
 a type nested through an inductive family with indices, a parameter that is not a type of `Type`, a
 field that depends on an earlier field or whose type is not a type of `Type`, such as a proof), from
@@ -314,12 +326,12 @@ def readGroup (indVal : InductiveVal) (xs : Array Expr) : TermElabM (Array (Expr
         ctors := ctors.modify k (·.push ctor)
       return sorts.zip ctors
 
-/-- Whether the `i`-th type of the group reaches itself: `some true` when it is among the types of
-the group that the recursive fields of its constructors hold, or that those of theirs hold, and so
-on, and `some false` when it is not. Each type of the group enters the list still to follow at most
-once, marked when it enters, and an index outside the group never enters, so the list is empty after
-as many steps as the group has types; `none`, which the caller refuses, if it were not. -/
-def reachesItself (group : Array (Expr × Array GCtor)) (i : Nat) : Option Bool := Id.run do
+/-- The types of the group that the `i`-th type reaches: those that the recursive fields of its
+constructors hold, those that those of theirs hold, and so on, the `i`-th type itself among them only
+when it reaches itself. Each type of the group enters the list still to follow at most once, marked
+when it enters, and an index outside the group never enters, so the list is empty after as many
+steps as the group has types; `none`, which the callers refuse, if it were not. -/
+def reached (group : Array (Expr × Array GCtor)) (i : Nat) : Option (Array Bool) := Id.run do
   let next (k : Nat) : List Nat := (group[k]?.map (·.2.toList)).getD [] |>.flatMap fun c =>
     c.fields.toList.filterMap fun | .ref l _ => some l | .data _ => none
   let mut seen : Array Bool := group.map fun _ => false
@@ -330,30 +342,46 @@ def reachesItself (group : Array (Expr × Array GCtor)) (i : Nat) : Option Bool 
       todo := l :: todo
   for _ in [0:group.size] do
     match todo with
-    | [] => return some false
+    | [] => return some seen
     | l :: rest =>
-      if l == i then return some true
       todo := rest
       for m in next l do
         if !(seen[m]?.getD true) then
           seen := seen.set! m true
           todo := m :: todo
-  return if todo.isEmpty then some false else none
+  return if todo.isEmpty then some seen else none
 
-/-- The code `Ty.decl n ps (Ty.mu b g r i)` of the `i`-th type of the recursive group `group`, as
-its base `b`, data and arguments `g` and recursive fields `r`: `b` the representation of the
-constructors of the `i`-th type whose fields hold no value of a type of the group, in declaration
-order; `g` the chain of the group's types, each the chain of its other constructors, in declaration
-order, each the chain of the chain of the codes of its fields that hold no value of a type of the
-group and the chain of the codes of its recursive fields' arguments, in declaration order (the unit
-code for a field that holds a value of the group, the argument's code for a function of one argument
-and the chain of the arguments' codes for a function of several); `r` the same chain with each
-constructor the chain of `ref l` for each recursive field, `l` the type of the group it holds.
-Each field's and argument's code is the one `codeOf` gives for its type. Refuses a type with no
-constructor of the first kind, and a type that does not grow (`Ty.grows`). -/
+/-- Whether the `i`-th type of the group reaches itself (`reached`): `none`, which the caller
+refuses, when that is not settled. -/
+def reachesItself (group : Array (Expr × Array GCtor)) (i : Nat) : Option Bool :=
+  (reached group i).map fun seen => seen[i]?.getD false
+
+/-- The *root* of the `i`-th type of the group, whose base values the code of the type's trees
+holds: the type itself when it has a constructor whose fields hold no value of a type of the group,
+and otherwise the first type of the group, in the order of the recursor's motives, that it reaches
+(`reached`) and that has such a constructor. `none` when it reaches none, so that no type it reaches
+has a value. -/
+def rootOf (group : Array (Expr × Array GCtor)) (seen : Array Bool) (i : Nat) : Option Nat :=
+  if (group[i]?.map (·.2.any GCtor.isBase)).getD false then some i
+  else (List.range group.size).find? fun l => seen[l]?.getD false && group[l]!.2.any GCtor.isBase
+
+/-- The representation of the `i`-th type of the recursive group `group`, `Ty.mu b g r i` where the
+type is its own root (`rootOf`) and otherwise `Ty.muAt b g r j i` for its root `j`, as its base `b`,
+data and arguments `g`, recursive fields `r` and root `j`: `b` the representation of the
+constructors of the root whose fields hold no value of a type of the group, in declaration order;
+`g` the chain of the group's types, each the chain of its other constructors, in declaration order,
+each the chain of the chain of the codes of its fields that hold no value of a type of the group and
+the chain of the codes of its recursive fields' arguments, in declaration order (the unit code for a
+field that holds a value of the group, the argument's code for a function of one argument and the
+chain of the arguments' codes for a function of several); `r` the same chain with each constructor
+the chain of `ref l` for each recursive field, `l` the type of the group it holds. Each field's and
+argument's code is the one `codeOf` gives for its type. Refuses a type that reaches no type of its
+group with a constructor of the first kind, or that its root's base values do not reach
+(`Ty.inhabited`), since then it has no value, and a type that does not grow (`Ty.grows`,
+`Ty.growsAt`). -/
 def recCodeWith {m : Type → Type} [Monad m] [MonadError m] [MonadEnv m] [MonadLCtx m]
     (indVal : InductiveVal) (group : Array (Expr × Array GCtor)) (i : Nat)
-    (codeOf : Expr → m Expr) : m (Expr × Expr × Expr) := do
+    (codeOf : Expr → m Expr) : m (Expr × Expr × Expr × Nat) := do
   let dataCodes (c : GCtor) : m (List Expr) :=
     c.fields.toList.filterMapM fun | .data t => some <$> codeOf t | .ref _ _ => pure none
   let domCodes (c : GCtor) : m (List Expr) :=
@@ -368,26 +396,41 @@ def recCodeWith {m : Type → Type} [Monad m] [MonadError m] [MonadEnv m] [Monad
     c.fields.toList.filterMap fun
       | .data _ => none
       | .ref l _ => some (mkApp (mkConst ``Ty.ref) (toExpr l))
-  let bases := group[i]!.2.toList.filter GCtor.isBase
-  if bases.isEmpty then
-    throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: it is recursive and each of its constructors has a field that holds a value of a type of its group, so the rule of the degenerate class fixes no empty value for it"
+  let some seen := reached group i
+    | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: which types of its group it reaches was not settled"
+  let some root := rootOf group seen i
+    | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: it has no value, since each constructor of each type of its group that it reaches has a field that holds a value of a type of the group"
+  let bases := group[root]!.2.toList.filter GCtor.isBase
   let b := sumCode (← bases.mapM fun c => return chainCode (← dataCodes c))
   let others : List (List GCtor) := group.toList.mapIdx fun k (entry : Expr × Array GCtor) =>
-    if k == i then entry.2.toList.filter fun c => !c.isBase else entry.2.toList
+    if k == root then entry.2.toList.filter fun c => !c.isBase else entry.2.toList
   let g := chainCode (← others.mapM fun cs => return chainCode (← cs.mapM fun c => do
     return chainCode [chainCode (← dataCodes c), chainCode (← domCodes c)]))
   let r := chainCode (others.map fun cs => chainCode (cs.map fun c => chainCode (targets c)))
-  -- `r` holds only numbers of types, so Lean's kernel decides whether the group grows.
-  let grows := Kernel.isDefEq (← getEnv) (← getLCtx) (mkApp2 (mkConst ``Ty.grows) r (toExpr i))
-    (toExpr true)
-  unless grows matches .ok true do
+  -- `r` holds only numbers of types, so Lean's kernel decides whether the type has a value and
+  -- whether the group grows.
+  let kernelTrue (e : Expr) : m Bool := do
+    return Kernel.isDefEq (← getEnv) (← getLCtx) e (toExpr true) matches .ok true
+  let marked := mkApp4 (mkConst ``List.getD [Level.zero]) (mkConst ``Bool)
+    (mkApp2 (mkConst ``Ty.inhabited) r (toExpr root)) (toExpr i) (toExpr false)
+  unless ← kernelTrue marked do
+    throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: it has no value, since each of its constructors has a field that holds a value of a type of its group that has none"
+  let grows := if root == i then mkApp2 (mkConst ``Ty.grows) r (toExpr i)
+    else mkApp3 (mkConst ``Ty.growsAt) r (toExpr root) (toExpr i)
+  unless ← kernelTrue grows do
     throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: its recursive constructors do not build values of every depth, since a type of its group they need has no value"
-  return (b, g, r)
+  return (b, g, r, root)
+
+/-- The representation `recCodeWith` writes, as a code: `Ty.mu b g r i` where the type is its own
+root, and otherwise `Ty.muAt b g r j i`. -/
+def recRep (b g r : Expr) (root i : Nat) : Expr :=
+  if root == i then mkApp4 (mkConst ``Ty.mu) b g r (toExpr i)
+  else mkApp5 (mkConst ``Ty.muAt) b g r (toExpr root) (toExpr i)
 
 /-- `recCodeWith` with the code of each field's type found by Lean's instance resolution, as the
 handler writes it. Refuses a field or argument whose type has no code. -/
 def recCode (indVal : InductiveVal) (group : Array (Expr × Array GCtor)) (i : Nat) :
-    TermElabM (Expr × Expr × Expr) :=
+    TermElabM (Expr × Expr × Expr × Nat) :=
   recCodeWith indVal group i fun t => do
     let some inst ← synthInstance? (mkApp (mkConst ``HasCode) t)
       | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: the type `{t}` of one of its fields has no code; derive `LeanIntent.HasCode` for it first if the project declares it"
@@ -438,13 +481,14 @@ def builtinHeads : MetaM (Array Name) := do
   return heads
 
 /-- Whether `f`, a map from the `i`-th type of the recursive group `group` (as `readGroup` reads it)
-to that type's trees, is the map the handler writes, read constructor by constructor: `none` when
-it is, and otherwise the reason it is not. Starting from `f` for the `i`-th type, it checks, for
-every constructor of every type of the group the maps reach, that the map applied to the constructor
-and its fields reduces, by Lean's `whnf` or else by its kernel, to a value that is, by Lean's kernel:
+to that type's trees, with the base values of the group's `root`-th type (`rootOf`), is the map the
+handler writes, read constructor by constructor: `none` when it is, and otherwise the reason it is
+not. Starting from `f` for the `i`-th type, it checks, for every constructor of every type of the
+group the maps reach, that the map applied to the constructor and its fields reduces, by Lean's
+`whnf` or else by its kernel, to a value that is, by Lean's kernel:
 
-* for a base constructor of the `i`-th type, the base value holding the constructor's alternative
-  of the base, with each field carried through its own type's isomorphism;
+* for a base constructor of the root, the base value holding the constructor's alternative of the
+  base, with each field carried through its own type's isomorphism;
 * for any other constructor, the node of that constructor, in the type's list, holding the chain
   of its other fields each so carried, whose child at each recursive field and position is the
   map of the type that field holds, applied to the field at that position, each argument carried
@@ -457,7 +501,7 @@ equations accept it. Maps that satisfy these equations for every constructor
 are, by structural recursion over the group, the handler's maps, so an isomorphism with this forward
 map is the handler's, its map back being that map's inverse. Each type of the group is read at most
 once. -/
-def checkRecMaps (group : Array (Expr × Array GCtor)) (i : Nat) (f : Expr)
+def checkRecMaps (group : Array (Expr × Array GCtor)) (root i : Nat) (f : Expr)
     (instOf : Expr → MetaM (Option Expr)) (candidate : Nat → MetaM (Option Expr)) :
     MetaM (Option String) := do
   let kernelEq (a b : Expr) : MetaM Bool := do
@@ -474,9 +518,9 @@ def checkRecMaps (group : Array (Expr × Array GCtor)) (i : Nat) (f : Expr)
         let some inst ← instOf t | return none
         parts := parts.push (codeOf t inst, carry ``Iso.to t inst x)
     return some parts.toList
-  -- The alternatives of the base: for each base constructor of the `i`-th type, its data chain.
+  -- The alternatives of the base: for each base constructor of the root, its data chain.
   let mut baseAlts := #[]
-  for c in group[i]!.2.filter GCtor.isBase do
+  for c in group[root]!.2.filter GCtor.isBase do
     let mut codes := #[]
     for fld in c.fields do
       if let .data t := fld then
@@ -504,7 +548,7 @@ def checkRecMaps (group : Array (Expr × Array GCtor)) (i : Nat) (f : Expr)
     let mut nb := 0
     let mut nn := 0
     for c in cs do
-      let isBase := k == i && c.isBase
+      let isBase := k == root && c.isBase
       let types ← c.fields.mapM fun
         | .data t => pure t
         | .ref l doms => doms.foldrM (fun d acc => mkArrow d acc) group[l]!.1
@@ -647,22 +691,23 @@ def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String ×
         let inst ← mkFreshExprMVar (mkApp (mkConst ``HasCode) t)
         modify (·.push (t, inst))
         return mkApp2 (mkConst ``HasCode.code) t inst
-      let read : Except String (Option (Array (Expr × Array GCtor) × Expr × Array (Expr × Expr))) ← try
+      let read : Except String
+          (Option (Array (Expr × Array GCtor) × Nat × Expr × Array (Expr × Expr))) ← try
           let group ← (readGroup indVal as : TermElabM _).run'
           match reachesItself group i with
           | none => pure (Except.error "whether it reaches itself through the fields of its group is not settled")
           | some false => pure (.ok none)
           | some true =>
-            let ((b, g, refs, ps), insts) ← (do
-                let (b, g, refs) ← recCodeWith indVal group i codeOf
-                return (b, g, refs, ← as.toList.mapM codeOf)).run #[]
-            pure (.ok (some (group, mkApp3 (mkConst ``Ty.decl) (toExpr indVal.name) (chainCode ps)
-              (mkApp4 (mkConst ``Ty.mu) b g refs (toExpr i)), insts)))
+            let ((b, g, refs, root, ps), insts) ← (do
+                let (b, g, refs, root) ← recCodeWith indVal group i codeOf
+                return (b, g, refs, root, ← as.toList.mapM codeOf)).run #[]
+            pure (.ok (some (group, root, mkApp3 (mkConst ``Ty.decl) (toExpr indVal.name)
+              (chainCode ps) (recRep b g refs root i), insts)))
         catch ex => pure (.error (← ex.toMessageData.toString))
       match read with
       | .error why => return ← fail why
       | .ok none => pure ()
-      | .ok (some (group, derived, insts)) =>
+      | .ok (some (group, root, derived, insts)) =>
         let given := mkApp3 (mkConst ``Ty.decl) n ps r
         unless ← isDefEq given derived do
           return ← fail "its code is not the one the declaration fixes"
@@ -680,8 +725,8 @@ def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String ×
         let candidate (l : Nat) : MetaM (Option Expr) := do
           let nm := ci.name.getPrefix ++ Name.mkSimple s!"to{l}"
           return if (← getEnv).contains nm then some (mkAppN (mkConst nm) binders) else none
-        if let some why ← checkRecMaps group i (mkApp3 (mkConst ``Iso.to) α (denoteE given) e) instOf
-            candidate then
+        if let some why ← checkRecMaps group root i (mkApp3 (mkConst ``Iso.to) α (denoteE given) e)
+            instOf candidate then
           return ← fail s!"its isomorphism is not the handler's: {why}"
         return (some ty, none)
     let cs ← (ctors indVal as : TermElabM _).run'
@@ -781,10 +826,12 @@ def chainEq : List Term → TermElabM Term
 
 /-- Writes the code, the isomorphism, the proof that the code stands for the type, and the instance
 of `HasCode` for `declName`, the `i`-th type of a recursive group: the code `Ty.decl` of its name,
-its parameters' codes and `Ty.mu` of the base and group `recCode` writes; the map from each type of
-the group to its trees by structural recursion over the group (`to0`, `to1`, …); the map back, the
-fold (`Ty.muFold`) of the map from base values (`baseInv`) and of the map from nodes (`alg`); and
-the proofs, by the same recursion, that each map undoes the other, which Lean's kernel checks. -/
+its parameters' codes and the representation `recCode` writes, `Ty.mu` of its base and group where
+the type is its own root and otherwise `Ty.muAt` with its root (`rootOf`); the map from each type of
+the group to its trees, with the root's base values, by structural recursion over the group (`to0`,
+`to1`, …); the map back, the fold (`Ty.muFold`) of the map from base values (`baseInv`) and of the
+map from nodes (`alg`); and the proofs, by the same recursion, that each map undoes the other, which
+Lean's kernel checks. -/
 def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandElabM Unit := do
   let instName := (← getCurrNamespace) ++ (← liftTermElabM <| Deriving.mkInstName ``HasCode declName)
   let codeName := instName ++ `code
@@ -805,11 +852,11 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
   let ns ← getCurrNamespace
   let rel (n : Name) : Lean.Ident := mkIdent (n.replacePrefix ns .anonymous)
   -- The code, the family of the group's types, and the plan of each type's constructors.
-  let plans ← liftTermElabM <| withParams indVal fun xs binders tApp => do
+  let (plans, root) ← liftTermElabM <| withParams indVal fun xs binders tApp => do
     if (← synthInstance? (mkApp (mkConst ``HasCode) tApp)).isSome then
       throwError "LeanIntent.HasCode: `{.ofConstName declName}` already has a code"
     let group ← readGroup indVal xs
-    let (b, g, r) ← recCode indVal group i
+    let (b, g, r, root) ← recCode indVal group i
     let ps ← xs.toList.mapM fun x => do
       let some inst ← synthInstance? (mkApp (mkConst ``HasCode) x)
         | throwError "LeanIntent.HasCode: a parameter of `{.ofConstName declName}` has no code"
@@ -817,8 +864,8 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
     addFun baseName binders (mkConst ``Ty) b false
     addFun groupName binders (mkConst ``Ty) g false
     addFun refsName #[] (mkConst ``Ty) r false
-    let rep := mkApp4 (mkConst ``Ty.mu) (mkAppN (mkConst baseName) binders)
-      (mkAppN (mkConst groupName) binders) (mkConst refsName) (toExpr i)
+    let rep := recRep (mkAppN (mkConst baseName) binders) (mkAppN (mkConst groupName) binders)
+      (mkConst refsName) root i
     addFun codeName binders (mkConst ``Ty) (mkApp3 (mkConst ``Ty.decl) (toExpr indVal.name)
       (chainCode ps) rep) false
     let fam ← withLocalDeclD `k (mkConst ``Nat) fun k => do
@@ -827,16 +874,16 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
         body ← mkAppOptM ``cond #[none, mkApp2 (mkConst ``Nat.beq) k (toExpr j), group[j]!.1, body]
       mkLambdaFVars #[k] body
     addFun sortName binders (← mkArrow (mkConst ``Nat) (mkSort Level.one)) fam false
-    let kb := (group[i]!.2.filter GCtor.isBase).size
-    return group.mapIdx fun k (entry : Expr × Array GCtor) => Id.run do
+    let kb := (group[root]!.2.filter GCtor.isBase).size
+    return (· , root) <| group.mapIdx fun k (entry : Expr × Array GCtor) => Id.run do
       let cs := entry.2
       let mut out : Array CtorPlan := #[]
       let mut nb := 0
       let mut nn := 0
       for h : p in [0:cs.size] do
         let c := cs[p]
-        let role := if k == i && c.isBase then Role.base nb kb else Role.node nn
-        if k == i && c.isBase then nb := nb + 1 else nn := nn + 1
+        let role := if k == root && c.isBase then Role.base nb kb else Role.node nn
+        if k == root && c.isBase then nb := nb + 1 else nn := nn + 1
         let fields : Array (Option (Nat × Nat)) := c.fields.map fun (f : GField) => match f with
           | GField.data _ => none
           | GField.ref l d => some (l, d.size)
@@ -855,6 +902,15 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
   let Gr ← `(@$(mkCIdent groupName) $args*)
   let R : Term := mkCIdent refsName
   let iq : Term := quote i
+  let rq : Term := quote root
+  -- The trees of the group's `k`-th type, and the way to build each type's values from its nodes.
+  let famTy (k : Term) : Term :=
+    if root == i then Syntax.mkApp (mkCIdent ``LeanIntent.Ty.MuOf) #[B, Gr, R, iq, k]
+    else Syntax.mkApp (mkCIdent ``LeanIntent.Ty.MuAtOf) #[B, Gr, R, rq, k]
+  let algTy ← if root == i then `(LeanIntent.Ty.MuAlg $Gr $R $iq $G)
+    else `(LeanIntent.Ty.MuAlgOf $Gr $R (LeanIntent.Ty.muN $R) $G)
+  let kId := mkIdent `k
+  let famK := famTy kId
   let fold ← `(LeanIntent.Ty.muFold $G (@$(mkCIdent baseInvName) $args*) (@$(mkCIdent algName) $args*))
   let fin (n : Nat) : TermElabM Term := `(⟨$(quote n), of_decide_eq_true rfl⟩)
   -- The maps to the trees, their inverses' parts, and the proofs.
@@ -971,7 +1027,7 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
       let x := mkIdent `x
       toDefs := toDefs.push (← `(command|
         def $(rel (toName k)) $binders* ($x : $G $(quote k)) :
-            LeanIntent.Ty.MuOf $B $Gr $R $iq $(quote k) :=
+            $(famTy (quote k)) :=
           match $x:ident with $toAlts:matchAlt*))
       invToDefs := invToDefs.push (← `(command|
         theorem $(rel (invToName k)) $binders* ($x : $G $(quote k)) :
@@ -983,10 +1039,10 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
     return (toDefs, baseAlts, algAlts, invToDefs, toInvAlts)
   elabCommand (← `(command| mutual $toDefs:command* end))
   elabCommand (← `(command|
-    def $(mkIdent (`_root_ ++ baseInvName)) $binders* (x : LeanIntent.Ty.denote $B) : $G $iq :=
+    def $(mkIdent (`_root_ ++ baseInvName)) $binders* (x : LeanIntent.Ty.denote $B) : $G $rq :=
       match x with $baseAlts:matchAlt*))
   elabCommand (← `(command|
-    def $(mkIdent (`_root_ ++ algName)) $binders* : LeanIntent.Ty.MuAlg $Gr $R $iq $G :=
+    def $(mkIdent (`_root_ ++ algName)) $binders* : $algTy :=
       fun j c d ih => match j, c, d, ih with $algAlts:matchAlt*))
   elabCommand (← `(command| mutual $invToDefs:command* end))
   let toGAlts ← liftTermElabM do
@@ -995,12 +1051,12 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
       alts := alts.push (← `(matchAltExpr| | $(quote k) => @$(mkCIdent (toName k)) $args*))
     alts.push <$> `(matchAltExpr| | _ + $(quote K) => fun e => nomatch e)
   elabCommand (← `(command|
-    def $(mkIdent (`_root_ ++ toGName)) $binders* (k : Nat) : $G k → LeanIntent.Ty.MuOf $B $Gr $R $iq k :=
-      match k with $toGAlts:matchAlt*))
+    def $(mkIdent (`_root_ ++ toGName)) $binders* ($kId : Nat) : $G $kId → $famK :=
+      match $kId:ident with $toGAlts:matchAlt*))
   elabCommand (← `(command|
-    theorem $(rel toInvName) $binders* {k : Nat} (v : LeanIntent.Ty.MuOf $B $Gr $R $iq k) :
-        @$(mkCIdent toGName) $args* k ($fold v) = v :=
-      match k, v with $toInvAlts:matchAlt*))
+    theorem $(rel toInvName) $binders* {$kId : Nat} (v : $famK) :
+        @$(mkCIdent toGName) $args* $kId ($fold v) = v :=
+      match $kId:ident, v with $toInvAlts:matchAlt*))
   elabCommand (← `(command|
     def $(mkIdent (`_root_ ++ isoName)) $binders* :
         LeanIntent.Iso $tStx (LeanIntent.Ty.denote (@$(mkCIdent codeName) $args*)) where
