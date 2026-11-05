@@ -1,4 +1,5 @@
 import LeanIntentExamples.TrivialWitnesses
+import LeanIntentExamples.WithoutBase
 
 /-!
 # Scripts of timed actions whose clock sits inside an argument or is the only argument
@@ -29,6 +30,17 @@ follow them, each of a type whose class held no script of timed actions before t
   also determines the argument, is no `LeanIntent.Clock`, so it adds no member. The same pair about
   policies of type `Nat → Bool` reports nothing (`perScheduleNat_witnesses`): the number is all a
   policy reads, and the type alone reads it as what the policy sees.
+* An agent that sees a rose tree of `LeanIntentExamples.WithoutBase`, of type `Rose → Bool`, a
+  recursive type nested through a list. Its one constructor's fields are clock parts: the label,
+  whose value does not determine the tree, since the children may differ, and the children, read as
+  a value and by their number, since `List Rose`, the group's type that holds them, is shaped as a
+  list. The pair that asks the agent to answer each input bit at the leaf labelled `0` and its
+  negation at the leaf labelled `1` is met by the script on the label alone, which the check reports
+  (`rose_witnesses`, `rose_label_reported`).
+* An agent that sees a link of `LeanIntentExamples.WithoutBase`, a structure whose one field is an
+  option of itself: that field holds all of the link, so the type alone reads it as what the agent
+  sees, and nothing inside the option, which has two constructors, is a clock part, so the class
+  holds no script (`link_clocks`).
 
 A `LeanIntent.Clock` inside a list, where no clock part reaches, is a declaration the class cannot
 read, and no verdict about such a type can be proved (`stray_refused`).
@@ -259,6 +271,83 @@ theorem perScheduleNat_witnesses :
     exact Bool.false_ne_true (h (fun _ => true) trivial 0)
   · subst e
     exact Bool.false_ne_true (h (fun _ => false) trivial 0).symm
+
+/-! ## An agent that sees a rose tree -/
+
+open LeanIntentExamples.WithoutBase in
+/-- A rose tree's label. -/
+def label : Rose → Nat
+  | .node n _ => n
+
+open LeanIntentExamples.WithoutBase in
+/-- The pair that asks, for each input bit `b`, that the agent answer `b` at the leaf labelled `0`
+and its negation at the leaf labelled `1`. -/
+def rosePair : Pair (Rose → Bool) :=
+  ⟨Bool, fun _ => True, fun b a => a (.node 0 []) = b ∧ a (.node 1 []) = !b⟩
+
+open LeanIntentExamples.WithoutBase in
+/-- The clock part on a rose tree's label: the data of the one constructor of `Rose`, the group's
+type `0`, which is not the group's root `List Rose`. -/
+abbrev roseLabel : ArgClock (Covered.sig (W := Rose → Bool)).args :=
+  ⟨_, .here (.field _ _ (.muAt rfl (.data (by decide) rfl (.head _ (.self _))))), .value _⟩
+
+open LeanIntentExamples.WithoutBase in
+/-- The label of a rose tree is what the clock part on it reads of the tree's code. -/
+theorem rose_label (x : (HasCode.code Rose).denote) :
+    label ((HasCode.iso (α := Rose)).inv x) = roseLabel.read (x, ()) := by
+  cases x with
+  | node c d k =>
+    rcases c with ⟨_ | _, hc⟩
+    · rfl
+    · simp [Ty.muN, Ty.items, Ty.item] at hc
+
+open LeanIntentExamples.WithoutBase in
+/-- The pair is met by the script on the label fixed to each input bit, and by no other member: not
+by every agent, the table, a constant, the script on the children or the script on their number,
+since the two trees have the same children. -/
+theorem rose_witnesses :
+    WitnessVerdicts rosePair [false, false, false, false, true, false, false] := by
+  refine ⟨fun h => ?_, fun h => ?_, fun ⟨_, e, h⟩ => ?_, fun ⟨_, e, h⟩ => ?_,
+    fun b _ => ⟨fun t => if label t = 0 then b else !b, fun xs ys e => ?_, rfl, rfl⟩,
+    fun h => ?_, fun h => ?_, trivial⟩
+  · exact Bool.false_ne_true (h (fun _ => false) true trivial).1
+  · obtain ⟨a, ⟨v, rfl⟩, h0, h1⟩ := h true trivial
+    exact Bool.false_ne_true (h1.symm.trans h0)
+  · subst e
+    exact Bool.false_ne_true (h true trivial).1
+  · subst e
+    exact Bool.false_ne_true (h false trivial).1.symm
+  · obtain ⟨x, ⟨⟩⟩ := xs
+    obtain ⟨y, ⟨⟩⟩ := ys
+    show (if label ((HasCode.iso (α := Rose)).inv x) = 0 then b else !b) =
+      (if label ((HasCode.iso (α := Rose)).inv y) = 0 then b else !b)
+    rw [rose_label x, rose_label y]
+    exact congrArg (fun n : Nat => if n = 0 then b else !b) e
+  · obtain ⟨a, hk, h0, h1⟩ := h true trivial
+    have e : a (.node 0 []) = a (.node 1 []) :=
+      hk ((HasCode.iso (α := Rose)).to (.node 0 []), ())
+        ((HasCode.iso (α := Rose)).to (.node 1 []), ()) rfl
+    exact Bool.false_ne_true (h1.symm.trans (e.symm.trans h0))
+  · obtain ⟨a, hk, h0, h1⟩ := h true trivial
+    have e : a (.node 0 []) = a (.node 1 []) :=
+      hk ((HasCode.iso (α := Rose)).to (.node 0 []), ())
+        ((HasCode.iso (α := Rose)).to (.node 1 []), ()) rfl
+    exact Bool.false_ne_true (h1.symm.trans (e.symm.trans h0))
+
+open LeanIntentExamples.WithoutBase in
+/-- The check reports the script on the label for the pair. -/
+theorem rose_label_reported :
+    Witness.timed roseLabel ∈
+      reported (Rose → Bool) [false, false, false, false, true, false, false] :=
+  (mem_reported rose_witnesses _).mpr
+    ⟨Witness.timed_mem (.inl ((ArgClock.determines_eq_false_iff _).mp rfl)),
+      rose_witnesses.2.2.2.2.1⟩
+
+open LeanIntentExamples.WithoutBase in
+/-- A link's one field, `next`, holds all of the link, so its reading determines the argument and the
+type alone reads it as what the agent sees; and `Option Link` has two constructors, so no clock part
+reaches inside it. So the class of `Link → Bool` holds no script of timed actions. -/
+theorem link_clocks : (Covered.sig (W := Link → Bool)).clocks = [] := rfl
 
 /-! ## A clock the class cannot read -/
 
