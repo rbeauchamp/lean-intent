@@ -12,7 +12,7 @@ Where the subject's type or domain is itself what is in question (step 3), the d
 
 Start the second model in a fresh session or context whose only material is that directory's contents: no earlier conversation, and nothing of your account, record, reasoning or the implementation in anything it can read (its workspace, memory, attached files or system prompt). Give it the prompt below that fits what you ask for, and save the prompt and its reply.
 Through a command line, for example `codex exec` as the next section gives it, or `claude -p "<prompt>"` run from `<dir>` with the isolation of step 3 found in that tool's own help; through a desktop app, a new conversation whose workspace is `<dir>`; through an API, a request that carries only the prompt and the directory's files. Use a model of another provider than the one that wrote your record, and check the interface's own help for how to start it that way.
-Before you take its reply as evidence, confirm what it read: from the interface's own record of the files the session opened (a transcript or tool log) where it keeps one, otherwise from the list the prompt asks for; anything outside the directory's files means the formalization is not blind, so discard it and start a fresh session.
+Before you take its reply as evidence, confirm what it read: from the interface's own record of the files the session opened (a transcript or tool log) where it keeps one, otherwise from the list the prompt asks for, or, from a session that is already sandboxed, as [the section on that case](#inside-a-session-that-is-already-sandboxed) says; anything outside the directory's files means the formalization is not blind, so discard it and start a fresh session.
 
 ## The Codex command
 
