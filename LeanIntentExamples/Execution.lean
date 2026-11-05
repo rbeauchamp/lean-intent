@@ -1,4 +1,5 @@
 import LeanIntent.Execution
+import LeanIntent.Execution.Code
 import LeanIntentExamples.Implementation
 
 /-!
@@ -29,6 +30,15 @@ reached (`awaiting_listed`, and `Execution.mem_reached` for every project). A de
 names is listed as run by no executable, as a library function is, and an executable no claim names
 as running no deliverable (`library_listed`); so is every deliverable of a project that declares no
 executable (`noExecutable_listed`).
+
+The reader counts a declaration of the build's IR as an implementation's compiled code by its name
+(`Execution.isCompiledCodeOf`, given the names of the environment's constants), and the last
+section states, over literal names, what it counts: the copy reduce-arity makes of the
+implementation (`redArg_counted`), its specialization (`specialization_counted`) and a lambda lifted
+out of its code (`lambda_counted`), but not a lambda lifted out of a constant of the project named
+under it (`helperLambda_not_counted`), a specialization of another function made inside it
+(`specializationInside_not_counted`), or a constant of the project named like the compiler's copy
+(`constantNamedRedArg_not_counted`).
 -/
 
 namespace LeanIntentExamples.Execution
@@ -117,6 +127,42 @@ theorem library_listed :
 /-- A project that declares no executable has every deliverable listed as run by none. -/
 theorem noExecutable_listed :
     (report [``sortingDeliverable] implemented [] [] []).notRun = [``sortingDeliverable] := by
+  decide +kernel
+
+/-! ## Which compiled declarations are the implementation's code -/
+
+/-- Reduce-arity's copy of `c`, which no constant is named, is `c`'s compiled code: the nearest
+proper prefix of `c._redArg` that is a constant is `c`. -/
+theorem redArg_counted : isCompiledCodeOf [`c, `main].contains `c `c._redArg = true := by
+  decide +kernel
+
+/-- A specialization of `c` made while compiling `main` is `c`'s compiled code: the prefixes of
+`c._at_.main.spec_0` are `c._at_.main`, `c._at_` and `c`, and only `c` is a constant. -/
+theorem specialization_counted :
+    isCompiledCodeOf [`c, `main].contains `c `c._at_.main.spec_0 = true := by
+  decide +kernel
+
+/-- A lambda lifted out of `c`'s code, which `main` reaches where it inlined `c`, is `c`'s compiled
+code, so `c`'s code runs. -/
+theorem lambda_counted : isCompiledCodeOf [`c, `main].contains `c `c._lam_0 = true := by
+  decide +kernel
+
+/-- A lambda lifted out of the project's constant `c.helper` is not `c`'s compiled code: the nearest
+proper prefix of `c.helper._lam_0` that is a constant is `c.helper`. -/
+theorem helperLambda_not_counted :
+    isCompiledCodeOf [`c, `c.helper].contains `c `c.helper._lam_0 = false := by
+  decide +kernel
+
+/-- A specialization of `f` made while compiling `c` is not `c`'s compiled code: the prefixes of
+`f._at_.c.spec_0` are `f._at_.c`, `f._at_` and `f`, and the nearest that is a constant is `f`. -/
+theorem specializationInside_not_counted :
+    isCompiledCodeOf [`f, `c].contains `c `f._at_.c.spec_0 = false := by
+  decide +kernel
+
+/-- A constant of the project named `c._redArg` is not `c`'s compiled code, since it is a constant
+of the environment. -/
+theorem constantNamedRedArg_not_counted :
+    isCompiledCodeOf [`c, `c._redArg].contains `c `c._redArg = false := by
   decide +kernel
 
 end LeanIntentExamples.Execution

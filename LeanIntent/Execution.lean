@@ -17,9 +17,9 @@ implementation, which `LeanIntent.Execution.Read` reads from the finished build.
   it reports the target reached only when it is (`reach_reached`), unreached only when it is not
   (`reach_unreached`), and runs out of fuel only when more names are reached than its fuel
   (`reach_exhausted`), so given enough fuel it decides `Reaches` (`reach_eq_reached_iff`). The
-  reader gives it, as `refs`, the constants each constant's code mentions as Lean's code generator
-  reads it, so that a constant mentioned only in a type or a proof, which no program runs, is not
-  followed.
+  reader gives it, as `refs`, the declarations each declaration's compiled code calls, as the build
+  stored that code, so that a constant mentioned only in a type or a proof, which no program runs,
+  is not followed.
 * **Pruning** (`prune`, `reaches_prune_iff`): restricting `refs` to the names a predicate keeps
   loses no path to a kept target, when every name that refers to a kept name is kept. The reader
   keeps the constants of the modules whose imports reach the module that declares the target, so it
@@ -57,10 +57,10 @@ The decisions this module makes, each on the owner's behalf:
 What this module does not establish: that the executables the decision is given are all the
 project's, and their root modules the ones Lake builds them from, which `LeanIntent.Execution.Read`
 reads through Lake's configuration (`LeanIntent.Execution.lakeExecutables`); that what the reader
-gives as `refs` is what the compiled program calls, which is Lean's code generator's reading and is
-trusted with it; and anything an executable does when it runs beyond which constants its entry
-point's code reaches, such as which branch it takes, or what code its module initializers run before
-`main`.
+gives as `refs` is what the compiled program calls, which it reads from the code the build stored
+and trusts to be the code the build emitted; and anything an executable does when it runs beyond
+which constants its entry point's code reaches, such as which branch it takes, or what code its
+module initializers run before `main`.
 -/
 
 namespace LeanIntent
