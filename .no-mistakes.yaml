@@ -37,14 +37,16 @@
 # Each limit is three times the longest duration measured for its check, rounded up to a whole
 # minute, so a run up to three times as slow as the slowest measured is never cut off; the margin
 # covers runs slowed by heavier load than the measurements saw and the library's growth until the
-# next measurement. Measured on 2026-11-05 at commit f27effd under Lean v4.35.0 on an Apple M5 Max
-# (18 cores, 128 GiB), through `no-mistakes admit`, beside other admitted work (load average 3 to
-# 9), each in a fresh clone with an empty artifact cache, as the seed build below always runs and
-# the Test command runs when no stored outputs fit: the check, 271 seconds as the seed build runs
-# it and 310 as the Test command does, and 257 when run again in the built clone, so most of it is
-# the audits rather than the build, and a limit of 960 seconds; the listing, 93 seconds after the
-# check and 90 in a clone with nothing built, so 300 seconds. Measure again when the library grows,
-# the toolchain changes or the machine changes, and raise a limit before three times a measured
+# next measurement. Measured on 2026-11-05 under Lean v4.35.0 on an Apple M5 Max (18 cores, 128
+# GiB), through `no-mistakes admit`, beside other admitted work, each in a fresh clone with an
+# empty artifact cache, as the seed build below always runs and the Test command runs when no
+# stored outputs fit, on the library as of commit f27effd: the check, 271 and 303 seconds as the
+# seed build runs it, 310 and 325 as the Test command does, and 257 when run again in the built
+# clone, so most of it is the audits rather than the build, and a limit of 1020 seconds; the
+# listing, 93 and 101 seconds after the check and 90 and 123 in a clone with nothing built, so 420
+# seconds. The second figure of each pair comes from this change's own validation run, at a load
+# average of 4 to 14, the others from runs at 3 to 9. Measure again when the library grows, the
+# toolchain changes or the machine changes, and raise a limit before three times a measured
 # duration passes it.
 test:
   instructions: |
@@ -77,10 +79,10 @@ test:
       lean_files=$(git ls-files -- '*.lean')
       if [ -n "$lean_files" ]; then
         status=0
-        no-mistakes admit --memory 6GiB --limit "none; measured peak 4.76 GiB" -- gtimeout --foreground --verbose --kill-after=30 300 lean --run tools/check.lean --tests || status=$?
+        no-mistakes admit --memory 6GiB --limit "none; measured peak 4.76 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests || status=$?
         case $status in
-          124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 300 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
-          137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 300 seconds and did not stop within 30 seconds of TERM" >&2 ;;
+          124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 420 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
+          137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 420 seconds and did not stop within 30 seconds of TERM" >&2 ;;
         esac
         exit "$status"
       fi
@@ -120,17 +122,17 @@ commands:
     export LAKE_CACHE_DIR="$PWD/.lake/cache"
     unset LAKE_ARTIFACT_CACHE
     status=0
-    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.69 GiB" -- gtimeout --foreground --verbose --kill-after=30 960 lean --run tools/check.lean || status=$?
+    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.69 GiB" -- gtimeout --foreground --verbose --kill-after=30 1020 lean --run tools/check.lean || status=$?
     case $status in
-      124) echo "lean --run tools/check.lean reached its wall-clock limit of 960 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
-      137) echo "lean --run tools/check.lean was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 960 seconds and did not stop within 30 seconds of TERM" >&2 ;;
+      124) echo "lean --run tools/check.lean reached its wall-clock limit of 1020 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
+      137) echo "lean --run tools/check.lean was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 1020 seconds and did not stop within 30 seconds of TERM" >&2 ;;
     esac
     [ "$status" -eq 0 ] || exit "$status"
     mkdir -p .lake
-    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.76 GiB" -- gtimeout --foreground --verbose --kill-after=30 300 lean --run tools/check.lean --tests > .lake/tests-listing || status=$?
+    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.76 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests > .lake/tests-listing || status=$?
     case $status in
-      124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 300 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
-      137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 300 seconds and did not stop within 30 seconds of TERM" >&2 ;;
+      124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 420 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
+      137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 420 seconds and did not stop within 30 seconds of TERM" >&2 ;;
     esac
     [ "$status" -eq 0 ] || exit "$status"
     if [ -s .lake/tests-listing ]; then
@@ -153,10 +155,10 @@ commands:
 build_outputs:
   command: |
     status=0
-    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.69 GiB" -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true gtimeout --foreground --verbose --kill-after=30 960 lean --run tools/check.lean || status=$?
+    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.69 GiB" -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true gtimeout --foreground --verbose --kill-after=30 1020 lean --run tools/check.lean || status=$?
     case $status in
-      124) echo "lean --run tools/check.lean reached its wall-clock limit of 960 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
-      137) echo "lean --run tools/check.lean was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 960 seconds and did not stop within 30 seconds of TERM" >&2 ;;
+      124) echo "lean --run tools/check.lean reached its wall-clock limit of 1020 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
+      137) echo "lean --run tools/check.lean was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 1020 seconds and did not stop within 30 seconds of TERM" >&2 ;;
     esac
     exit "$status"
   directories:
