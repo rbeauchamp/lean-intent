@@ -30,8 +30,8 @@ script solves every feasible goal; no constant follows the course that needs `tr
 `false`, so the table does not meet it. No timed script follows every readable course, so neither
 member meets the pair whose only input is trivial, while the agent that ignores its clock and does
 what it sees does, and with it the members that do not read the clock and that read only what the
-agent sees (`wholeCourse_witnesses`). `LeanIntentExamples.Clocks` shows the scripts whose clock sits inside an
-argument or is the subject's only argument.
+agent sees (`wholeCourse_witnesses`). `LeanIntentExamples.Clocks` shows the scripts whose clock
+sits inside an argument or is the subject's only argument.
 -/
 
 namespace LeanIntentExamples.TrivialWitnesses
