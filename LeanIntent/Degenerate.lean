@@ -61,9 +61,11 @@ a value of the output type or from a projection (`Degenerate.constantSubject`,
 (`Degenerate.Is`), so no function takes a member and returns one subject: `Degenerate.reading` reads
 a member as the subject it names or as the group of other constants. A type with no code is
 not covered: no `Covered W` instance exists, so Lean reports that it cannot synthesize one, and no
-verdict about the class of `W` can be stated. Among such types are dependent functions, `Fin 0` and
-`Fin n` for a variable `n`, and every type constrained by proofs, indices or value parameters other
-than `Fin (n + 1)` and `BitVec w`.
+verdict about the class of `W` can be stated here. Among such types are dependent functions,
+`Fin 0` and `Fin n` for a variable `n`, every type constrained by proofs, indices or value
+parameters other than `Fin (n + 1)` and `BitVec w`, and every type in a higher universe, of which
+one whose values carry their own memory type with the shape of a machine, such as an agent with its
+own memory, has its class and verdicts through its behaviour (`LeanIntent.Machines`).
 
 ## Verdicts
 

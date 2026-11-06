@@ -36,10 +36,10 @@ never by reading source text by hand:
   imports from the built modules;
 * the compiled code of each declaration and what it uses, from Lean (`Lean.IR.findEnvDecl`,
   `Lean.IR.collectUsedDecls`) over that environment;
-* the attestations of declared types' codes that the library's declarations depend on, from the
-  library's own audit (`LeanIntent.CodeAudit.audit`) over the environment Lean imports from the
-  built modules, run by `tools/codes.lean` in a process of its own, since this program is not
-  built against the library.
+* the attestations of declared types' codes, and of declared structures' coverage as machines, that
+  the library's declarations depend on, from the library's own audit (`LeanIntent.CodeAudit.audit`)
+  over the environment Lean imports from the built modules, run by `tools/codes.lean` in a process
+  of its own, since this program is not built against the library.
 
 The rules:
 
@@ -76,7 +76,9 @@ The rules:
 * `CODES`: the audit of declared types' codes (`LeanIntent.CodeAudit`) accepts every constant the
   library's modules declare, its worked examples included: no declaration they depend on attests a
   declared type's code with a code or isomorphism other than the one the deriving handler writes
-  from the type's declaration, and none rests on an axiom other than Lean's three. `tools/codes.lean`
+  from the type's declaration, or a declared structure's coverage as a machine with an isomorphism
+  other than the one its deriving handler writes, and none rests on an axiom other than Lean's
+  three. `tools/codes.lean`
   says what it prints and when it fails; the rule fails rather than passing when the library's
   modules declare no constant.
 

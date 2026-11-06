@@ -66,7 +66,9 @@ every pair about `W` whatever the pair's input type, and the verdicts on every p
 stated over that one class. The input type needs no code: the members chosen at each input quantify
 over it, and no member is built from it. A subject type that is not covered has no `Covered`
 instance, so Lean reports that it cannot synthesize one and no verdict about a pair of that type can
-be stated.
+be stated here; a type in a higher universe whose values carry their own memory type with the shape
+of a machine, such as an agent with its own memory, has its class and verdicts through its behaviour
+(`LeanIntent.Machines`).
 
 ## Verdicts
 
