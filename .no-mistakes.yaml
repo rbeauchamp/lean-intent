@@ -13,11 +13,11 @@
 # Memory. Lean work runs through `no-mistakes admit` with a bound above its peak, so that it waits
 # until the bound fits the machine's memory budget beside all other admitted work. Measured under
 # Lean v4.35.0 as the largest sum of resident memory over the processes each ran, sampled every 0.1
-# to 0.2 seconds, which counts the .olean files every Lean process maps and so bounds their
-# footprint from above, from a clean checkout. The check, with an empty artifact cache: 6.27 and
-# 6.42 GiB in two runs on 2026-11-05, on an 18-core machine, after the execution check's modules
-# were added (5.11 GiB there on the commit before them; 4.69 GiB on 2026-10-30 on a 14-core
-# machine); its peak comes in its first ten seconds. The listing, which elaborates
+# to 0.25 seconds, which counts the .olean files every Lean process maps and so bounds their
+# footprint from above, from a clean checkout. The check, with an empty artifact cache: 7.05 and
+# 7.25 GiB in two runs on 2026-11-05, on an 18-core machine, after the execution check's modules
+# were added (5.43 GiB there on the commit before them; 4.69 GiB on 2026-10-30 on a 14-core
+# machine); its peak comes in its first twelve seconds. The listing, which elaborates
 # tools/check.lean against Lean and Lake and runs once per side: 4.76 GiB on 2026-10-30 and again
 # on 2026-11-05. Measure again when the library grows or the toolchain changes, and raise a bound
 # before a peak comes within 15% of it.
@@ -68,8 +68,8 @@ no_ci: true
 # cannot start (`admit` exits 126 or 127) or is killed. Each also fails rather than passing when
 # it finds nothing to check: the checks refuse a library with no Lean file or no declaration, and
 # the listing a project with no Lean file. The two run one after the other, so the command's peak
-# is the larger of the two peaks the paragraph on memory above gives, the check's 6.42 GiB, below
-# the check's 8 GiB bound by more than the 15% that paragraph asks for.
+# is the larger of the two peaks the paragraph on memory above gives, the check's 7.25 GiB, which
+# is within 15% of the check's 8 GiB bound, nearer than that paragraph allows.
 #
 # What a change re-checks is Lake's decision: Lake reuses an earlier output only where its own
 # record of the module's inputs matches, the trace in .lake/build or the input hash that finds an
