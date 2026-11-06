@@ -22,8 +22,9 @@ implementation, which `LeanIntent.Execution.Read` reads from the finished build.
   is not followed.
 * **Pruning** (`prune`, `reaches_prune_iff`): restricting `refs` to the names a predicate keeps
   loses no path to a kept target, when every name that refers to a kept name is kept. The reader
-  keeps the constants of the modules whose imports reach the module that declares the target, so it
-  never reads the code of a constant that cannot lead to the target, such as one of Lean's own.
+  keeps the declarations of the modules whose imports reach the module that declares the target, so
+  it never reads the code of a declaration that cannot lead to the target, such as one of Lean's
+  own.
 * **The decision** (`findings`) reads the project's deliverables, the implementation recorded for
   each and those declared awaiting theirs (as `LeanIntent.Implementation.Read` reports them), the
   executables (`Executable`: its name, its root module, whether that module and what it imports
@@ -55,12 +56,12 @@ The decisions this module makes, each on the owner's behalf:
   executable of the name the claim gives.
 
 What this module does not establish: that the executables the decision is given are all the
-project's, and their root modules the ones Lake builds them from, which `LeanIntent.Execution.Read`
-reads through Lake's configuration (`LeanIntent.Execution.lakeExecutables`); that what the reader
-gives as `refs` is what the compiled program calls, which it reads from the code the build stored
-and trusts to be the code the build emitted; and anything an executable does when it runs beyond
-which constants its entry point's code reaches, such as which branch it takes, or what code its
-module initializers run before `main`.
+project's, and their root modules the ones Lake builds them from, which a gate reads through Lake's
+configuration (`LeanIntent.Execution.lakeExecutables`) and gives to `LeanIntent.Execution.Read`;
+that what the reader gives as `refs` is what the compiled program calls, which it reads from the
+code the build stored and trusts to be the code the build emitted; and anything an executable does
+when it runs beyond which declarations of its compiled code its entry point reaches, such as which
+branch it takes, or what code its module initializers run before `main`.
 -/
 
 namespace LeanIntent

@@ -197,9 +197,8 @@ declarations each one's stored IR calls or makes a closure of (`irRefs`), follow
 declarations of modules whose imports reach `c`'s (`importersOf`), since no other can call it. The
 declarations are found by a walk from `main` that records what each one's IR calls, and `c` too for
 each other declaration with stored IR that is `c`'s compiled code (`isCompiledCodeOf`, over the
-environment's constants: a reduce-arity copy of `c`), and the
-verdict is `Execution.reach` over that record. An error when more declarations are reached than
-`2 ^ 64`. -/
+environment's constants: a reduce-arity copy of `c`), and the verdict is `Execution.reach` over that
+record. An error when more declarations are reached than `2 ^ 64`. -/
 def reachesIn (c : Implementation.Constant) : CoreM Bool := do
   let env ← getEnv
   unless importedModuleOf env c.name == some c.module do return false
