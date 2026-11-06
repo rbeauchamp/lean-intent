@@ -413,11 +413,19 @@ def audit (first : Name) (rest : List Name) : MetaM Outcome := do
       let tys ← es.toArray.mapM diagnosticType
       let tys := tys.foldl (fun acc t => if acc.contains t then acc else acc.push t) #[]
       refused := refused.push (c, if tys.isEmpty then none else some (", ".intercalate tys.toList), why)
-  -- The reached declarations that depend on each refused one, for its carriers.
-  let mut dependents : Std.HashMap Name (Array Name) := {}
-  for (c, ds) in refs.toList do
-    for d in ds do
-      dependents := dependents.insert d ((dependents.getD d #[]).push c)
+  -- The reached declarations that depend on each refused one, for its carriers. They are read only
+  -- for a refused attestation, so they are collected only when there is one. Each declaration
+  -- counts once for each name it depends on, however often the name occurs in it, and joins that
+  -- name's list at its head, which copies nothing, so collecting them takes time linear in the
+  -- names the reached declarations depend on, as the traversal above does.
+  let mut dependents : Std.HashMap Name (List Name) := {}
+  unless refused.isEmpty do
+    for (c, ds) in refs.toList do
+      let mut once : Std.HashSet Name := {}
+      for d in ds do
+        unless once.contains d do
+          once := once.insert d
+          dependents := dependents.insert d (c :: dependents.getD d [])
   let mut findings := #[]
   for (c, ty, why) in refused do
     let mut seen : Std.HashSet Name := {}
@@ -429,7 +437,7 @@ def audit (first : Name) (rest : List Name) : MetaM Outcome := do
         up := rest
         unless seen.contains d do
           seen := seen.insert d
-          up := (dependents.getD d #[]).toList ++ up
+          up := dependents.getD d [] ++ up
     let mut carriers := #[]
     for d in seen.toArray.qsort Name.lt do
       if let some ci := lookup d then
