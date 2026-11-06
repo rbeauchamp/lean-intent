@@ -74,8 +74,8 @@ def entryOf (decl : Name) : MetaM Entry := do
 the project whose modules are `mods` lie, given `built`, the module names its build lists. It is
 `Required.report` of those names, the project's deliverables and values recording implementations,
 each by the module that declares it, and the entries of its values of `Required`, so its findings
-are empty exactly when each deliverable and each value recording an implementation is declared in a
-module `built` names, each deliverable is named by a value of `Required`, each such value names a
+are empty exactly when the project declares no value of `Required`, or each deliverable and each
+value recording an implementation is declared in a module `built` names, each deliverable is named by a value of `Required`, each such value names a
 deliverable, and each thing such a value lists is a theorem declared in a module `built` names
 (`Required.findings_eq_nil_iff`, of the entries as this module reads them). -/
 def check (mods built : Array Name) : MetaM Report := do

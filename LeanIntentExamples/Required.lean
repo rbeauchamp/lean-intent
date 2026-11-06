@@ -17,11 +17,13 @@ declared (`empty_unrepresentable`).
 The decision, given what a build shows of the project (`deliverable`, `implementation` and
 `entry`, as `LeanIntent.Required.Read` would read them) and the module names the build lists
 (`built`), finds nothing (`located`), and lists each theorem with the module that declares it
-(`located_listed`); with nothing declared it finds nothing (`nothing_accepted`, by
-`findings_nothing`, which holds whatever the build lists). Each change below is refused by name:
+(`located_listed`). A project that declares no value of `Required`, such as one that adopted
+lean-intent before this check, is refused nothing, even with the deliverable declared in a module
+the build does not list (`undeclaredProject_accepted`, by `findings_nothing`, which holds whatever
+the project declares and the build lists). Each change below is refused by name:
 
-* no value naming the deliverable's theorems, which the refusal says to declare
-  (`undeclared_refused`);
+* once the project declares a value of `Required`, a second deliverable that no such value names,
+  which the refusal says to declare (`undeclared_refused`);
 * a comparison theorem declared in a module the build does not list, such as a scratch file
   (`scratch_refused`), and a theorem of the very name of one in a built module, declared in such a
   module instead, which the decision reads by the module that declares it, never by its name
@@ -102,10 +104,17 @@ theorem located_listed :
         (``sortingRequired, ⟨`LeanIntentExamples.Required, ``nilSort_separates⟩)] := by
   decide +kernel
 
-theorem nothing_accepted : findings built [] [] [] = [] := findings_nothing
+theorem undeclaredProject_accepted :
+    findings built [{ deliverable with module := `LeanIntentExamples.Scratch }] [implementation]
+      [] = [] :=
+  findings_nothing
+
+/-- A second deliverable of the project, by its module and its name. -/
+def other : Implementation.Constant := ⟨`LeanIntentExamples.Confirmation, `otherDeliverable⟩
 
 theorem undeclared_refused :
-    findings built [deliverable] [implementation] [] = [.undeclared ``sortingDeliverable] := by
+    findings built [deliverable, other] [implementation] [entry] =
+      [.undeclared `otherDeliverable] := by
   decide +kernel
 
 /-- The comparison theorem, declared instead in a scratch module the build does not list. -/

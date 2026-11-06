@@ -25,25 +25,33 @@ outside the modules its build lists.
 * **The decision** (`findings`) reads the modules the project's build lists (`built`), the
   deliverables and the values of `Implementation d` by the module that declares each, and, for each
   value of `Required d`, the deliverable its type names and what it lists, as
-  `LeanIntent.Required.Read` computes them from the build. It finds nothing exactly when every
-  deliverable and every implementation value is declared in a module the build lists, every
-  deliverable has a value of `Required` naming it, every such value names a deliverable of the
-  project, and everything such a value lists is a theorem declared in a module the build lists
-  (`findings_eq_nil_iff`, whose statement `Located` shares no definition with the decision). Each
+  `LeanIntent.Required.Read` computes them from the build. It finds nothing exactly when the
+  project declares no value of `Required`, or every deliverable and every implementation value is
+  declared in a module the build lists, every deliverable has a value of `Required` naming it, every
+  such value names a deliverable of the project, and everything such a value lists is a theorem
+  declared in a module the build lists (`findings_eq_nil_iff`, whose statement `Located` shares no
+  definition with the decision). Each
   finding holds and names what it is about (`findings_sound`), and `Finding.message` says, for each,
   what the project declares or moves to clear it.
-* **A project that declares nothing keeps its verdict.** With no deliverable, no implementation and
-  no value of `Required`, the decision finds nothing, whatever the build lists (`findings_nothing`).
+* **A project that declares nothing keeps its verdict.** With no value of `Required`, the decision
+  finds nothing, whatever deliverables and implementations the project declares and whatever the
+  build lists (`findings_nothing`), so a project that adopted lean-intent before this check passes
+  it until it declares such a value.
 
 The decisions this module makes, each on the owner's behalf:
 
-* **Every deliverable names its theorems.** A deliverable no value of `Required` names is refused,
-  naming it and saying what to declare: the procedure requires its obligations and its comparison
-  before the deliverable is confirmed, and a theorem nothing names is a theorem no check finds.
+* **The check starts with the project's first value of `Required`, and then every deliverable
+  names its theorems.** A project's declaring such a value is its adoption of the check, so one that
+  declares none keeps the verdict it had before. Once it declares one, a deliverable no such value
+  names is refused, naming it and saying what to declare: the procedure requires its obligations
+  and its comparison before the deliverable is confirmed, and a theorem nothing names is a theorem
+  no check finds.
 * **A theorem is listed as a constant Lean records as a theorem, and nothing else.** A term that is
-  not a constant, such as an application of a theorem to arguments, names no declaration whose
-  module can be read, and is refused naming the value; a constant that is not a theorem, such as a
-  definition or an axiom, is refused naming it.
+  not a constant, such as a constructor's application, names no declaration whose module can be
+  read, and is refused naming the value; a constant that is not a theorem, such as a definition or
+  an axiom, is refused naming it. An application of a theorem to arguments is a term too, but where
+  Lean's elaborator abstracts it into an auxiliary theorem of the value's own module, the value
+  holds that theorem's constant, and it is read as that theorem.
 * **Where a theorem lies is the module Lean's environment records as declaring it**, compared with
   the module names the build lists, never the theorem's name: a name a file the build does not list
   also declares cannot pass for the theorem, since one environment holds one declaration of a name.
@@ -148,22 +156,33 @@ def entryFindings (built : List Lean.Name) (ds : List Constant) (r : Entry) : Li
   (if ds.any (some ·.name == r.deliverable) then [] else [.untied r.name]) ++
     r.theorems.flatMap (citedFindings built r.name)
 
-/-- **The decision**: what is wrong with where the theorems lie, given the modules `built` the
-build lists, the deliverables `ds` and the values `vs` recording implementations, each by the module
-that declares it, and the entries `rs` of the values of `Required`. -/
-def findings (built : List Lean.Name) (ds vs : List Constant) (rs : List Entry) : List Finding :=
+/-- What is wrong with where the theorems lie in a project that declares the entries `rs`, given the
+modules `built` the build lists and the deliverables `ds` and the values `vs` recording
+implementations, each by the module that declares it. -/
+def declaredFindings (built : List Lean.Name) (ds vs : List Constant) (rs : List Entry) :
+    List Finding :=
   ds.flatMap (deliverableFindings built rs) ++ vs.flatMap (implementationFindings built) ++
     rs.flatMap (entryFindings built ds)
 
-/-- **Every required theorem lies in a module the build lists**: each deliverable and each value
-recording an implementation is declared in such a module; each deliverable is named by an entry;
-each entry names a deliverable; and everything each entry lists is a theorem declared in such a
-module. It is stated over the lists alone, with no definition the decision uses. -/
+/-- **The decision**: nothing, for a project that declares no value of `Required`, which so keeps
+the verdict it had before it adopted the check; otherwise what is wrong with where the theorems lie
+(`declaredFindings`), given the modules `built` the build lists, the deliverables `ds` and the
+values `vs` recording implementations, each by the module that declares it, and the entries `rs` of
+the values of `Required`. -/
+def findings (built : List Lean.Name) (ds vs : List Constant) (rs : List Entry) : List Finding :=
+  if rs = [] then [] else declaredFindings built ds vs rs
+
+/-- **Every required theorem lies in a module the build lists, once the project declares any**: the
+project declares no entry; or each deliverable and each value recording an implementation is
+declared in such a module, each deliverable is named by an entry, each entry names a deliverable,
+and everything each entry lists is a theorem declared in such a module. It is stated over the lists
+alone, with no definition the decision uses. -/
 def Located (built : List Lean.Name) (ds vs : List Constant) (rs : List Entry) : Prop :=
-  (∀ d ∈ ds, d.module ∈ built) ∧ (∀ v ∈ vs, v.module ∈ built) ∧
-    (∀ d ∈ ds, ∃ r ∈ rs, r.deliverable = some d.name) ∧
-    (∀ r ∈ rs, ∃ d ∈ ds, r.deliverable = some d.name) ∧
-    ∀ r ∈ rs, ∀ t ∈ r.theorems, ∃ c, t = .thm c ∧ c.module ∈ built
+  rs = [] ∨
+    (∀ d ∈ ds, d.module ∈ built) ∧ (∀ v ∈ vs, v.module ∈ built) ∧
+      (∀ d ∈ ds, ∃ r ∈ rs, r.deliverable = some d.name) ∧
+      (∀ r ∈ rs, ∃ d ∈ ds, r.deliverable = some d.name) ∧
+      ∀ r ∈ rs, ∀ t ∈ r.theorems, ∃ c, t = .thm c ∧ c.module ∈ built
 
 /-- What a gate reads: the findings, and each theorem the values list, with the value listing it
 and the theorem by the module that declares it. -/
@@ -229,10 +248,14 @@ theorem entryFindings_eq_nil_iff {r : Entry} :
     simp [this, hd]
 
 /-- **The decision finds nothing exactly when every required theorem lies in a module the build
-lists** (`Located`): for every list of module names and every list of deliverables, values and
-entries. -/
+lists, once the project declares any** (`Located`): for every list of module names and every list
+of deliverables, values and entries. -/
 theorem findings_eq_nil_iff : findings built ds vs rs = [] ↔ Located built ds vs rs := by
   unfold findings Located
+  by_cases hne : rs = []
+  · simp [hne]
+  simp only [hne, ↓reduceIte, false_or]
+  unfold declaredFindings
   simp only [List.append_eq_nil_iff, List.flatMap_eq_nil_iff, deliverableFindings_eq_nil_iff,
     implementationFindings_eq_nil_iff, entryFindings_eq_nil_iff]
   constructor
@@ -242,18 +265,24 @@ theorem findings_eq_nil_iff : findings built ds vs rs = [] ↔ Located built ds 
   · rintro ⟨hdb, hv, hdr, hrd, hrt⟩
     exact ⟨⟨fun d h => ⟨hdb d h, hdr d h⟩, hv⟩, fun r h => ⟨hrd r h, hrt r h⟩⟩
 
-/-- **A project that declares nothing keeps its verdict**: with no deliverable, no value recording
-an implementation and no value of `Required`, the decision finds nothing, whatever the build lists. -/
-theorem findings_nothing : findings built [] [] [] = [] := rfl
+/-- **A project that declares no value of `Required` keeps its verdict**: the decision finds
+nothing, whatever deliverables and values recording implementations the project declares and
+whatever the build lists, so a project that adopted lean-intent before this check, and has
+declared no such value yet, is refused nothing by it. -/
+theorem findings_nothing : findings built ds vs [] = [] := by
+  simp [findings]
 
-/-- A deliverable no entry names is refused, naming it, whatever else the project declares. -/
-theorem undeclared_mem {d : Constant} (hd : d ∈ ds) (hr : ∀ r ∈ rs, r.deliverable ≠ some d.name) :
+/-- Once the project declares a value of `Required`, a deliverable no entry names is refused, naming
+it, whatever else the project declares. -/
+theorem undeclared_mem {d : Constant} (hne : rs ≠ []) (hd : d ∈ ds)
+    (hr : ∀ r ∈ rs, r.deliverable ≠ some d.name) :
     Finding.undeclared d.name ∈ findings built ds vs rs := by
   have : rs.any (·.deliverable == some d.name) = false :=
     Bool.eq_false_iff.mpr fun h => by
       obtain ⟨r, hr', he⟩ := List.any_eq_true.mp h
       exact hr r hr' (beq_iff_eq.mp he)
-  unfold findings
+  unfold findings declaredFindings
+  simp only [hne, ↓reduceIte]
   exact List.mem_append_left _ (List.mem_append_left _
     (List.mem_flatMap.mpr ⟨d, hd, by simp [deliverableFindings, this]⟩))
 
@@ -261,7 +290,8 @@ theorem undeclared_mem {d : Constant} (hd : d ∈ ds) (hr : ∀ r ∈ rs, r.deli
 entry's value, the theorem and that module. -/
 theorem unbuilt_mem {r : Entry} {c : Constant} (hr : r ∈ rs) (ht : .thm c ∈ r.theorems)
     (hb : c.module ∉ built) : Finding.unbuilt r.name c.name c.module ∈ findings built ds vs rs := by
-  unfold findings
+  unfold findings declaredFindings
+  simp only [List.ne_nil_of_mem hr, ↓reduceIte]
   refine List.mem_append_right _ (List.mem_flatMap.mpr ⟨r, hr, ?_⟩)
   unfold entryFindings
   exact List.mem_append_right _ (List.mem_flatMap.mpr ⟨_, ht, by simp [citedFindings, hb]⟩)
@@ -274,7 +304,7 @@ def Finding.Holds (built : List Lean.Name) (ds vs : List Constant) (rs : List En
     Finding → Prop
   | .deliverableUnbuilt d m => ⟨m, d⟩ ∈ ds ∧ m ∉ built
   | .implementationUnbuilt v m => ⟨m, v⟩ ∈ vs ∧ m ∉ built
-  | .undeclared d => (∃ c ∈ ds, c.name = d) ∧ ∀ r ∈ rs, r.deliverable ≠ some d
+  | .undeclared d => rs ≠ [] ∧ (∃ c ∈ ds, c.name = d) ∧ ∀ r ∈ rs, r.deliverable ≠ some d
   | .untied n => ∃ r ∈ rs, r.name = n ∧ ∀ d ∈ ds, r.deliverable ≠ some d.name
   | .notConstant n => ∃ r ∈ rs, r.name = n ∧ .term ∈ r.theorems
   | .notTheorem n c => ∃ r ∈ rs, r.name = n ∧ ∃ m, .other ⟨m, c⟩ ∈ r.theorems
@@ -284,13 +314,17 @@ def Finding.Holds (built : List Lean.Name) (ds vs : List Constant) (rs : List En
 theorem findings_sound {f : Finding} (hf : f ∈ findings built ds vs rs) :
     f.Holds built ds vs rs := by
   unfold findings at hf
+  split at hf
+  · exact absurd hf List.not_mem_nil
+  rename_i hne
+  unfold declaredFindings at hf
   simp only [List.mem_append, List.mem_flatMap] at hf
   rcases hf with (⟨d, hd, hf⟩ | ⟨v, hv, hf⟩) | ⟨r, hr, hf⟩
   · unfold deliverableFindings at hf
     rcases List.mem_append.mp hf with hf | hf <;> split at hf <;> rename_i h <;>
       (try exact absurd hf List.not_mem_nil) <;> rw [List.mem_singleton.mp hf]
     · exact ⟨hd, by simpa using h⟩
-    · refine ⟨⟨d, hd, rfl⟩, fun r hr he => h ?_⟩
+    · refine ⟨hne, ⟨d, hd, rfl⟩, fun r hr he => h ?_⟩
       exact List.any_eq_true.mpr ⟨r, hr, by simp [he]⟩
   · unfold implementationFindings at hf
     split at hf <;> rename_i h

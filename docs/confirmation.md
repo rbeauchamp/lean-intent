@@ -36,7 +36,7 @@ A raw string holds a statement's text unchanged, since a printed text has no con
 
 Once a deliverable's implementation exists, the project records it in a value of its own, which names the deliverable and which this check does not read, so recording or replacing it changes no confirmation ([the implementation of a deliverable](implementation.md)).
 
-The theorems a deliverable relies on, its obligations and the comparison with a second model's blind formalization among them, are named in values of their own (`LeanIntent.Required`), which this check does not read either; [the required-theorems check](required-theorems.md), run beside this one on the same modules, refuses a deliverable no such value names, a named theorem declared in a module the project's build does not list, and a deliverable declared in such a module, whose kept answers are then checked by nothing.
+The theorems a deliverable relies on, its obligations and the comparison with a second model's blind formalization among them, are named in values of their own (`LeanIntent.Required`), which this check does not read either; [the required-theorems check](required-theorems.md), run beside this one on the same modules, refuses, once the project declares such a value, a deliverable no such value names, a named theorem declared in a module the project's build does not list, and a deliverable declared in such a module, whose kept answers are then checked by nothing.
 
 `Read.answerStatement` writes the text of a new answer to one question of a deliverable, the restatement among them, holding the two texts it must hold:
 
