@@ -11,14 +11,17 @@
 # branch, so a change to any of them governs the runs that follow its merge.
 #
 # Memory. Lean work runs through `no-mistakes admit` with a bound above its peak, so that it waits
-# until the bound fits the machine's memory budget beside all other admitted work. Measured on
-# 2026-10-30 under Lean v4.35.0 as the largest sum of resident memory over the processes each ran,
-# sampled every 0.1 seconds, which counts the .olean files every Lean process maps and so bounds
-# their footprint from above, from a clean checkout, after this library's growth took the check
-# past its earlier bound: the check, with an empty artifact cache, 4.69 GiB; the listing, which
-# elaborates tools/check.lean against Lean and Lake and runs once per side, 4.76 GiB. Measure again
-# when the library grows or the toolchain changes, and raise a bound before a peak comes within 15%
-# of it.
+# until the bound fits the machine's memory budget beside all other admitted work. Measured under
+# Lean v4.35.0 as the largest sum of resident memory over the processes each ran, sampled every 0.1
+# to 0.25 seconds, which counts the .olean files every Lean process maps and so bounds their
+# footprint from above, from a clean checkout. The check, with an empty artifact cache: 7.05 and
+# 7.25 GiB in two runs on 2026-11-05, on an 18-core machine, on the head that adds the execution
+# check's modules after its rebase onto #53 (5.43 GiB there on the commit before them; 4.69 GiB on
+# 2026-10-30 on a 14-core machine); its peak comes in its first twelve seconds, and 7.25 GiB is
+# below its 9 GiB bound by more than 15%. The listing, which elaborates tools/check.lean against
+# Lean and Lake and runs once per side: 4.76 GiB on 2026-10-30 and again on 2026-11-05. Measure
+# again when the library grows or the toolchain changes, and raise a bound before a peak comes
+# within 15% of it.
 test:
   instructions: |
     On lean-intent this step is verification. A change's claims are established by machine-checked proof, by derivation and by reading; lean-intent has no running product to drive.
@@ -66,8 +69,8 @@ no_ci: true
 # cannot start (`admit` exits 126 or 127) or is killed. Each also fails rather than passing when
 # it finds nothing to check: the checks refuse a library with no Lean file or no declaration, and
 # the listing a project with no Lean file. The two run one after the other, so the command's peak
-# is the larger of the two peaks the paragraph on memory above gives, 4.76 GiB, below the listing's
-# 6 GiB bound by more than the 15% that paragraph asks for.
+# is the larger of the two peaks the paragraph on memory above gives, the check's 7.25 GiB, which
+# is below the check's 9 GiB bound by more than 15%.
 #
 # What a change re-checks is Lake's decision: Lake reuses an earlier output only where its own
 # record of the module's inputs matches, the trace in .lake/build or the input hash that finds an
@@ -84,7 +87,7 @@ commands:
     set -eu
     export LAKE_CACHE_DIR="$PWD/.lake/cache"
     unset LAKE_ARTIFACT_CACHE
-    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.69 GiB" -- lean --run tools/check.lean
+    no-mistakes admit --memory 9GiB --limit "none; measured peak 7.25 GiB" -- lean --run tools/check.lean
     mkdir -p .lake
     no-mistakes admit --memory 6GiB --limit "none; measured peak 4.76 GiB" -- lean --run tools/check.lean --tests > .lake/tests-listing
     if [ -s .lake/tests-listing ]; then
@@ -105,7 +108,7 @@ commands:
 # Test command needs no such setting, because Lake restores every output it takes from a cache it
 # only reads.
 build_outputs:
-  command: no-mistakes admit --memory 6GiB --limit "none; measured peak 4.69 GiB" -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true lean --run tools/check.lean
+  command: no-mistakes admit --memory 9GiB --limit "none; measured peak 7.25 GiB" -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true lean --run tools/check.lean
   directories:
     - .lake/cache
   toolchain_files:

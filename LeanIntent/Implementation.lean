@@ -72,7 +72,8 @@ The decisions this module makes, each on the owner's behalf:
   that the modules read do not declare, ties it to nothing the log is tied to.
 
 What this module does not establish: that the recorded constant is what a program runs, such as an
-executable's entry point calling it, or that its compiled code computes its definition, which
+executable's entry point calling it, which `LeanIntent.Execution` checks of each executable a
+project says runs the deliverable, or that its compiled code computes its definition, which
 `implemented_by` and `extern` replace; that the proof rests only on axioms the project accepts, which
 `#print axioms` lists of a value and a project's own gate audits, as it audits its other proofs; that
 Lean's kernel checked each value, which the option `debug.skipKernelTC` skips; that the entries are
