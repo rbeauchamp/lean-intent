@@ -1,4 +1,7 @@
-import LeanIntent.Declared
+module
+
+public import LeanIntent.Declared
+import all Init.Prelude
 
 /-!
 # Records about recursive, nested and mutual types the project declares
@@ -22,7 +25,15 @@ hold `Json` values and whose objects pair strings with them, takes constants at 
 (`json_degenerate`). So does a type with a parameter (`Tree`), a type with a function in a field
 (`Term`), and one of mutually inductive types that has a constructor holding no value of its group
 (`Even`, `even_degenerate`).
+
+The module imports `Init.Prelude` with `import all`: its proofs reduce the codes of the types it
+declares, whose equality compares the types' names with `Lean.Name.beq`, a function whose body
+Lean's prelude does not expose to a `module` file. `keepsValue_possibilities` is proved with
+`by rfl`, since Lean checks a theorem written `:= rfl` in the public scope, which that import does
+not reach.
 -/
+
+public section
 
 namespace LeanIntentExamples.Recursive
 
@@ -36,7 +47,7 @@ inductive Expr where
   deriving LeanIntent.HasCode
 
 /-- The value of an expression, in the integers. -/
-def Expr.eval : Expr → Int
+@[expose] def Expr.eval : Expr → Int
   | .num n => n
   | .add a b => a.eval + b.eval
   | .neg a => - a.eval
@@ -76,7 +87,7 @@ theorem simplify_degenerate :
   simp only [Iso.inv_to]
 
 /-- The simplified expression has the value of the expression. -/
-def keepsValue : IntentRecord (Expr → Expr) where
+@[expose] def keepsValue : IntentRecord (Expr → Expr) where
   shape := .function _ _
   dom := []
   props := [⟨"keeps the value", fun f => ∀ e, (f e).eval = e.eval⟩]
@@ -97,7 +108,7 @@ theorem keepsValue_verdicts : Verdicts keepsValue [false, true] := by
 confirmed or declined. -/
 theorem keepsValue_possibilities :
     (possibilities keepsValue_verdicts).map Consequence.holds =
-      [fun f => f = fun e => (HasCode.iso (α := Expr)).inv ((HasCode.iso (α := Expr)).to e)] := rfl
+      [fun f => f = fun e => (HasCode.iso (α := Expr)).inv ((HasCode.iso (α := Expr)).to e)] := by rfl
 
 /-! ## A nested type -/
 

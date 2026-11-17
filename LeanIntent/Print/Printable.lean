@@ -1,4 +1,6 @@
-import LeanIntent.Print.RoundTrip
+module
+
+public import LeanIntent.Print.RoundTrip
 
 /-!
 # The terms the printer prints
@@ -7,6 +9,8 @@ import LeanIntent.Print.RoundTrip
 the printer prints exactly those, at every precedence and for every choice of `bare`: it refuses
 no term of the class, so it is not met by refusing everything, and prints none outside it.
 -/
+
+public section
 
 namespace LeanIntent.Print
 

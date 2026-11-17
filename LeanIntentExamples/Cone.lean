@@ -1,4 +1,10 @@
-import LeanIntent.Cone
+module
+
+public import LeanIntent.Cone
+import all Lean.Declaration
+import all Init.Prelude
+import all Lean.Data.Name
+import all Lean.PrivateName
 
 /-!
 # Cone exclusion on a small environment
@@ -18,19 +24,26 @@ cut down to what matters here:
 cone reaches `impl` through `helper` (`cheat_refused`); it accepts `honest`, whose cone is `honest`
 and `vocab` and holds no declaration of `impl` (`honest_accepted`). Together they show the
 procedure is not vacuous: on one environment it accepts one record and refuses another.
+
+The module imports four of Lean's modules with `import all`, each for a function its proofs reduce
+whose body Lean does not expose to a `module` file: `Init.Prelude` for `Lean.Name.beq`,
+`Lean.Data.Name` for `Lean.Name.isPrefixOf`, `Lean.PrivateName` for `Lean.privateToUserName` and
+`Lean.Declaration` for `Lean.ConstantInfo.isAxiom`.
 -/
+
+public section
 
 namespace LeanIntentExamples.Cone
 
 open Lean LeanIntent.Cone
 
 /-- A definition named `n` of type `Type` whose value is `v`. -/
-def defn (n : Name) (v : Expr) : ConstantInfo :=
+@[expose] def defn (n : Name) (v : Expr) : ConstantInfo :=
   .defnInfo { name := n, levelParams := [], type := .sort 1, value := v, hints := .abbrev,
               safety := .safe, all := [n] }
 
 /-- The hand-written environment. -/
-def env : Name → Option ConstantInfo
+@[expose] def env : Name → Option ConstantInfo
   | `impl => some (defn `impl (.sort 0))
   | `helper => some (defn `helper (.const `impl []))
   | `cheat => some (defn `cheat (.const `helper []))
@@ -39,7 +52,7 @@ def env : Name → Option ConstantInfo
   | _ => none
 
 /-- The implementation's declarations: `impl` and everything Lean would name under it. -/
-def isImpl : Name → Bool := isImplDecl [`impl]
+@[expose] def isImpl : Name → Bool := isImplDecl [`impl]
 
 theorem refersTo_defn {n c : Name} {v : Expr} : RefersTo (defn n v) c ↔ Mentions c v := by
   simp [defn, RefersTo, Mentions]

@@ -1,5 +1,7 @@
-import Lean.Expr
-import LeanIntent.Print.Token
+module
+
+public import Lean.Expr
+public import LeanIntent.Print.Token
 
 /-!
 # Printing a Lean term as tokens, and parsing the tokens back
@@ -26,6 +28,8 @@ it returns the very term `pr` printed, and `LeanIntent.Print.Printable` that `pr
 terms `Printable` admits.
 -/
 
+public section
+
 namespace LeanIntent.Print
 
 open Lean (Name Level Expr Literal BinderInfo)
@@ -34,66 +38,66 @@ open Lean (Name Level Expr Literal BinderInfo)
 or as an argument. -/
 inductive Prec where
   | term | simple | head | arg
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- Whether a sort, a natural number literal or an application needs parentheses at `p`: as the
 function of an application or as an argument. -/
-def Prec.tight : Prec → Bool
+@[expose] def Prec.tight : Prec → Bool
   | .head | .arg => true
   | _ => false
 
 /-- Whether `p` is an argument's precedence. -/
-def Prec.isArg : Prec → Bool
+@[expose] def Prec.isArg : Prec → Bool
   | .arg => true
   | _ => false
 
 /-- Whether `p` is the lowest precedence. -/
-def Prec.isTerm : Prec → Bool
+@[expose] def Prec.isTerm : Prec → Bool
   | .term => true
   | _ => false
 
 /-- `ts` in parentheses when `b`. -/
-def paren (b : Bool) (ts : List Tok) : List Tok := if b then .lparen :: ts ++ [.rparen] else ts
+@[expose] def paren (b : Bool) (ts : List Tok) : List Tok := if b then .lparen :: ts ++ [.rparen] else ts
 
 /-- A component that can be written: as it is, or escaped since it holds no `»`. -/
-def compOk (s : String) : Bool := rawable s || !(s.toList.contains '»')
+@[expose] def compOk (s : String) : Bool := rawable s || !(s.toList.contains '»')
 
 /-- A name that is one component that can be written. -/
-def atomOk : Name → Bool
+@[expose] def atomOk : Name → Bool
   | .str .anonymous s => compOk s
   | _ => false
 
 /-- A name of at least one component, each a string that can be written. -/
-def nameOk (n : Name) : Bool :=
+@[expose] def nameOk (n : Name) : Bool :=
   match comps n with
   | some ss => !ss.isEmpty && ss.all compOk
   | none => false
 
 /-- The position of the innermost binder named `n` in the scope `sc`, innermost first. -/
-def lookup (n : Name) : List Name → Option Nat
+@[expose] def lookup (n : Name) : List Name → Option Nat
   | [] => none
   | m :: ms => if m = n then some 0 else (lookup n ms).map (· + 1)
 
 /-! ## Universe levels -/
 
 /-- The number `l` is, when it is a numeral. -/
-def natOf : Level → Option Nat
+@[expose] def natOf : Level → Option Nat
   | .zero => some 0
   | .succ l => (natOf l).map (· + 1)
   | _ => none
 
 /-- The level a numeral denotes. -/
-def levelOfNat : Nat → Level
+@[expose] def levelOfNat : Nat → Level
   | 0 => .zero
   | k + 1 => .succ (levelOfNat k)
 
 /-- `l` after `k` successors. -/
-def addN (l : Level) : Nat → Level
+@[expose] def addN (l : Level) : Nat → Level
   | 0 => l
   | k + 1 => .succ (addN l k)
 
 /-- A level's tokens, in parentheses when `atom` and it is not a numeral or a parameter. -/
-def prLevel : Level → Bool → Option (List Tok)
+@[expose] def prLevel : Level → Bool → Option (List Tok)
   | .zero, _ => some [.num 0]
   | .succ l, atom =>
     match natOf l with
@@ -111,7 +115,7 @@ def prLevel : Level → Bool → Option (List Tok)
   | .mvar _, _ => none
 
 /-- A list of levels separated by commas. -/
-def prLevels : List Level → Option (List Tok)
+@[expose] def prLevels : List Level → Option (List Tok)
   | [] => some []
   | [l] => prLevel l false
   | l :: ls => do
@@ -120,19 +124,19 @@ def prLevels : List Level → Option (List Tok)
     some (t ++ .comma :: r)
 
 /-- A constant's universe levels: nothing when it has none, and otherwise `.{` and the levels. -/
-def prUnivs (us : List Level) : Option (List Tok) :=
+@[expose] def prUnivs (us : List Level) : Option (List Tok) :=
   match us with
   | [] => some []
   | us => (prLevels us).map fun t => .dotBrace :: t ++ [.rbrace]
 
 /-- The level `a` followed by an offset `+ k`, if one follows. -/
-def levelTail (a : Level) : List Tok → Option (Level × List Tok)
+@[expose] def levelTail (a : Level) : List Tok → Option (Level × List Tok)
   | .plus :: .num k :: ts => some (addN a k, ts)
   | ts => some (a, ts)
 
 mutual
 /-- A level written as a numeral, a parameter or in parentheses. -/
-def psLevelAtom : Nat → List Tok → Option (Level × List Tok)
+@[expose] def psLevelAtom : Nat → List Tok → Option (Level × List Tok)
   | 0, _ => none
   | f + 1, ts =>
     match ts with
@@ -146,7 +150,7 @@ def psLevelAtom : Nat → List Tok → Option (Level × List Tok)
     | _ => none
 
 /-- A level. -/
-def psLevel : Nat → List Tok → Option (Level × List Tok)
+@[expose] def psLevel : Nat → List Tok → Option (Level × List Tok)
   | 0, _ => none
   | f + 1, ts =>
     match ts with
@@ -164,7 +168,7 @@ def psLevel : Nat → List Tok → Option (Level × List Tok)
 end
 
 /-- Levels separated by commas and closed by `}`. -/
-def psLevels : Nat → List Tok → Option (List Level × List Tok)
+@[expose] def psLevels : Nat → List Tok → Option (List Level × List Tok)
   | 0, _ => none
   | f + 1, ts => do
     let (l, ts) ← psLevel (2 * ts.length + 2) ts
@@ -176,7 +180,7 @@ def psLevels : Nat → List Tok → Option (List Level × List Tok)
     | _ => none
 
 /-- A constant's universe levels, after `.{` when it has any. -/
-def psUnivs (ts : List Tok) : Option (List Level × List Tok) :=
+@[expose] def psUnivs (ts : List Tok) : Option (List Level × List Tok) :=
   match ts with
   | .dotBrace :: ts => psLevels (ts.length + 1) ts
   | ts => some ([], ts)
@@ -184,49 +188,49 @@ def psUnivs (ts : List Tok) : Option (List Level × List Tok) :=
 /-! ## Terms -/
 
 /-- The opening bracket of a binder annotation. -/
-def openTok : BinderInfo → Tok
+@[expose] def openTok : BinderInfo → Tok
   | .default => .lparen
   | .implicit => .lbrace
   | .strictImplicit => .lstrict
   | .instImplicit => .lbrack
 
 /-- The closing bracket of a binder annotation. -/
-def closer : BinderInfo → Tok
+@[expose] def closer : BinderInfo → Tok
   | .default => .rparen
   | .implicit => .rbrace
   | .strictImplicit => .rstrict
   | .instImplicit => .rbrack
 
 /-- A binder's tokens: its name and type in the brackets of its annotation. -/
-def binderToks (bi : BinderInfo) (n : Name) (t : List Tok) : List Tok :=
+@[expose] def binderToks (bi : BinderInfo) (n : Name) (t : List Tok) : List Tok :=
   openTok bi :: .ident n :: .colon :: t ++ [closer bi]
 
 /-- Whether a level is `0`, whose sort `Prop` is written as one token. -/
-def isZero : Level → Bool
+@[expose] def isZero : Level → Bool
   | .zero => true
   | _ => false
 
 /-- A sort's tokens: `Prop`, `Type`, `Type` and a level, or `Sort` and a level. -/
-def prSort : Level → Option (List Tok)
+@[expose] def prSort : Level → Option (List Tok)
   | .zero => some [.kwProp]
   | .succ l => if isZero l then some [.kwType] else (prLevel l true).map (.kwType :: ·)
   | l => (prLevel l true).map (.kwSort :: ·)
 
 /-- A `let`'s tokens: `let`, or `have` when `nonDep`, its name and type, `:=`, its value, `;` and its
 body. -/
-def letToks (nonDep : Bool) (n : Name) (t v b : List Tok) : List Tok :=
+@[expose] def letToks (nonDep : Bool) (n : Name) (t v b : List Tok) : List Tok :=
   (if nonDep then .kwHave else .kwLet) :: .ident n :: .colon :: t ++ .colonEq :: v ++
     .semicolon :: b
 
 /-- Whether a `∀` is written as an arrow: its binder has no name and the default annotation. -/
-def isArrow : Name → BinderInfo → Bool
+@[expose] def isArrow : Name → BinderInfo → Bool
   | .anonymous, .default => true
   | _, _ => false
 
 /-- The tokens of `e` at precedence `p`, under the binders `sc`, innermost first; `none` when `e`
 is not printable. A constant is written without `@` when `bare` chooses it and no binder in scope
 has its name. -/
-def pr (bare : Name → Bool) : List Name → Expr → Prec → Option (List Tok)
+@[expose] def pr (bare : Name → Bool) : List Name → Expr → Prec → Option (List Tok)
   | sc, .bvar i, _ =>
     match sc[i]? with
     | some n => if atomOk n && lookup n sc == some i then some [.ident n] else none
@@ -269,17 +273,17 @@ def pr (bare : Name → Bool) : List Name → Expr → Prec → Option (List Tok
   | _, _, _ => none
 
 /-- Whether the tokens start an argument of an application. -/
-def atomStart : List Tok → Bool
+@[expose] def atomStart : List Tok → Bool
   | .ident _ :: _ | .atSign :: _ | .kwProp :: _ | .str _ :: _ | .lparen :: _ => true
   | _ => false
 
 /-- Whether the tokens start a level written as a numeral, a parameter or in parentheses. -/
-def levelStart : List Tok → Bool
+@[expose] def levelStart : List Tok → Bool
   | .num _ :: _ | .ident _ :: _ | .lparen :: _ => true
   | _ => false
 
 /-- The binder annotation an opening bracket starts. -/
-def opener : Tok → Option BinderInfo
+@[expose] def opener : Tok → Option BinderInfo
   | .lparen => some .default
   | .lbrace => some .implicit
   | .lstrict => some .strictImplicit
@@ -288,7 +292,7 @@ def opener : Tok → Option BinderInfo
 
 mutual
 /-- A term at the lowest precedence. -/
-def psTerm : Nat → List Name → List Tok → Option (Expr × List Tok)
+@[expose] def psTerm : Nat → List Name → List Tok → Option (Expr × List Tok)
   | 0, _, _ => none
   | f + 1, sc, ts =>
     match ts with
@@ -318,7 +322,7 @@ def psTerm : Nat → List Name → List Tok → Option (Expr × List Tok)
 
 /-- A `let` after its keyword, `nonDep` when the keyword is `have`: its name and type, `:=`, its
 value, `;` and its body. -/
-def psLet : Nat → List Name → Bool → List Tok → Option (Expr × List Tok)
+@[expose] def psLet : Nat → List Name → Bool → List Tok → Option (Expr × List Tok)
   | 0, _, _, _ => none
   | f + 1, sc, nd, ts =>
     match ts with
@@ -336,7 +340,7 @@ def psLet : Nat → List Name → Bool → List Tok → Option (Expr × List Tok
     | _ => none
 
 /-- A binder: its annotation, name and type. -/
-def psBinder : Nat → List Name → List Tok → Option (BinderInfo × Name × Expr × List Tok)
+@[expose] def psBinder : Nat → List Name → List Tok → Option (BinderInfo × Name × Expr × List Tok)
   | 0, _, _ => none
   | f + 1, sc, ts =>
     match ts with
@@ -351,7 +355,7 @@ def psBinder : Nat → List Name → List Tok → Option (BinderInfo × Name × 
     | _ => none
 
 /-- A term before `→`: a sort with its level, a natural number literal, or an application. -/
-def psSimple : Nat → List Name → List Tok → Option (Expr × List Tok)
+@[expose] def psSimple : Nat → List Name → List Tok → Option (Expr × List Tok)
   | 0, _, _ => none
   | f + 1, sc, ts =>
     match ts with
@@ -366,7 +370,7 @@ def psSimple : Nat → List Name → List Tok → Option (Expr × List Tok)
       psArgs f sc h ts
 
 /-- The arguments applied to `h`. -/
-def psArgs : Nat → List Name → Expr → List Tok → Option (Expr × List Tok)
+@[expose] def psArgs : Nat → List Name → Expr → List Tok → Option (Expr × List Tok)
   | 0, _, _, _ => none
   | f + 1, sc, h, ts =>
     if atomStart ts then do
@@ -376,7 +380,7 @@ def psArgs : Nat → List Name → Expr → List Tok → Option (Expr × List To
 
 /-- An argument: an identifier, a constant after `@`, `Prop`, a string literal, or a term in
 parentheses. An identifier is the innermost binder in scope of its name, or else a constant. -/
-def psAtom : Nat → List Name → List Tok → Option (Expr × List Tok)
+@[expose] def psAtom : Nat → List Name → List Tok → Option (Expr × List Tok)
   | 0, _, _ => none
   | f + 1, sc, ts =>
     match ts with

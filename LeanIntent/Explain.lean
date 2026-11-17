@@ -1,4 +1,6 @@
-import LeanIntent.Settled
+module
+
+public import LeanIntent.Settled
 
 /-!
 # Plain-word explanations of an intent record
@@ -32,6 +34,8 @@ authority traces back to a declared owner is decided by `LeanIntent.Trace`, and
 `LeanIntent.Confirmation` ties the answers and statuses a project keeps to its log.
 -/
 
+public section
+
 namespace LeanIntent
 
 universe u
@@ -54,7 +58,7 @@ structure Gloss where
 /-- The consequence `c` holds of the record `r` as it is shown: for an entailment, every model of
 `r` satisfies it; for a possibility, some model of `r` does. It names no verdict, since a consequence
 holds or not whoever answers it, and a rendering prints this definition for every consequence. -/
-def Consequence.HoldsOf (c : Consequence W) (r : IntentRecord W) : Prop :=
+@[expose] def Consequence.HoldsOf (c : Consequence W) (r : IntentRecord W) : Prop :=
   match c.kind with
   | .entailment => ∀ w, r.Meets w → c.holds w
   | .possibility => HasInstance fun w => r.Meets w ∧ c.holds w

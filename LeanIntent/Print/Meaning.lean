@@ -1,4 +1,6 @@
-import LeanIntent.Cone
+module
+
+public import LeanIntent.Cone
 
 /-!
 # The declarations a term's meaning reaches
@@ -46,6 +48,8 @@ fit in a 64-bit address space could ask of it, so it never returns a list it has
 reads them with `Lean.Environment.find?`.
 -/
 
+public section
+
 namespace LeanIntent.Print
 
 open Lean (Name ConstantInfo Expr)
@@ -54,7 +58,7 @@ open LeanIntent.Cone (declRefs mem_declRefs exprRefs mem_exprRefs Mentions Refer
 /-- What the declaration `ci`, named `c`, refers to in a meaning: the names
 `LeanIntent.Cone.declRefs` lists, except for a definition that `eqn` gives an equation for, which
 refers to the names its type and that equation mention, in place of those its value mentions. -/
-def refsVia (eqn : Name → Option Expr) (c : Name) : ConstantInfo → List Name
+@[expose] def refsVia (eqn : Name → Option Expr) (c : Name) : ConstantInfo → List Name
   | .defnInfo v =>
     match eqn c with
     | some t => exprRefs v.type (exprRefs t [])
@@ -106,12 +110,12 @@ inductive Gap where
   | unknown (c : Name)
   /-- More steps were needed than the fuel allows. -/
   | fuel
-  deriving Inhabited, Repr, DecidableEq
+  deriving @[expose] Inhabited, Repr, @[expose] DecidableEq
 
 /-- The closure: takes each name of `work` in turn, skips it when `stop` chooses it or `done`
 already holds it, and otherwise adds its declaration to `done` and the names it refers to to
 `work`. -/
-def collect (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr) (stop : Name → Bool) :
+@[expose] def collect (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr) (stop : Name → Bool) :
     Nat → List Name → List (Name × ConstantInfo) → Except Gap (List (Name × ConstantInfo))
   | 0, _, _ => .error .fuel
   | _ + 1, [], done => .ok done
@@ -124,7 +128,7 @@ def collect (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr)
 
 /-- The declarations reached from `roots`, in the order they are reached, each with its name; or
 why there are none. -/
-def meaning (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr) (stop : Name → Bool)
+@[expose] def meaning (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr) (stop : Name → Bool)
     (roots : List Name) : Except Gap (List (Name × ConstantInfo)) :=
   (collect lookup eqn stop (2 ^ 64) roots []).map List.reverse
 

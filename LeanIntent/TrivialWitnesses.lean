@@ -1,5 +1,7 @@
-import LeanIntent.Pairs
-import LeanIntent.Clocks
+module
+
+public import LeanIntent.Pairs
+public import LeanIntent.Clocks
 
 /-!
 # The trivial witnesses of a precondition-postcondition pair
@@ -99,6 +101,8 @@ exactly when no trivial witness meets the pair (`reported_eq_nil_iff`).
   `.table` reports such a constant (`Witness.table_meets_of_met`).
 -/
 
+public section
+
 namespace LeanIntent
 
 open Sig
@@ -109,7 +113,7 @@ open Sig
 zero: at position zero, it is the same function of the arguments after it whatever that argument is;
 at a later position, the function of the rest that each value of the first argument gives does not
 read the argument at the position before. No function reads a position past its last argument. -/
-def Sig.Fn.Ignores {b : Ty} : {as : List Ty} → Fn b as → Nat → Prop
+@[expose] def Sig.Fn.Ignores {b : Ty} : {as : List Ty} → Fn b as → Nat → Prop
   | [], _, _ => True
   | _ :: _, f, 0 => ∀ x y, f x = f y
   | _ :: _, f, i + 1 => ∀ x, Sig.Fn.Ignores (f x) i
@@ -146,21 +150,21 @@ namespace Sig
 /-- The members that do not read one argument, at each input: one for each argument of a function of
 at least two, and none otherwise, since a function of one argument that does not read it is a
 constant, which `.table` holds. -/
-def blinds (σ : Sig) : List (Witness σ) :=
+@[expose] def blinds (σ : Sig) : List (Witness σ) :=
   if 2 ≤ σ.args.length then (List.finRange σ.args.length).map .blind else []
 
 /-- The clock parts the class reads as clocks: each whose reading does not determine the arguments,
 and each the project declared its clock by the type `LeanIntent.Clock α` (`ArgClock.InClock`). -/
-def clocks (σ : Sig) : List (ArgClock σ.args) :=
+@[expose] def clocks (σ : Sig) : List (ArgClock σ.args) :=
   (ArgClock.all σ.args).filter fun k => !k.determines || decide k.InClock
 
 /-- The scripts of timed actions, at each input: one member for each clock part `clocks` lists. -/
-def timeds (σ : Sig) : List (Witness σ) := σ.clocks.map .timed
+@[expose] def timeds (σ : Sig) : List (Witness σ) := σ.clocks.map .timed
 
 /-- The trivial witnesses of a pair about subjects of the type `σ` denotes: any subject, a table,
 the members that do not read one argument, one degenerate subject at every input for each member
 of the degenerate class, and the scripts of timed actions on each clock. -/
-def witnesses (σ : Sig) : List (Witness σ) :=
+@[expose] def witnesses (σ : Sig) : List (Witness σ) :=
   .vacuous :: .table :: (σ.blinds ++ σ.degenerate.map .fixed ++ σ.timeds)
 
 /-- The clock parts the class reads as clocks, apart from the list that computes them: those whose
@@ -226,7 +230,7 @@ end Sig
 /-- The trivial witnesses of a pair about subjects of the type `W`, by their descriptions: the class
 of `W`'s code. It takes no pair, so it is the same for every pair about `W`, whatever its input
 type. -/
-def witnesses (W : Type) [c : Covered W] : List (Witness c.sig) := c.sig.witnesses
+@[expose] def witnesses (W : Type) [c : Covered W] : List (Witness c.sig) := c.sig.witnesses
 
 /-! ## What a member meets -/
 
@@ -237,13 +241,13 @@ variable {W : Type} [c : Covered W]
 /-- `w` is a constant subject: the function that returns one value of the output type whatever its
 arguments, carried back to `W` (`Degenerate.constantSubject`). For a plain value, every subject is
 one. -/
-def Witness.Constant (w : W) : Prop := ∃ v, w = Degenerate.constantSubject v
+@[expose] def Witness.Constant (w : W) : Prop := ∃ v, w = Degenerate.constantSubject v
 
 /-- `w` does not read its argument at position `i`: the function of `W`'s code that the isomorphism
 through which the code stands for `W` takes it to does not read it (`Sig.Fn.Ignores`). The
 isomorphism takes each argument through a bijection of its own type, so this is the subject itself
 not reading that argument. -/
-def Witness.BlindTo (i : Nat) (w : W) : Prop := (c.iso.to w).Ignores i
+@[expose] def Witness.BlindTo (i : Nat) (w : W) : Prop := (c.iso.to w).Ignores i
 
 /-- `w` reads only the clock part `k` of its arguments: the function of `W`'s code that the
 isomorphism takes it to reads only `k` (`Sig.Fn.ReadsOnly`). The isomorphism takes each component
@@ -251,11 +255,11 @@ of an argument through a bijection of its own type, a list's length and an array
 themselves, a declared type's fields to its representation's, and a recursive type's constructors,
 their fields and their children to its trees' nodes, data and children, and so the length of a type
 shaped as a list to its tree's, so this is the subject itself reading only that part. -/
-def Witness.TimedBy (k : ArgClock c.sig.args) (w : W) : Prop := (c.iso.to w).ReadsOnly k
+@[expose] def Witness.TimedBy (k : ArgClock c.sig.args) (w : W) : Prop := (c.iso.to w).ReadsOnly k
 
 /-- The script of timed actions on the clock part `k` that takes the action `s n` whenever `k` reads
 `n`, carried back to `W` (`ArgClock.script`). -/
-def Witness.script (k : ArgClock c.sig.args) (s : k.Out → c.sig.out.denote) : W :=
+@[expose] def Witness.script (k : ArgClock c.sig.args) (s : k.Out → c.sig.out.denote) : W :=
   c.iso.inv (k.script s)
 
 /-- The member `t` meets the pair `q`: for `.vacuous`, every subject meets it; for `.table`, at each
@@ -263,7 +267,7 @@ input the precondition admits a constant subject meets the postcondition; for `.
 such input a subject that does not read its argument at `i` does; for `.fixed d`, one subject `d`
 stands for meets the pair at every input; and for `.timed k`, at each input the precondition admits
 a subject that reads only the clock part `k` meets the postcondition. -/
-def Witness.Meets (t : Witness c.sig) (q : Pair W) : Prop :=
+@[expose] def Witness.Meets (t : Witness c.sig) (q : Pair W) : Prop :=
   match t with
   | .vacuous => ∀ w, q.Met w
   | .table => ∀ x, q.pre x → ∃ w, Witness.Constant w ∧ q.post x w
@@ -525,7 +529,7 @@ meets it; one subject of a member of the degenerate class, offered at every inpu
 a clock part of the arguments whose reading does not determine them or that is a
 `LeanIntent.Clock α`, a table of scripts of timed actions on it, offering at each input the script
 that takes, whenever the part reads `n`, the action it gives that input and `n`, meets it. -/
-def Pair.MetTrivially (q : Pair W) : Prop :=
+@[expose] def Pair.MetTrivially (q : Pair W) : Prop :=
   (∀ s : q.Input → W, ∀ x, q.pre x → q.post x (s x)) ∨
     (∃ tab : q.Input → c.sig.out.denote,
       ∀ x, q.pre x → q.post x (Degenerate.constantSubject (tab x))) ∨
@@ -565,13 +569,13 @@ variable {W : Type} [c : Covered W]
 
 /-- The goal that `b` is the verdict on the member `t` for the pair `q`: that `t` meets `q` when `b`
 is `true`, and that it does not when `b` is `false`. -/
-def witnessGoal (q : Pair W) (t : Witness c.sig) : Bool → Prop
+@[expose] def witnessGoal (q : Pair W) (t : Witness c.sig) : Bool → Prop
   | true => t.Meets q
   | false => ¬ t.Meets q
 
 /-- The goals that `bs` are, in order, the verdicts on the members `ts` for `q`, and the goal
 `False` when the two lists differ in length. -/
-def witnessGoals (q : Pair W) : List (Witness c.sig) → List Bool → List Prop
+@[expose] def witnessGoals (q : Pair W) : List (Witness c.sig) → List Bool → List Prop
   | [], [] => []
   | t :: ts, b :: bs => witnessGoal q t b :: witnessGoals q ts bs
   | _, _ => [False]
@@ -580,16 +584,16 @@ def witnessGoals (q : Pair W) : List (Witness c.sig) → List Bool → List Prop
 witnesses of `W` for the pair `q`; and the goal `False` when an argument of `W` holds a
 `LeanIntent.Clock` where no clock part reaches it (`Sig.strayClock`), a declaration of a clock the
 class cannot read, so that no verdict about such a type passes with the declaration ignored. -/
-def witnessVerdicts (q : Pair W) (bs : List Bool) : List Prop :=
+@[expose] def witnessVerdicts (q : Pair W) (bs : List Bool) : List Prop :=
   if c.sig.strayClock then [False] else witnessGoals q (witnesses W) bs
 
 /-- `bs` are the verdicts, in order, on the trivial witnesses of `W` for the pair `q`. -/
-def WitnessVerdicts (q : Pair W) (bs : List Bool) : Prop := Goals (witnessVerdicts q bs)
+@[expose] def WitnessVerdicts (q : Pair W) (bs : List Bool) : Prop := Goals (witnessVerdicts q bs)
 
 /-- What the trivial-witness check asks, written apart from its former: no argument of `W` holds a
 `LeanIntent.Clock` the class cannot read, and one verdict for each member of the class, `true`
 exactly when the member at the same position meets the pair. -/
-def intendedWitnessVerdicts (q : Pair W) (bs : List Bool) : Prop :=
+@[expose] def intendedWitnessVerdicts (q : Pair W) (bs : List Bool) : Prop :=
   c.sig.strayClock = false ∧ bs.length = (witnesses W).length ∧
     ∀ (i : Nat) (hb : i < bs.length) (hd : i < (witnesses W).length),
       (bs[i] = true ↔ (witnesses W)[i].Meets q)
@@ -642,13 +646,13 @@ theorem goals_of_witnessVerdicts {q : Pair W} {bs : List Bool} (h : WitnessVerdi
   · exact h
 
 /-- The members among `ts` whose verdict in `bs` is `true`. -/
-def reportedGo {σ : Sig} : List (Witness σ) → List Bool → List (Witness σ)
+@[expose] def reportedGo {σ : Sig} : List (Witness σ) → List Bool → List (Witness σ)
   | t :: ts, true :: bs => t :: reportedGo ts bs
   | _ :: ts, false :: bs => reportedGo ts bs
   | _, _ => []
 
 /-- The members of the class of `W` whose verdict in `bs` is that they meet the pair. -/
-def reported (W : Type) [c : Covered W] (bs : List Bool) : List (Witness c.sig) :=
+@[expose] def reported (W : Type) [c : Covered W] (bs : List Bool) : List (Witness c.sig) :=
   reportedGo (witnesses W) bs
 
 theorem mem_reportedGo (q : Pair W) (t : Witness c.sig) : (ts : List (Witness c.sig)) →

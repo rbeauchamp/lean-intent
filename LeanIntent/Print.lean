@@ -1,5 +1,7 @@
-import LeanIntent.Print.Printable
-import LeanIntent.Print.Canon
+module
+
+public import LeanIntent.Print.Printable
+public import LeanIntent.Print.Canon
 
 /-!
 # An audited printer for Lean terms
@@ -22,16 +24,18 @@ written without `@` when no binder in scope has their name, and `esc`, further n
 write escaped between `«` and `»`, such as those that are tokens of the reader's grammar.
 -/
 
+public section
+
 namespace LeanIntent.Print
 
 open Lean (Name Level Expr BinderInfo)
 
 /-- `e` printed as text, or `none` when the printer refuses it. -/
-def print (bare : Name → Bool) (esc : String → Bool) (e : Expr) : Option String :=
+@[expose] def print (bare : Name → Bool) (esc : String → Bool) (e : Expr) : Option String :=
   (pr bare [] e .term).map fun ts => String.ofList (render esc ts)
 
 /-- The term a text is, by the printer's grammar, or `none` when it is not one. -/
-def parse (s : String) : Option Expr := do
+@[expose] def parse (s : String) : Option Expr := do
   let ts ← lex s.toList
   let (e, rest) ← psTerm (4 * ts.length + 3) [] ts
   if rest.isEmpty then some e else none
@@ -39,7 +43,7 @@ def parse (s : String) : Option Expr := do
 /-! ## The printer writes only tokens the lexer reads back -/
 
 /-- Every token of a list can be written and read back. -/
-def WFs (ts : List Tok) : Prop := ∀ t ∈ ts, t.WF
+@[expose] def WFs (ts : List Tok) : Prop := ∀ t ∈ ts, t.WF
 
 theorem wfs_nil : WFs [] := fun _ h => nomatch h
 

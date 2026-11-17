@@ -1,6 +1,8 @@
-import Lean
-import LeanIntent.Confirmation
-import LeanIntent.Render
+module
+
+public import Lean
+public import LeanIntent.Confirmation
+public import LeanIntent.Render.Text
 
 /-!
 # Reading a project's confirmations from the finished build
@@ -53,6 +55,8 @@ question of a deliverable, with the two texts it must hold; a project commits th
 of its log.
 -/
 
+public section
+
 namespace LeanIntent.Confirmation.Read
 
 open Lean Meta LeanIntent.Render
@@ -60,7 +64,7 @@ open Lean Meta LeanIntent.Render
 /-- Whether a discovered constant's safety permits relying on the proofs it holds. Definitions
 must be `safe`: `ConstantInfo.isUnsafe` alone also admits `partial` definitions. Other kinds retain
 Lean's unsafe flag check; opaque constants and axioms still fail when their values are read. -/
-def proofSafe : ConstantInfo → Bool
+@[expose] def proofSafe : ConstantInfo → Bool
   | .defnInfo v =>
     match v.safety with
     | .safe => true

@@ -1,4 +1,6 @@
-import Lake.Config.Package
+module
+
+public import Lake.Config.Package
 
 /-!
 # The executable targets a Lake package declares
@@ -11,13 +13,15 @@ and the root module Lake builds it from. The package is the one a gate loads wit
 this module only reads its configuration, and starts no process.
 -/
 
+public section
+
 namespace LeanIntent.Execution
 
 /-- **The executables `pkg` declares**: each `lean_exe` target of the package, by its name and its
 root module, as Lake's configuration holds them (`Lake.Package.targetDecls`, of which
 `Lake.ConfigDecl.leanExeConfig?` gives the executables' configurations, whose `root` defaults to the
 target's name). -/
-def lakeExecutables (pkg : _root_.Lake.Package) : Array (Lean.Name × Lean.Name) :=
+@[expose] def lakeExecutables (pkg : _root_.Lake.Package) : Array (Lean.Name × Lean.Name) :=
   pkg.targetDecls.filterMap fun t => t.leanExeConfig?.map fun cfg => (t.name, cfg.root)
 
 end LeanIntent.Execution

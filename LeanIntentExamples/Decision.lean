@@ -1,4 +1,6 @@
-import LeanIntent.Degenerate
+module
+
+public import LeanIntent.Degenerate
 
 /-!
 # A decision procedure that may always answer no
@@ -12,25 +14,27 @@ the check reports it (`soundOnly_verdicts`). The record that also asks that ever
 answered `true`, `decides`, is met by neither (`decides_verdicts`).
 -/
 
+public section
+
 namespace LeanIntentExamples.Decision
 
 open LeanIntent
 
 /-- Every `true` answer is right. -/
-def soundClause : Clause (Nat → Bool) := ⟨"sound", fun f => ∀ n, f n = true → n % 2 = 0⟩
+@[expose] def soundClause : Clause (Nat → Bool) := ⟨"sound", fun f => ∀ n, f n = true → n % 2 = 0⟩
 
 /-- Every even number is answered `true`. -/
-def completeClause : Clause (Nat → Bool) := ⟨"complete", fun f => ∀ n, n % 2 = 0 → f n = true⟩
+@[expose] def completeClause : Clause (Nat → Bool) := ⟨"complete", fun f => ∀ n, n % 2 = 0 → f n = true⟩
 
 /-- The record that asks only for sound answers. -/
-def soundOnly : IntentRecord (Nat → Bool) where
+@[expose] def soundOnly : IntentRecord (Nat → Bool) where
   shape := .function _ _
   dom := []
   props := [soundClause]
   vocab := []
 
 /-- The record that asks for sound and complete answers. -/
-def decides : IntentRecord (Nat → Bool) where
+@[expose] def decides : IntentRecord (Nat → Bool) where
   shape := .function _ _
   dom := []
   props := [soundClause, completeClause]

@@ -1,5 +1,8 @@
-import LeanIntent.Answers
-import LeanIntent.Codec.Text
+module
+
+public import LeanIntent.Answers
+public import LeanIntent.Codec.Text
+import all Init.Data.String.Defs
 
 /-!
 # Statements: the owners' log, one text each
@@ -36,7 +39,12 @@ What this module does not decide: whether a statement's authority traces back to
 (lean-intent #19), and whether an answer's text has changed since it was given, which
 `LeanIntent.Confirmation` decides from the `revision` and `predicate` fields, which hold what was
 shown. It reads the text of each statement, and no more.
+
+The module imports `Init.Data.String.Defs` with `import all`: `fromUTF8?_eq_some_iff` unfolds Lean's
+`String.fromUTF8` and `String.toUTF8`, whose bodies that module does not expose to a `module` file.
 -/
+
+public section
 
 namespace LeanIntent
 
@@ -44,13 +52,13 @@ open Codec
 
 /-- The characters of an identifier: the ASCII letters and digits, and `.`, `_`, `-`, `@`, `+` and
 `/`. None is a character OpenSSH's allowed-signers format treats as a pattern or separator. -/
-def identChar (c : Char) : Bool :=
+@[expose] def identChar (c : Char) : Bool :=
   let n := c.toNat
   (48 ≤ n && n ≤ 57) || (65 ≤ n && n ≤ 90) || (97 ≤ n && n ≤ 122) ||
     n == 46 || n == 95 || n == 45 || n == 64 || n == 43 || n == 47
 
 /-- The characters of base64: the ASCII letters and digits, and `+`, `/` and `=`. -/
-def base64Char (c : Char) : Bool :=
+@[expose] def base64Char (c : Char) : Bool :=
   let n := c.toNat
   (48 ≤ n && n ≤ 57) || (65 ≤ n && n ≤ 90) || (97 ≤ n && n ≤ 122) || n == 43 || n == 47 || n == 61
 
@@ -66,7 +74,7 @@ instance {p : Char → Bool} : DecidableEq (Word p) := fun a b =>
 
 /-- The word `s`, for a string literal `s`: Lean decides that it is a word of `p` by writing out its
 characters. -/
-def Word.of {p : Char → Bool} (s : String)
+@[expose] def Word.of {p : Char → Bool} (s : String)
     (h : s.toList ≠ [] ∧ s.toList.all p = true := by simp only [String.reduceToList]; decide) :
     Word p :=
   ⟨s, h⟩
@@ -91,10 +99,10 @@ inductive KeyAlgorithm where
   | ecdsaP256Sk
   /-- `ssh-rsa`. -/
   | rsa
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- The name OpenSSH gives the algorithm, then the space that ends it in a public key line. -/
-def KeyAlgorithm.keyword : KeyAlgorithm → List Char
+@[expose] def KeyAlgorithm.keyword : KeyAlgorithm → List Char
   | .ed25519 => chars!"ssh-ed25519 "
   | .ed25519Sk => chars!"sk-ssh-ed25519@openssh.com "
   | .ecdsaP256 => chars!"ecdsa-sha2-nistp256 "
@@ -111,7 +119,7 @@ structure PublicKey where
   algorithm : KeyAlgorithm
   /-- The key's data, in base64. -/
   data : Word base64Char
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- A principal: a person or an agent, by name, with the public keys it signs with, if any. -/
 structure Principal where
@@ -119,7 +127,7 @@ structure Principal where
   name : Ident
   /-- The public keys of the principal; empty for a principal that does not sign. -/
   keys : List PublicKey
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- Who makes a statement: a principal, acting as an owner, or under the delegation named. -/
 structure Authority where
@@ -127,15 +135,15 @@ structure Authority where
   principal : Ident
   /-- The id of the delegation the principal acts under; `none` when it acts as an owner. -/
   delegation : Option Ident
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- The number of days of a month of the Gregorian calendar. -/
-def Date.daysIn (year month : Nat) : Nat :=
+@[expose] def Date.daysIn (year month : Nat) : Nat :=
   if month = 2 then (if year % 4 = 0 ∧ (year % 100 ≠ 0 ∨ year % 400 = 0) then 29 else 28)
   else if month = 4 ∨ month = 6 ∨ month = 9 ∨ month = 11 then 30 else 31
 
 /-- `year`, `month` and `day` name a day of the Gregorian calendar. -/
-def Date.isValid (year month day : Nat) : Bool :=
+@[expose] def Date.isValid (year month day : Nat) : Bool :=
   1 ≤ month && month ≤ 12 && 1 ≤ day && day ≤ Date.daysIn year month
 
 /-- A day of the Gregorian calendar, printed as ISO 8601 writes it, `YYYY-MM-DD`. -/
@@ -148,7 +156,7 @@ structure Date where
   day : Nat
   /-- The three name a day. -/
   valid : Date.isValid year month day = true
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- Where a statement came from: the owner's words, as written, or a reference to where they are
 kept. -/
@@ -157,7 +165,7 @@ inductive Source where
   | words (text : String)
   /-- Where the owner's words are kept, such as a link to a comment or a message. -/
   | reference (location : String)
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- The intent records a delegation covers. -/
 inductive Records where
@@ -165,7 +173,7 @@ inductive Records where
   | all
   /-- The intent records named. -/
   | only (names : List String)
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- What a delegation lets its delegate do: answer for which records, and which acts. -/
 structure Scope where
@@ -177,10 +185,10 @@ structure Scope where
   decline : Bool
   /-- The delegate may retract an answer. -/
   retract : Bool
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
-deriving instance DecidableEq for Consequence.Kind
-deriving instance DecidableEq for Verdict
+deriving instance @[expose] DecidableEq for Consequence.Kind
+deriving instance @[expose] DecidableEq for Verdict
 
 namespace Statement
 
@@ -193,7 +201,7 @@ structure Owners where
   principals : List Principal
   /-- How many owners must approve the next declaration, if the project sets a number. -/
   threshold : Option Nat
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- A delegation: `delegator` lets `delegate` act within `scope`, and, if `mayPassOn`, delegate
 within it in turn. -/
@@ -206,7 +214,7 @@ structure Delegation where
   scope : Scope
   /-- Whether the delegate may pass it on. -/
   mayPassOn : Bool
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- An answer to one consequence of one revision of an intent record. -/
 structure Answer where
@@ -224,7 +232,7 @@ structure Answer where
   predicate : String
   /-- The answer. -/
   verdict : Verdict
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- A retraction of the answer stated by the statement named. -/
 structure Retraction where
@@ -232,7 +240,7 @@ structure Retraction where
   author : Authority
   /-- The id of the answer's statement. -/
   answer : Ident
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- A revocation of the delegation stated by the statement named. -/
 structure Revocation where
@@ -240,7 +248,7 @@ structure Revocation where
   author : Authority
   /-- The id of the delegation's statement. -/
   delegation : Ident
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- Whose words an intent record's source is, when the owner adopted them from someone else: who
 wrote them, what that writer had read, the words as adopted, and who adopted them. The statement's
@@ -256,7 +264,7 @@ structure Origin where
   hadRead : String
   /-- The words, exactly as adopted. -/
   words : String
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- What an external tool did for a consequence that rests on it, or what is still open. -/
 inductive ToolOutcome where
@@ -265,7 +273,7 @@ inductive ToolOutcome where
   | measured (version configuration result cost : String)
   /-- What is not measured, and what depends on it. -/
   | openItem (item dependents : String)
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- A consequence's rest on an external tool. -/
 structure ToolBasis where
@@ -279,7 +287,7 @@ structure ToolBasis where
   tool : String
   /-- What it did, or what is open. -/
   outcome : ToolOutcome
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- What a statement states, one of the seven kinds. -/
 inductive Body where
@@ -297,7 +305,7 @@ inductive Body where
   | origin (o : Origin)
   /-- A consequence's rest on an external tool. -/
   | tool (t : ToolBasis)
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 end Statement
 
@@ -314,7 +322,7 @@ structure Statement where
   source : Source
   /-- What it states. -/
   body : Statement.Body
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-! ## The grammar -/
 
@@ -335,22 +343,22 @@ theorem base64Char_plain (c : Char) (h : base64Char c = true) : concealing c = f
   omega
 
 /-- A word of `p`'s characters, then `term`. -/
-def word (p : Char → Bool) (hp : ∀ c, p c = true → concealing c = false) (term : Char)
+@[expose] def word (p : Char → Bool) (hp : ∀ c, p c = true → concealing c = false) (term : Char)
     (ht : p term = false) (hterm : Plain [term] := by decide) : Codec (Word p) :=
   map (token p term ht hp hterm) (fun w => ⟨w.toString.toList, w.valid.2⟩)
     (fun l => if h : l.1 ≠ [] then some ⟨String.ofList l.1, by simp [h, l.2]⟩ else none)
     (fun w => by obtain ⟨w, h⟩ := w; simp [h.1, String.ofList_toList])
 
 /-- An identifier on the rest of a line. -/
-def ident : Codec Ident := word identChar identChar_plain '\n' (by decide)
+@[expose] def ident : Codec Ident := word identChar identChar_plain '\n' (by decide)
 
 /-- `yes` or `no` on the rest of a line. -/
-def yesNo : Codec Bool :=
+@[expose] def yesNo : Codec Bool :=
   keywords (fun b => if b then chars!"yes\n" else chars!"no\n") [false, true]
     (by intro b; cases b <;> decide) (by decide) (by intro b; cases b <;> decide)
 
 /-- A public key on a line of its own: `key`, its algorithm and its data. -/
-def publicKey : Codec PublicKey :=
+@[expose] def publicKey : Codec PublicKey :=
   map (keyed chars!"key " (by decide)
       ((keywords KeyAlgorithm.keyword
         [.ed25519, .ed25519Sk, .ecdsaP256, .ecdsaP384, .ecdsaP521, .ecdsaP256Sk, .rsa]
@@ -359,19 +367,19 @@ def publicKey : Codec PublicKey :=
     (fun k => (k.algorithm, k.data)) (fun (a, d) => some ⟨a, d⟩) (fun _ => rfl)
 
 /-- A principal after the fixed text `role`: its name, then its keys. -/
-def principal (role : List Char) (hr : Plain role := by decide) : Codec Principal :=
+@[expose] def principal (role : List Char) (hr : Plain role := by decide) : Codec Principal :=
   map (keyed role hr (ident.seq (keyed chars!"keys " (by decide) (list publicKey))))
     (fun p => (p.name, p.keys)) (fun (n, k) => some ⟨n, k⟩) (fun _ => rfl)
 
 /-- Who makes a statement: `by` and a principal, then `as owner`, or `under` and a delegation. -/
-def authority : Codec Authority :=
+@[expose] def authority : Codec Authority :=
   map (keyed chars!"by " (by decide)
       (ident.seq
         (option chars!"as owner\n" chars!"under " (by decide) (by decide) (by decide) ident)))
     (fun a => (a.principal, a.delegation)) (fun (p, d) => some ⟨p, d⟩) (fun _ => rfl)
 
 /-- `date` and a day, as `YYYY-MM-DD`. -/
-def date : Codec Date :=
+@[expose] def date : Codec Date :=
   map (keyed chars!"date " (by decide)
       ((nat 4 '-' (by decide)).seq ((nat 2 '-' (by decide)).seq (nat 2 '\n' (by decide)))))
     (fun d => (d.year, d.month, d.day))
@@ -379,14 +387,14 @@ def date : Codec Date :=
     (fun d => by obtain ⟨y, m, d, h⟩ := d; simp [h])
 
 /-- `words` and the owner's words as text, or `reference` and a location on the rest of the line. -/
-def source : Codec Source :=
+@[expose] def source : Codec Source :=
   map (sum chars!"words " chars!"reference " (by decide) (by decide) (by decide) text line)
     (fun | .words t => .inl t | .reference r => .inr r)
     (fun | .inl t => some (.words t) | .inr r => some (.reference r))
     (fun s => by cases s <;> rfl)
 
 /-- The records of a scope: `all records`, or `records` and a list of `record` lines. -/
-def records : Codec Records :=
+@[expose] def records : Codec Records :=
   map (option chars!"all records\n" chars!"records " (by decide) (by decide) (by decide)
       (list (keyed chars!"record " (by decide) line)))
     (fun | .all => none | .only ns => some ns)
@@ -394,7 +402,7 @@ def records : Codec Records :=
     (fun r => by cases r <;> rfl)
 
 /-- A scope: its records, then whether the delegate may confirm, decline and retract. -/
-def scope : Codec Scope :=
+@[expose] def scope : Codec Scope :=
   map (records.seq ((keyed chars!"may confirm " (by decide) yesNo).seq
       ((keyed chars!"may decline " (by decide) yesNo).seq
         (keyed chars!"may retract " (by decide) yesNo))))
@@ -403,28 +411,28 @@ def scope : Codec Scope :=
 
 /-- An owners declaration: `principals` and a list of `principal` entries, then `no threshold`, or
 `threshold` and a number. -/
-def owners : Codec Statement.Owners :=
+@[expose] def owners : Codec Statement.Owners :=
   map ((keyed chars!"principals " (by decide) (list (principal chars!"principal "))).seq
       (option chars!"no threshold\n" chars!"threshold " (by decide) (by decide) (by decide)
         (nat 0 '\n' (by decide))))
     (fun o => (o.principals, o.threshold)) (fun (p, t) => some ⟨p, t⟩) (fun _ => rfl)
 
 /-- A delegation: who grants it, the `delegate`, the scope, and whether it may be passed on. -/
-def delegation : Codec Statement.Delegation :=
+@[expose] def delegation : Codec Statement.Delegation :=
   map (authority.seq ((principal chars!"delegate ").seq
       (scope.seq (keyed chars!"may pass on " (by decide) yesNo))))
     (fun d => (d.delegator, d.delegate, d.scope, d.mayPassOn))
     (fun (a, p, s, m) => some ⟨a, p, s, m⟩) (fun _ => rfl)
 
 /-- The kind of a consequence: `shown as entailment` or `shown as possibility`. -/
-def consequenceKind : Codec Consequence.Kind :=
+@[expose] def consequenceKind : Codec Consequence.Kind :=
   keywords (fun | .entailment => chars!"shown as entailment\n"
                 | .possibility => chars!"shown as possibility\n")
     [.entailment, .possibility] (by intro k; cases k <;> decide) (by decide)
     (by intro k; cases k <;> decide)
 
 /-- A verdict: `verdict confirmed` or `verdict declined`. -/
-def verdict : Codec Verdict :=
+@[expose] def verdict : Codec Verdict :=
   keywords (fun | .confirmed => chars!"verdict confirmed\n"
                 | .declined => chars!"verdict declined\n")
     [.confirmed, .declined] (by intro v; cases v <;> decide) (by decide)
@@ -432,7 +440,7 @@ def verdict : Codec Verdict :=
 
 /-- An answer: who answers, the `record`, its `revision`, the `consequence`, its kind, its
 `predicate`, and the verdict. -/
-def answer : Codec Statement.Answer :=
+@[expose] def answer : Codec Statement.Answer :=
   map (authority.seq ((keyed chars!"record " (by decide) line).seq
       ((keyed chars!"revision " (by decide) text).seq
       ((keyed chars!"consequence " (by decide) line).seq
@@ -441,18 +449,18 @@ def answer : Codec Statement.Answer :=
     (fun (a, r, v, c, k, p, d) => some ⟨a, r, v, c, k, p, d⟩) (fun _ => rfl)
 
 /-- A retraction: who retracts, then `retracts` and the answer's statement id. -/
-def retraction : Codec Statement.Retraction :=
+@[expose] def retraction : Codec Statement.Retraction :=
   map (authority.seq (keyed chars!"retracts " (by decide) ident))
     (fun r => (r.author, r.answer)) (fun (a, i) => some ⟨a, i⟩) (fun _ => rfl)
 
 /-- A revocation: who revokes, then `revokes` and the delegation's statement id. -/
-def revocation : Codec Statement.Revocation :=
+@[expose] def revocation : Codec Statement.Revocation :=
   map (authority.seq (keyed chars!"revokes " (by decide) ident))
     (fun r => (r.author, r.delegation)) (fun (a, i) => some ⟨a, i⟩) (fun _ => rfl)
 
 /-- An origin: who adopts the words, the `record`, who `wrote` them, what they `had read`, and the
 `words`. -/
-def origin : Codec Statement.Origin :=
+@[expose] def origin : Codec Statement.Origin :=
   map (authority.seq ((keyed chars!"record " (by decide) line).seq
       ((keyed chars!"written by " (by decide) line).seq
       ((keyed chars!"had read " (by decide) text).seq (keyed chars!"adopted " (by decide) text)))))
@@ -461,7 +469,7 @@ def origin : Codec Statement.Origin :=
 
 /-- What a tool did: `measured` and its version, configuration, result and cost, or `open item` and
 what depends on it. -/
-def toolOutcome : Codec Statement.ToolOutcome :=
+@[expose] def toolOutcome : Codec Statement.ToolOutcome :=
   map (sum chars!"measured\n" chars!"open item " (by decide) (by decide) (by decide)
       ((keyed chars!"version " (by decide) line).seq
         ((keyed chars!"configuration " (by decide) text).seq
@@ -473,7 +481,7 @@ def toolOutcome : Codec Statement.ToolOutcome :=
 
 /-- A consequence's rest on a tool: who says so, the `record`, the `consequence`, the `tool`, and what
 it did. -/
-def tool : Codec Statement.ToolBasis :=
+@[expose] def tool : Codec Statement.ToolBasis :=
   map (authority.seq ((keyed chars!"record " (by decide) line).seq
       ((keyed chars!"consequence " (by decide) line).seq
       ((keyed chars!"tool " (by decide) line).seq toolOutcome))))
@@ -496,10 +504,10 @@ inductive Kind where
   | origin
   /-- A consequence's rest on a tool. -/
   | tool
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- What a statement of each kind states. -/
-def Kind.Body : Kind → Type
+@[expose] def Kind.Body : Kind → Type
   | .owners => Statement.Owners
   | .delegation => Statement.Delegation
   | .answer => Statement.Answer
@@ -509,7 +517,7 @@ def Kind.Body : Kind → Type
   | .tool => Statement.ToolBasis
 
 /-- The line that names a statement's kind. -/
-def kind : Codec Kind :=
+@[expose] def kind : Codec Kind :=
   keywords (fun | .owners => chars!"kind owners\n" | .delegation => chars!"kind delegation\n"
                 | .answer => chars!"kind answer\n" | .retraction => chars!"kind retraction\n"
                 | .revocation => chars!"kind revocation\n" | .origin => chars!"kind origin\n"
@@ -519,7 +527,7 @@ def kind : Codec Kind :=
     (by decide) (by intro k; cases k <;> decide)
 
 /-- The codec of what a statement of kind `k` states. -/
-def body : (k : Kind) → Codec k.Body
+@[expose] def body : (k : Kind) → Codec k.Body
   | .owners => owners
   | .delegation => delegation
   | .answer => answer
@@ -529,7 +537,7 @@ def body : (k : Kind) → Codec k.Body
   | .tool => tool
 
 /-- The fields every statement has, after its kind: `project`, `id`, `date` and its source. -/
-def header : Codec (Ident × Ident × Date × Source) :=
+@[expose] def header : Codec (Ident × Ident × Date × Source) :=
   (keyed chars!"project " (by decide) ident).seq ((keyed chars!"id " (by decide) ident).seq
     (date.seq source))
 
@@ -539,7 +547,7 @@ namespace Statement
 
 /-- A statement: the line `lean-intent statement 1`, which names the grammar's version, its kind,
 the fields every statement has, and what it states. -/
-def codec : Codec Statement :=
+@[expose] def codec : Codec Statement :=
   map (keyed chars!"lean-intent statement 1\n" (by decide)
       (Grammar.kind.dep (γ := fun k => (Ident × Ident × Date × Source) × k.Body)
         fun k => Grammar.header.seq (Grammar.body k)))
@@ -564,10 +572,10 @@ def codec : Codec Statement :=
 /-! ## Printing and parsing -/
 
 /-- The text of a statement. -/
-def print (s : Statement) : String := String.ofList (codec.print s)
+@[expose] def print (s : Statement) : String := String.ofList (codec.print s)
 
 /-- The statement whose text is `t`, or `none` when `print` writes no statement as `t`. -/
-def parse (t : String) : Option Statement := codec.read t.toList
+@[expose] def parse (t : String) : Option Statement := codec.read t.toList
 
 /-- `parse` accepts exactly the texts `print` writes, and reads each as the statement printed. -/
 theorem parse_eq_some_iff (t : String) (s : Statement) : parse t = some s ↔ print s = t := by
@@ -587,7 +595,7 @@ theorem print_injective {s s' : Statement} (h : print s = print s') : s = s' := 
   exact (Option.some.inj this).symm
 
 /-- The statement whose text's UTF-8 encoding is `b`, or `none` when there is none. -/
-def parseUTF8 (b : ByteArray) : Option Statement := (String.fromUTF8? b).bind parse
+@[expose] def parseUTF8 (b : ByteArray) : Option Statement := (String.fromUTF8? b).bind parse
 
 theorem fromUTF8?_eq_some_iff (b : ByteArray) (t : String) :
     String.fromUTF8? b = some t ↔ t.toUTF8 = b := by

@@ -1,4 +1,6 @@
-import LeanIntent.Obligations
+module
+
+public import LeanIntent.Obligations
 
 /-!
 # The owner's answers, kept by every later revision
@@ -73,6 +75,8 @@ What this module does not establish:
   value of `Accepted answers` for that revision, and a project that declares none checks nothing.
 -/
 
+public section
+
 namespace LeanIntent
 
 universe u
@@ -112,7 +116,7 @@ structure Answer (W : Type u) where
 /-- The goal the answer `a` sets the revision `r`: for a confirmed entailment, every model of `r`
 satisfies the consequence; for a declined entailment, some model fails it; for a confirmed
 possibility, some model satisfies it; for a declined possibility, no model satisfies it. -/
-def Answer.KeptBy (a : Answer W) (r : IntentRecord W) : Prop :=
+@[expose] def Answer.KeptBy (a : Answer W) (r : IntentRecord W) : Prop :=
   match a.consequence.kind, a.verdict with
   | .entailment, .confirmed => ∀ w, r.Meets w → a.consequence.holds w
   | .entailment, .declined => HasInstance fun w => r.Meets w ∧ ¬ a.consequence.holds w
@@ -120,14 +124,14 @@ def Answer.KeptBy (a : Answer W) (r : IntentRecord W) : Prop :=
   | .possibility, .declined => ∀ w, r.Meets w → ¬ a.consequence.holds w
 
 /-- The goals the stored answers set the revision `r`: one for each answer, in order. -/
-def kept (r : IntentRecord W) (answers : List (Answer W)) : List Prop :=
+@[expose] def kept (r : IntentRecord W) (answers : List (Answer W)) : List Prop :=
   answers.map fun a => a.KeptBy r
 
 /-- The revision `r` keeps every stored answer. -/
-def Keeps (r : IntentRecord W) (answers : List (Answer W)) : Prop := Goals (kept r answers)
+@[expose] def Keeps (r : IntentRecord W) (answers : List (Answer W)) : Prop := Goals (kept r answers)
 
 /-- What keeping the stored answers asks of `r`, written apart from the former. -/
-def intendedKeeps (r : IntentRecord W) (answers : List (Answer W)) : Prop :=
+@[expose] def intendedKeeps (r : IntentRecord W) (answers : List (Answer W)) : Prop :=
   ∀ a ∈ answers, match a with
   | ⟨⟨_, .entailment, c⟩, .confirmed⟩ =>
       ∀ w, ((∀ d ∈ r.dom, d.holds w) ∧ ∀ p ∈ r.props, p.holds w) → c w
@@ -156,7 +160,7 @@ theorem keeps_iff (r : IntentRecord W) (answers : List (Answer W)) :
 /-! ## Refusals name the answer they break -/
 
 /-- The opposite answer: the same consequence with the other verdict. -/
-def Answer.opposite (a : Answer W) : Answer W where
+@[expose] def Answer.opposite (a : Answer W) : Answer W where
   consequence := a.consequence
   verdict := match a.verdict with
     | .confirmed => .declined

@@ -1,4 +1,6 @@
-import LeanIntentExamples.Sorting
+module
+
+public import LeanIntentExamples.Sorting
 
 /-!
 # The owner's answers about the sorting records, kept across revisions
@@ -22,30 +24,32 @@ revision that renames the record's clauses and vocabulary and restates its two p
 keeps both answers, since the same functions meet it (`restatedAccepted`).
 -/
 
+public section
+
 namespace LeanIntentExamples.Answers
 
 open LeanIntent LeanIntentExamples.Sorting
 
 /-- Declined: the record allows returning the empty list for every input. Like `rulesOutShort`, its
 predicate uses only Lean's own library, so no revision of this project changes what it says. -/
-def emptyForEvery : Answer (List Int → List Int) where
+@[expose] def emptyForEvery : Answer (List Int → List Int) where
   consequence :=
     ⟨"returning the empty list for every input", .possibility, fun f => f = fun _ => []⟩
   verdict := .declined
 
 /-- Confirmed: the record rules out returning `[1, 2]` for input `[2, 1, 1]`. -/
-def rulesOutShort : Answer (List Int → List Int) where
+@[expose] def rulesOutShort : Answer (List Int → List Int) where
   consequence :=
     ⟨"returning [1, 2] for input [2, 1, 1] is ruled out", .entailment,
       fun f => f [2, 1, 1] ≠ [1, 2]⟩
   verdict := .confirmed
 
 /-- The stored answers about the sorting record. -/
-def answers : List (Answer (List Int → List Int)) := [emptyForEvery, rulesOutShort]
+@[expose] def answers : List (Answer (List Int → List Int)) := [emptyForEvery, rulesOutShort]
 
 /-- The stored answers with who gave each: the owner's, and a decision on the owner's behalf. Whom
 each names changes nothing a revision must keep. -/
-def attributed : List (Attributed (List Int → List Int)) :=
+@[expose] def attributed : List (Attributed (List Int → List Int)) :=
   [⟨emptyForEvery, .owner (.of "richard")⟩,
    ⟨rulesOutShort, .onBehalf (.of "claude") (.of "assistant")
      "A rearrangement of [2, 1, 1] has three elements, which the owner's restatement requires."⟩]
@@ -66,7 +70,7 @@ theorem sorting_keeps : Keeps sorting answers := by
   exact nomatch ha
 
 /-- The corrected record, accepted under the stored answers. -/
-def sortingAccepted : Accepted answers := ⟨sorting, sorting_keeps⟩
+@[expose] def sortingAccepted : Accepted answers := ⟨sorting, sorting_keeps⟩
 
 /-- Every accepted revision excludes the empty-list function, whatever its properties say. -/
 theorem accepted_excludes_nilSort (x : Accepted answers) : ¬ x.record.Meets nilSort :=
@@ -96,7 +100,7 @@ theorem sortedOnly_not_accepted (x : Accepted answers) : x.record ≠ sortedOnly
 
 /-- The corrected record with its clauses and vocabulary renamed, and its two properties stated as
 one. -/
-def sortingRestated : IntentRecord (List Int → List Int) where
+@[expose] def sortingRestated : IntentRecord (List Int → List Int) where
   shape := .function _ _
   dom := []
   props := [⟨"ascending rearrangement", fun f => ∀ l, Sorted (f l) ∧ (f l).Perm l⟩]
@@ -109,7 +113,7 @@ theorem sortingRestated_meets {f : List Int → List Int} :
   simp [IntentRecord.Meets, IntentRecord.Dom, IntentRecord.Props, sortingRestated, forall_and]
 
 /-- The restated record keeps both answers, each proved again of it. -/
-def restatedAccepted : Accepted answers :=
+@[expose] def restatedAccepted : Accepted answers :=
   ⟨sortingRestated, (keeps_congr answers fun _ => sortingRestated_meets).mpr sorting_keeps⟩
 
 end LeanIntentExamples.Answers

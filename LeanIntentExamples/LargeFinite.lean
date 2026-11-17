@@ -1,4 +1,6 @@
-import LeanIntent.Declared
+module
+
+public import LeanIntent.Declared
 
 /-!
 # Records about finite types too large to enumerate
@@ -20,6 +22,8 @@ The rule is one for every type: it counts the constants the class would list, no
 `Fin 255` lists its values and `Fin 256` does not (`fin255_length`, `fin256_length`), and neither does
 a structure of eight `Bool`s, which has 256 (`flags_length`).
 -/
+
+public section
 
 namespace LeanIntentExamples.LargeFinite
 
@@ -44,7 +48,7 @@ theorem hash_constant_covered (v : UInt64) :
   constant_covered_of_finite (W := Hash) rfl v
 
 /-- The result varies with the arguments. -/
-def varies : IntentRecord Hash where
+@[expose] def varies : IntentRecord Hash where
   shape := .function _ _
   dom := []
   props := [⟨"varies", fun f => ∃ a b c a' b' c', f a b c ≠ f a' b' c'⟩]
@@ -71,7 +75,7 @@ theorem varies_verdicts : Verdicts varies [false, false, true, true, true] := by
   · exact varies_of _ 0 0 0 0 0 1 UInt64.zero_ne_one
 
 /-- The result is always 42. -/
-def fortyTwo : IntentRecord Hash where
+@[expose] def fortyTwo : IntentRecord Hash where
   shape := .function _ _
   dom := []
   props := [⟨"is 42", fun f => ∀ a b c, f a b c = 42⟩]
@@ -119,7 +123,7 @@ theorem phase_subjects :
         .subject fun _ => 4, .subject fun _ => 5, .subject fun _ => 6, .subject fun _ => 7] := rfl
 
 /-- Every phase is reached. -/
-def reachesAll : IntentRecord (Clock → Fin 8) where
+@[expose] def reachesAll : IntentRecord (Clock → Fin 8) where
   shape := .function _ _
   dom := []
   props := [⟨"reaches every phase", fun f => ∀ i, ∃ c, f c = i⟩]

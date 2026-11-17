@@ -1,4 +1,6 @@
-import LeanIntent.Declared
+module
+
+public import LeanIntent.Declared
 
 /-!
 # The clocks inside a subject's arguments
@@ -112,6 +114,8 @@ such nodes.
   group, is neither read nor found.
 -/
 
+public section
+
 namespace LeanIntent
 
 /-- A clock: the tick it reads, a value of `α`. A project gives this type to the part of its
@@ -121,10 +125,10 @@ that part as a clock even where it is all the subject has to read (`LeanIntent.A
 structure Clock (α : Type) where
   /-- The tick the clock reads. -/
   tick : α
-  deriving DecidableEq, Repr, LeanIntent.HasCode
+  deriving @[expose] DecidableEq, Repr, LeanIntent.HasCode
 
 /-- The name `LeanIntent.Clock`'s code carries. -/
-def Clock.codeName : Lean.Name := ``Clock
+@[expose] def Clock.codeName : Lean.Name := ``Clock
 
 /-- `Clock α`'s code: its name, the chain of its one parameter, and the chain of its one field, both
 `α`'s code. -/
@@ -150,11 +154,11 @@ namespace Ty
 
 /-- The marks of the numbers below `K` after `n` rounds of `F`, from none: in each round, a number
 below `K` is marked when `F` marks it from the marks of the round before. -/
-def roundsOf (K : Nat) (F : (Nat → Bool) → Nat → Bool) (n : Nat) : List Bool :=
+@[expose] def roundsOf (K : Nat) (F : (Nat → Bool) → Nat → Bool) (n : Nat) : List Bool :=
   iter (fun h => (List.range K).map (F fun m => h.getD m false)) n (List.replicate K false)
 
 /-- `F` marks more numbers from more marks. -/
-def StepMono (F : (Nat → Bool) → Nat → Bool) : Prop :=
+@[expose] def StepMono (F : (Nat → Bool) → Nat → Bool) : Prop :=
   ∀ P Q : Nat → Bool, (∀ m, P m = true → Q m = true) → ∀ m, F P m = true → F Q m = true
 
 section Rounds
@@ -195,7 +199,7 @@ theorem roundsOf_stable {n : Nat}
     rw [e, h m, roundsOf_succ]
 
 /-- How many numbers below `k` the marks `P` mark. -/
-def countBelow (P : Nat → Bool) : Nat → Nat
+@[expose] def countBelow (P : Nat → Bool) : Nat → Nat
   | 0 => 0
   | k + 1 => countBelow P k + (if P k = true then 1 else 0)
 
@@ -360,11 +364,11 @@ theorem den_cons : (t : Ty) → (k : Nat) → (p : List Nat) → t.den (k :: p) 
 
 /-- The code of the fields of the `c`-th constructor of the `m`-th type of a group that hold no
 value of the group, in the chain `g` of the group's data and arguments. -/
-def ctorData (g : Ty) (m c : Nat) : Ty := ((g.item m).item c).item 0
+@[expose] def ctorData (g : Ty) (m c : Nat) : Ty := ((g.item m).item c).item 0
 
 /-- The code of the arguments of the `f`-th recursive field of the `c`-th constructor of the `m`-th
 type of a group: the unit code for a field that holds a value of the group. -/
-def ctorArg (g : Ty) (m c f : Nat) : Ty := (((g.item m).item c).item 1).item f
+@[expose] def ctorArg (g : Ty) (m c f : Nat) : Ty := (((g.item m).item c).item 1).item f
 
 theorem den_data (g : Ty) (m c : Nat) : g.den [m, c, 0] = (g.ctorData m c).denote := by
   rw [den_cons, den_cons, den_cons]
@@ -376,11 +380,11 @@ theorem den_arg (g : Ty) (m c f : Nat) : g.den [m, c, 1, f] = (g.ctorArg m c f).
 
 /-- The numbers the decisions about a group's types mark: each type the chain `r` lists, and the
 root `o`. -/
-def groupBound (r : Ty) (o : Nat) : Nat := r.items + o + 1
+@[expose] def groupBound (r : Ty) (o : Nat) : Nat := r.items + o + 1
 
 /-- One round of finding the types of a group with a value: the root `o`, which has its base
 values, and each type with a constructor whose recursive fields all hold types `h` marks. -/
-def inhStep (r : Ty) (o : Nat) (h : Nat → Bool) (l : Nat) : Bool :=
+@[expose] def inhStep (r : Ty) (o : Nat) (h : Nat → Bool) (l : Nat) : Bool :=
   l == o || (List.range (r.muN l)).any fun c =>
     (List.range (r.muA l c)).all fun f => h (r.muS l c f)
 
@@ -394,7 +398,7 @@ theorem inhStep_mono (r : Ty) (o : Nat) : StepMono (inhStep r o) := by
 
 /-- Whether the `l`-th type of the group whose recursive fields `r` lists, rooted at its `o`-th
 type, has a value (`treeInh_iff`). -/
-def treeInh (r : Ty) (o l : Nat) : Bool :=
+@[expose] def treeInh (r : Ty) (o l : Nat) : Bool :=
   (roundsOf (groupBound r o) (inhStep r o) (groupBound r o)).getD l false
 
 theorem rounds_inh_sound {b g r : Ty} {o : Nat} : (n l : Nat) →
@@ -428,7 +432,7 @@ theorem treeInh_iff {b g r : Ty} {o l : Nat} :
   ⟨rounds_inh_sound _ l, fun ⟨x⟩ => treeInh_of x⟩
 
 /-- Whether the `l`-th type of the group is found to have a value within `n` rounds. -/
-def inhAfter (r : Ty) (o n l : Nat) : Bool :=
+@[expose] def inhAfter (r : Ty) (o n l : Nat) : Bool :=
   (roundsOf (groupBound r o) (inhStep r o) n).getD l false
 
 theorem inhAfter_zero {r : Ty} {o l : Nat} : inhAfter r o 0 l = false := roundsOf_zero l
@@ -497,18 +501,18 @@ theorem filter_two {l : List Nat} {p : Nat → Bool} {a b : Nat} (ha : a ∈ l.f
 
 /-- Whether the `c`-th constructor of the `m`-th type builds a value: each of its recursive fields
 holds a type with one. -/
-def ctorInh (r : Ty) (o m c : Nat) : Bool :=
+@[expose] def ctorInh (r : Ty) (o m c : Nat) : Bool :=
   (List.range (r.muA m c)).all fun f => treeInh r o (r.muS m c f)
 
 /-- The number of the kinds of value of the `m`-th type: its base values where it is the root, and
 each constructor that builds a value. -/
-def shapeCount (r : Ty) (o m : Nat) : Nat :=
+@[expose] def shapeCount (r : Ty) (o m : Nat) : Nat :=
   (if m = o then 1 else 0) + ((List.range (r.muN m)).filter (ctorInh r o m)).length
 
 /-- One round of finding the types of a group with two values: each with two kinds of value, the
 root where its base has two values, and each with a constructor that builds a value and whose other
 fields have two values or one of whose recursive fields holds a type `h` marks. -/
-def multiStep (b g r : Ty) (o : Nat) (h : Nat → Bool) (m : Nat) : Bool :=
+@[expose] def multiStep (b g r : Ty) (o : Nat) (h : Nat → Bool) (m : Nat) : Bool :=
   decide (2 ≤ shapeCount r o m) || (m == o && !b.unique) ||
     (List.range (r.muN m)).any fun c => ctorInh r o m c &&
       (!(g.ctorData m c).unique || (List.range (r.muA m c)).any fun f => h (r.muS m c f))
@@ -523,7 +527,7 @@ theorem multiStep_mono (b g r : Ty) (o : Nat) : StepMono (multiStep b g r o) := 
 
 /-- Whether the `m`-th type of the group with the base `b`, data and arguments `g` and recursive
 fields `r`, rooted at its `o`-th type, has two values (`treeMulti_iff`). -/
-def treeMulti (b g r : Ty) (o m : Nat) : Bool :=
+@[expose] def treeMulti (b g r : Ty) (o m : Nat) : Bool :=
   (roundsOf (groupBound r o) (multiStep b g r o) (groupBound r o)).getD m false
 
 end Ty
@@ -534,7 +538,7 @@ variable {B : Type} {i : Nat} {N : Nat → Nat} {D : Nat → Nat → Type} {A : 
   {P : Nat → Nat → Nat → Type} {S : Nat → Nat → Nat → Nat}
 
 /-- The children `k` with those of the field `f₀` replaced by `u`. -/
-def upd {j : Nat} {c : Nat}
+@[expose] def upd {j : Nat} {c : Nat}
     (k : (f : Fin (A j c)) → P j c f → MuVal B i N D A P S (S j c f)) (f₀ : Fin (A j c))
     (u : P j c f₀ → MuVal B i N D A P S (S j c f₀)) :
     (f : Fin (A j c)) → P j c f → MuVal B i N D A P S (S j c f) :=
@@ -695,7 +699,7 @@ variable {B : Type} {i : Nat} {N : Nat → Nat} {D : Nat → Nat → Type} {A : 
   {P : Nat → Nat → Nat → Type} {S : Nat → Nat → Nat → Nat}
 
 /-- The base value of a tree of a type with no other constructor. -/
-def baseVal : {l : Nat} → N l = 0 → MuVal B i N D A P S l → B
+@[expose] def baseVal : {l : Nat} → N l = 0 → MuVal B i N D A P S l → B
   | _, _, .base x => x
   | _, h, .node c _ _ => (by have := c.2; omega : False).elim
 
@@ -706,20 +710,20 @@ theorem base_baseVal (h : N i = 0) (x : MuVal B i N D A P S i) : .base (baseVal 
   | node c _ _ => exact (by have := c.2; omega : False).elim
 
 /-- The data of a tree of a type that is not the root and has one constructor. -/
-def nodeData : {l : Nat} → l ≠ i → N l = 1 → MuVal B i N D A P S l → D l 0
+@[expose] def nodeData : {l : Nat} → l ≠ i → N l = 1 → MuVal B i N D A P S l → D l 0
   | _, hl, _, .base _ => absurd rfl hl
   | _, _, _, .node ⟨0, _⟩ d _ => d
   | _, _, h, .node ⟨_ + 1, hc⟩ _ _ => absurd hc (by omega)
 
 /-- The children of a tree of a type that is not the root and has one constructor. -/
-def nodeKids : {l : Nat} → l ≠ i → N l = 1 → MuVal B i N D A P S l →
+@[expose] def nodeKids : {l : Nat} → l ≠ i → N l = 1 → MuVal B i N D A P S l →
     (f : Fin (A l 0)) → P l 0 f → MuVal B i N D A P S (S l 0 f)
   | _, hl, _, .base _ => absurd rfl hl
   | _, _, _, .node ⟨0, _⟩ _ k => k
   | _, _, h, .node ⟨_ + 1, hc⟩ _ _ => absurd hc (by omega)
 
 /-- The tree of the one constructor of a type, from its data and children. -/
-def ofNode {l : Nat} (h : N l = 1) (d : D l 0)
+@[expose] def ofNode {l : Nat} (h : N l = 1) (d : D l 0)
     (k : (f : Fin (A l 0)) → P l 0 f → MuVal B i N D A P S (S l 0 f)) : MuVal B i N D A P S l :=
   .node ⟨0, by omega⟩ d k
 
@@ -812,7 +816,7 @@ theorem eqRec_inj {F : Nat → Type} {j j' : Nat} (e : j = j') {a b : F j}
 
 /-- The recursive fields of the `c`-th constructor of the `m`-th type that hold the `m`-th type
 itself. -/
-def selfFields (r : Ty) (m c : Nat) : List Nat :=
+@[expose] def selfFields (r : Ty) (m c : Nat) : List Nat :=
   (List.range (r.muA m c)).filter fun f => r.muS m c f == m
 
 theorem lt_of_mem_selfFields {r : Ty} {m c f : Nat} (h : f ∈ r.selfFields m c) : f < r.muA m c :=
@@ -829,14 +833,14 @@ theorem mem_of_head? {l : List Nat} {f : Nat} (h : l.head? = some f) : f ∈ l :
 /-- Whether the `m`-th type of a group is shaped as a list: each of its constructors has at most
 one recursive field that holds the type itself, a value of it and not a function to one, and some
 constructor has one. -/
-def listShaped (g r : Ty) (m : Nat) : Bool :=
+@[expose] def listShaped (g r : Ty) (m : Nat) : Bool :=
   ((List.range (r.muN m)).all fun c => decide ((r.selfFields m c).length ≤ 1) &&
     (r.selfFields m c).all fun f => g.ctorArg m c f == .unit) &&
   (List.range (r.muN m)).any fun c => !(r.selfFields m c).isEmpty
 
 /-- The length of a tree: the number of nodes along the field of each node that holds a value of
 its own type, so zero for a base value and for a node with no such field. -/
-def treeLen {b g r : Ty} {o : Nat} : {j : Nat} → muTy b g r o r.muN j → Nat
+@[expose] def treeLen {b g r : Ty} {o : Nat} : {j : Nat} → muTy b g r o r.muN j → Nat
   | _, .base _ => 0
   | j, .node c _ k =>
     match h : (r.selfFields j c).head? with
@@ -873,15 +877,15 @@ theorem treeLen_eqRec {b g r : Ty} {o j j' : Nat} (e : j = j') (v : muTy b g r o
 
 /-- Whether the `c`-th constructor of the `m`-th type builds a value of length zero: it builds a
 value, and has no field that holds the type itself. -/
-def zeroCtor (r : Ty) (o m c : Nat) : Bool := ctorInh r o m c && (r.selfFields m c).isEmpty
+@[expose] def zeroCtor (r : Ty) (o m c : Nat) : Bool := ctorInh r o m c && (r.selfFields m c).isEmpty
 
 /-- Whether the `c`-th constructor of the `m`-th type builds a value one node longer than its child:
 it builds a value, and has a field that holds the type itself. -/
-def stepCtor (r : Ty) (o m c : Nat) : Bool := ctorInh r o m c && !(r.selfFields m c).isEmpty
+@[expose] def stepCtor (r : Ty) (o m c : Nat) : Bool := ctorInh r o m c && !(r.selfFields m c).isEmpty
 
 /-- Whether the fields of the `c`-th constructor of the `m`-th type other than the recursive fields
 `skip` have one value. -/
-def restUnique (b g r : Ty) (o m c : Nat) (skip : List Nat) : Bool :=
+@[expose] def restUnique (b g r : Ty) (o m c : Nat) (skip : List Nat) : Bool :=
   (g.ctorData m c).unique && (List.range (r.muA m c)).all fun f =>
     skip.contains f || !treeMulti b g r o (r.muS m c f)
 
@@ -903,7 +907,7 @@ theorem restUnique_iff {b g r : Ty} {o m c : Nat} {skip : List Nat} :
 /-- Whether the length of a tree of the `m`-th type determines the tree: the type has at most one
 value of length zero, and its constructors build at most one kind of longer value, each fixed by its
 child of its own type. -/
-def lenDet (b g r : Ty) (o m : Nat) : Bool :=
+@[expose] def lenDet (b g r : Ty) (o m : Nat) : Bool :=
   decide ((if m = o then 1 else 0) + ((List.range (r.muN m)).filter (zeroCtor r o m)).length ≤ 1) &&
     (m != o || b.unique) &&
     ((List.range (r.muN m)).all fun c => !zeroCtor r o m c || restUnique b g r o m c []) &&
@@ -1169,12 +1173,12 @@ inductive Place where
   | tree (b g r : Ty) (o l : Nat)
 
 /-- The type of the values at a place. -/
-@[reducible] def Place.denote : Place → Type
+@[expose, reducible] def Place.denote : Place → Type
   | .code t => t.denote
   | .tree b g r o l => Ty.muTy b g r o r.muN l
 
 /-- Whether the values at a place are pairs, whose components are their two sides. -/
-def Place.pair : Place → Bool
+@[expose] def Place.pair : Place → Bool
   | .code (.prod _ _) => true
   | _ => false
 
@@ -1215,7 +1219,7 @@ inductive Place.Step : Place → Place → Type
   | base {b g r : Ty} {o l : Nat} : l = o → r.muN l = 0 → Place.Step (.tree b g r o l) (.code b)
 
 /-- The isomorphism a step is, from the values at its place to those at the next. -/
-def Place.Step.iso : {s s' : Place} → Place.Step s s' → Iso s.denote s'.denote
+@[expose] def Place.Step.iso : {s s' : Place} → Place.Step s s' → Iso s.denote s'.denote
   | _, _, .decl _ _ _ => Iso.refl _
   | _, _, .muTree h => Iso.ofEq (Ty.denote_mu_of_grows h)
   | _, _, @Place.Step.muBase _ _ r i h =>
@@ -1236,7 +1240,7 @@ def Place.Step.iso : {s s' : Place} → Place.Step s s' → Iso s.denote s'.deno
 /-- The place a tree of the `l`-th type views as, from the view `bv` of the base, with the transport
 to it: the base's view, where the type is the root and has no other constructor, and the tree
 itself otherwise. -/
-def Place.treeViewOf (b g r : Ty) (o l : Nat) (bv : Σ v : Place, Iso b.denote v.denote) :
+@[expose] def Place.treeViewOf (b g r : Ty) (o l : Nat) (bv : Σ v : Place, Iso b.denote v.denote) :
     Σ v : Place, Iso (Place.tree b g r o l).denote v.denote :=
   if h : l = o ∧ r.muN l = 0 then
     ⟨bv.1, (Place.Step.base (b := b) (g := g) (r := r) h.1 h.2).iso.trans bv.2⟩
@@ -1248,7 +1252,7 @@ another: a declared type views as its representation; a recursive type that grow
 group, and one that does not as its base; a type of a group without a base of its own as a tree of
 its group where it grows and as the unit code where it does not; and every other code as itself. Its
 match has no catch-all case, so a code former added to `Ty` must say where its values lie. -/
-def Ty.viewOf : (t : Ty) → Σ v : Place, Iso t.denote v.denote
+@[expose] def Ty.viewOf : (t : Ty) → Σ v : Place, Iso t.denote v.denote
   | .unit => ⟨.code .unit, Iso.refl _⟩
   | .bool => ⟨.code .bool, Iso.refl _⟩
   | .nat => ⟨.code .nat, Iso.refl _⟩
@@ -1278,15 +1282,15 @@ def Ty.viewOf : (t : Ty) → Σ v : Place, Iso t.denote v.denote
     else ⟨.code .unit, (Place.Step.muAtUnit (b := b) (g := g) (Bool.eq_false_iff.mpr h)).iso⟩
 
 /-- The place the values at a place have, with the transport to it (`Ty.viewOf`). -/
-def Place.viewOf : (s : Place) → Σ v : Place, Iso s.denote v.denote
+@[expose] def Place.viewOf : (s : Place) → Σ v : Place, Iso s.denote v.denote
   | .code t => t.viewOf
   | .tree b g r o l => Place.treeViewOf b g r o l b.viewOf
 
 /-- The place the values at `s` have by the equations of `Ty.den` that are isomorphisms. -/
-def Place.view (s : Place) : Place := s.viewOf.1
+@[expose] def Place.view (s : Place) : Place := s.viewOf.1
 
 /-- The transport from the values at a place to those at its view. -/
-def Place.viewIso (s : Place) : Iso s.denote s.view.denote := s.viewOf.2
+@[expose] def Place.viewIso (s : Place) : Iso s.denote s.view.denote := s.viewOf.2
 
 /-! ## Readings through a bijection -/
 
@@ -1344,13 +1348,13 @@ inductive Place.Count : Place → Type
 namespace Place.Count
 
 /-- What a count reads from a value. -/
-def read : {v : Place} → Place.Count v → v.denote → Nat
+@[expose] def read : {v : Place} → Place.Count v → v.denote → Nat
   | _, .length _, x => x.length
   | _, .size _, x => x.size
   | _, .treeLength _, x => Ty.treeLen x
 
 /-- Every count of a value at the place `v`. -/
-def all : (v : Place) → List (Place.Count v)
+@[expose] def all : (v : Place) → List (Place.Count v)
   | .code (.list a) => [.length a]
   | .code (.array a) => [.size a]
   | .code _ => []
@@ -1364,7 +1368,7 @@ theorem mem_all : {v : Place} → (k : Place.Count v) → k ∈ all v
 
 /-- Whether a count determines the value: a list's length and an array's size when the elements
 have one value, and a tree's length when `Ty.lenDet` says so. -/
-def determines : {v : Place} → Place.Count v → Bool
+@[expose] def determines : {v : Place} → Place.Count v → Bool
   | _, .length a => a.unique
   | _, .size a => a.unique
   | _, @treeLength b g r o l _ => Ty.lenDet b g r o l
@@ -1391,18 +1395,18 @@ inductive ClockRead (p : Place) : Type
 namespace ClockRead
 
 /-- The type of what a reading reads: the component's own for its value, a number otherwise. -/
-@[reducible] def Out {p : Place} : ClockRead p → Type
+@[expose, reducible] def Out {p : Place} : ClockRead p → Type
   | .value => p.denote
   | .count _ => Nat
 
 /-- What a reading reads from a component. -/
-def read {p : Place} : (k : ClockRead p) → p.denote → k.Out
+@[expose] def read {p : Place} : (k : ClockRead p) → p.denote → k.Out
   | .value, x => x
   | .count k, x => k.read (p.viewIso.to x)
 
 /-- Every reading of a component at the place `p`: its value, once, and then each count of its view,
 carried back through the transport. -/
-def all (p : Place) : List (ClockRead p) := .value :: (Place.Count.all p.view).map .count
+@[expose] def all (p : Place) : List (ClockRead p) := .value :: (Place.Count.all p.view).map .count
 
 /-- `all` lists every reading. -/
 theorem mem_all {p : Place} : (k : ClockRead p) → k ∈ all p
@@ -1411,7 +1415,7 @@ theorem mem_all {p : Place} : (k : ClockRead p) → k ∈ all p
 
 /-- Whether a reading determines the component: its value always, and a count where the count
 determines the view's value. -/
-def determines {p : Place} : ClockRead p → Bool
+@[expose] def determines {p : Place} : ClockRead p → Bool
   | .value => true
   | .count k => k.determines
 
@@ -1469,14 +1473,14 @@ end
 mutual
 
 /-- The component a path selects. -/
-def Place.Path.get : {s p : Place} → Place.Path s p → s.denote → p.denote
+@[expose] def Place.Path.get : {s p : Place} → Place.Path s p → s.denote → p.denote
   | _, _, .self _, x => x
   | _, _, .fst _ q, x => q.get x.1
   | _, _, .snd _ q, x => q.get x.2
   | _, _, .fields _ q, x => q.get x
 
 /-- The component a path into a field selects. -/
-def Place.FieldPath.get : {s p : Place} → Place.FieldPath s p → s.denote → p.denote
+@[expose] def Place.FieldPath.get : {s p : Place} → Place.FieldPath s p → s.denote → p.denote
   | _, _, .head _ q, x => q.get x.1
   | _, _, .tail _ q, x => q.get x.2
   | _, _, .step st q, x => q.get (st.iso.to x)
@@ -1497,16 +1501,16 @@ variable (b g r : Ty) (o : Nat) (baseP : List (Σ p, FieldPath (.code b) p))
   (dataP : (l : Nat) → List (Σ p, FieldPath (.code (g.ctorData l 0)) p))
 
 /-- The paths into the base of a tree of the root, where it has no other constructor. -/
-def treeBasePaths (l : Nat) : List (Σ p, FieldPath (.tree b g r o l) p) :=
+@[expose] def treeBasePaths (l : Nat) : List (Σ p, FieldPath (.tree b g r o l) p) :=
   if h : l = o ∧ r.muN l = 0 then baseP.map fun q => ⟨q.1, .step (.base h.1 h.2) q.2⟩ else []
 
 /-- The paths into the data of a tree of a type that is not the root and has one constructor. -/
-def treeDataPaths (l : Nat) : List (Σ p, FieldPath (.tree b g r o l) p) :=
+@[expose] def treeDataPaths (l : Nat) : List (Σ p, FieldPath (.tree b g r o l) p) :=
   if h : l ≠ o ∧ r.muN l = 1 then (dataP l).map fun q => ⟨q.1, .data h.1 h.2 q.2⟩ else []
 
 /-- The paths into the children of a tree of a type that is not the root and has one constructor,
 each child read whole and then by the paths `kids m` into a tree of its type `m`. -/
-def treeKidPaths (l : Nat) (kids : (m : Nat) → List (Σ p, FieldPath (.tree b g r o m) p)) :
+@[expose] def treeKidPaths (l : Nat) (kids : (m : Nat) → List (Σ p, FieldPath (.tree b g r o m) p)) :
     List (Σ p, FieldPath (.tree b g r o l) p) :=
   if h : l ≠ o ∧ r.muN l = 1 then
     (List.finRange (r.muA l 0)).flatMap fun (f : Fin (r.muA l 0)) =>
@@ -1519,7 +1523,7 @@ def treeKidPaths (l : Nat) (kids : (m : Nat) → List (Σ p, FieldPath (.tree b 
 
 /-- The paths into the fields of a tree of the `l`-th type that descend into at most `n`
 children. -/
-def treeFieldPaths : (n l : Nat) → List (Σ p, FieldPath (.tree b g r o l) p)
+@[expose] def treeFieldPaths : (n l : Nat) → List (Σ p, FieldPath (.tree b g r o l) p)
   | 0, l => treeBasePaths b g r o baseP l ++ treeDataPaths b g r o dataP l
   | n + 1, l => treeBasePaths b g r o baseP l ++ treeDataPaths b g r o dataP l ++
       treeKidPaths b g r o l fun m => treeFieldPaths n m
@@ -1527,7 +1531,7 @@ def treeFieldPaths : (n l : Nat) → List (Σ p, FieldPath (.tree b g r o l) p)
 /-- The paths into the fields of a recursive type: where it grows, those of its tree, descending into
 at most as many children as the group has types (`Place.FieldPath.mem_fieldPaths` proves that bound
 loses none); where it does not, those of its base. -/
-def muFieldPaths (i : Nat) : List (Σ p, FieldPath (.code (.mu b g r i)) p) :=
+@[expose] def muFieldPaths (i : Nat) : List (Σ p, FieldPath (.code (.mu b g r i)) p) :=
   if h : r.grows i = true then
     (treeFieldPaths b g r i baseP dataP r.items i).map fun q => ⟨q.1, .step (.muTree h) q.2⟩
   else baseP.map fun q => ⟨q.1, .step (.muBase (Bool.eq_false_iff.mpr h)) q.2⟩
@@ -1535,7 +1539,7 @@ def muFieldPaths (i : Nat) : List (Σ p, FieldPath (.code (.mu b g r i)) p) :=
 /-- The paths into the fields of a type of a group without a base of its own, rooted at the group's
 `o`-th type: where it grows, those of its tree, as for `muFieldPaths`; where it does not, none, since
 it denotes the unit type. -/
-def muAtFieldPaths (i : Nat) : List (Σ p, FieldPath (.code (.muAt b g r o i)) p) :=
+@[expose] def muAtFieldPaths (i : Nat) : List (Σ p, FieldPath (.code (.muAt b g r o i)) p) :=
   if h : r.growsAt o i = true then
     (treeFieldPaths b g r o baseP dataP r.items i).map fun q => ⟨q.1, .step (.muAt h) q.2⟩
   else []
@@ -1549,7 +1553,7 @@ mutual
 /-- Every path from a value of the code `t`, applying no function: the value itself, and the
 components of each side of a pair or, for any other code, of each field (`Ty.paths_eq`). Its match
 has no catch-all case, so a code former added to `Ty` must say what its values' components are. -/
-def Ty.paths : (t : Ty) → List (Σ p, Place.Path (.code t) p)
+@[expose] def Ty.paths : (t : Ty) → List (Σ p, Place.Path (.code t) p)
   | .unit => [⟨_, .self _⟩]
   | .bool => [⟨_, .self _⟩]
   | .nat => [⟨_, .self _⟩]
@@ -1579,7 +1583,7 @@ def Ty.paths : (t : Ty) → List (Σ p, Place.Path (.code t) p)
 /-- Every path into a field of a value of the code `r`: the fields of a chain, and, at a code a step
 of `Ty.den` applies to, the fields of the value at the next place. Its match has no catch-all case,
 so a code former added to `Ty` must say what its values' fields are. -/
-def Ty.fieldPaths : (r : Ty) → List (Σ p, Place.FieldPath (.code r) p)
+@[expose] def Ty.fieldPaths : (r : Ty) → List (Σ p, Place.FieldPath (.code r) p)
   | .prod a rest => ((Ty.paths a).map fun q => ⟨q.1, .head rest q.2⟩) ++
       (Ty.fieldPaths rest).map fun q => ⟨q.1, .tail a q.2⟩
   | .decl n ps rep => (Ty.fieldPaths rep).map fun q => ⟨q.1, .step (.decl n ps rep) q.2⟩
@@ -1601,7 +1605,7 @@ def Ty.fieldPaths : (r : Ty) → List (Σ p, Place.FieldPath (.code r) p)
 
 /-- `fieldPaths` of the data of the `l`-th type's first constructor in the chain `g`
 (`Ty.dataPaths_eq`), by recursion on `g`. -/
-def Ty.dataPaths : (g : Ty) → (l : Nat) → List (Σ p, Place.FieldPath (.code (g.ctorData l 0)) p)
+@[expose] def Ty.dataPaths : (g : Ty) → (l : Nat) → List (Σ p, Place.FieldPath (.code (g.ctorData l 0)) p)
   | .prod t _, 0 => Ty.ctorPaths t
   | .prod _ rest, l + 1 => Ty.dataPaths rest l
   | .unit, _ => []
@@ -1622,7 +1626,7 @@ def Ty.dataPaths : (g : Ty) → (l : Nat) → List (Σ p, Place.FieldPath (.code
   | .muAt _ _ _ _ _, _ => []
 
 /-- `fieldPaths` of the data of the first constructor in the chain `t` of a type's constructors. -/
-def Ty.ctorPaths : (t : Ty) → List (Σ p, Place.FieldPath (.code ((t.item 0).item 0)) p)
+@[expose] def Ty.ctorPaths : (t : Ty) → List (Σ p, Place.FieldPath (.code ((t.item 0).item 0)) p)
   | .prod c _ => Ty.chainPaths c
   | .unit => []
   | .bool => []
@@ -1642,7 +1646,7 @@ def Ty.ctorPaths : (t : Ty) → List (Σ p, Place.FieldPath (.code ((t.item 0).i
   | .muAt _ _ _ _ _ => []
 
 /-- `fieldPaths` of the first item of the chain `c`. -/
-def Ty.chainPaths : (c : Ty) → List (Σ p, Place.FieldPath (.code (c.item 0)) p)
+@[expose] def Ty.chainPaths : (c : Ty) → List (Σ p, Place.FieldPath (.code (c.item 0)) p)
   | .prod d _ => Ty.fieldPaths d
   | .unit => []
   | .bool => []
@@ -1682,13 +1686,13 @@ namespace Place
 
 /-- Every path into a field of a value at a place. At a tree, the paths descend into at most as many
 children as its group has types, which loses none (`Place.FieldPath.mem_fieldPaths`). -/
-def fieldPaths : (s : Place) → List (Σ p, FieldPath s p)
+@[expose] def fieldPaths : (s : Place) → List (Σ p, FieldPath s p)
   | .code t => Ty.fieldPaths t
   | .tree b g r o l =>
     treeFieldPaths b g r o (Ty.fieldPaths b) (fun l => Ty.dataPaths g l) r.items l
 
 /-- Every path from a value at a place. -/
-def paths : (s : Place) → List (Σ p, Path s p)
+@[expose] def paths : (s : Place) → List (Σ p, Path s p)
   | .code t => Ty.paths t
   | .tree b g r o l => ⟨_, .self _⟩ ::
       (fieldPaths (.tree b g r o l)).map fun q => ⟨q.1, .fields rfl q.2⟩
@@ -1715,7 +1719,7 @@ theorem Place.treeFieldPaths_baseData {b g r : Ty} {o : Nat}
 /-- The listing a path from a value at `s` is in: `Ty.paths` at a code; and, at a tree of a type found
 to have a value within `n + 1` rounds, the tree itself and the paths into its fields that descend
 into at most `n` children. -/
-def Place.PathListed : (s : Place) → (Σ p, Place.Path s p) → Prop
+@[expose] def Place.PathListed : (s : Place) → (Σ p, Place.Path s p) → Prop
   | .code t, x => x ∈ Ty.paths t
   | .tree b g r o l, x => ∀ n, Ty.inhAfter r o (n + 1) l = true →
       x ∈ (⟨_, .self _⟩ :: (Place.treeFieldPaths b g r o (Ty.fieldPaths b)
@@ -1724,7 +1728,7 @@ def Place.PathListed : (s : Place) → (Σ p, Place.Path s p) → Prop
 /-- The listing a path into a field of a value at `s` is in: `Ty.fieldPaths` at a code; and, at a
 tree of a type found to have a value within `n + 1` rounds, the paths into its fields that descend
 into at most `n` children. -/
-def Place.FieldPathListed : (s : Place) → (Σ p, Place.FieldPath s p) → Prop
+@[expose] def Place.FieldPathListed : (s : Place) → (Σ p, Place.FieldPath s p) → Prop
   | .code t, x => x ∈ Ty.fieldPaths t
   | .tree b g r o l, x => ∀ n, Ty.inhAfter r o (n + 1) l = true →
       x ∈ Place.treeFieldPaths b g r o (Ty.fieldPaths b) (fun l => Ty.dataPaths g l) n l
@@ -1853,12 +1857,12 @@ theorem Place.FieldPath.mem_fieldPaths {s p : Place} (q : Place.FieldPath s p) (
 
 /-- The components a path into a field selects from a value at `s`, each with the function that
 selects it. -/
-def Place.fieldGets (s : Place) : List (Σ p : Place, s.denote → p.denote) :=
+@[expose] def Place.fieldGets (s : Place) : List (Σ p : Place, s.denote → p.denote) :=
   s.fieldPaths.map fun q => ⟨q.1, q.2.get⟩
 
 /-- The components that the paths into fields select at `s` are those at the place `v.1`, carried
 back through the transport `v.2`. -/
-def Place.FieldsVia (s : Place) (v : Σ v : Place, Iso s.denote v.denote) : Prop :=
+@[expose] def Place.FieldsVia (s : Place) (v : Σ v : Place, Iso s.denote v.denote) : Prop :=
   s.fieldGets = v.1.fieldGets.map fun q => ⟨q.1, fun x => q.2 (v.2.to x)⟩
 
 theorem Place.fieldsVia_refl (s : Place) : s.FieldsVia ⟨s, Iso.refl _⟩ := by
@@ -2027,7 +2031,7 @@ components other than the value itself are those at the view other than its valu
 other than the value are the counts of the view, each read through the transport; and the view is
 its own view with the identity for its transport, so those counts are the view's own readings other
 than its value. -/
-def Place.ListedAtView (s : Place) : Prop :=
+@[expose] def Place.ListedAtView (s : Place) : Prop :=
   (s.paths.map fun q => (⟨q.1, q.2.get⟩ : Σ p : Place, s.denote → p.denote)).tail =
       (s.view.paths.map fun q =>
         (⟨q.1, q.2.get⟩ : Σ p : Place, s.view.denote → p.denote)).tail.map
@@ -2073,12 +2077,12 @@ inductive Place.ArgPath (p : Place) : List Ty → Type
 namespace Place.ArgPath
 
 /-- The component a path selects from a tuple of arguments. -/
-def read {p : Place} : {as : List Ty} → ArgPath p as → Sig.Args as → p.denote
+@[expose] def read {p : Place} : {as : List Ty} → ArgPath p as → Sig.Args as → p.denote
   | _ :: _, .here q, xs => q.get xs.1
   | _ :: _, .there q, xs => q.read xs.2
 
 /-- Every path into the arguments `as`. -/
-def paths : (as : List Ty) → List (Σ p, ArgPath p as)
+@[expose] def paths : (as : List Ty) → List (Σ p, ArgPath p as)
   | [] => []
   | a :: as => ((Ty.paths a).map fun q => ⟨q.1, .here q.2⟩) ++
       (paths as).map fun q => ⟨q.1, .there q.2⟩
@@ -2108,12 +2112,12 @@ namespace ArgClock
 abbrev Out {as : List Ty} (k : ArgClock as) : Type := k.reading.Out
 
 /-- What a clock part of the arguments reads from a tuple of them. -/
-def read {as : List Ty} (k : ArgClock as) (xs : Sig.Args as) : k.Out :=
+@[expose] def read {as : List Ty} (k : ArgClock as) (xs : Sig.Args as) : k.Out :=
   k.reading.read (k.path.read xs)
 
 /-- Every clock part of the arguments `as`: each component of each argument, in order, with each of
 its readings. -/
-def all (as : List Ty) : List (ArgClock as) :=
+@[expose] def all (as : List Ty) : List (ArgClock as) :=
   (Place.ArgPath.paths as).flatMap fun p => (ClockRead.all p.1).map fun r => ⟨p.1, p.2, r⟩
 
 /-- `all` lists every clock part of the arguments: every path from an argument, whatever the number
@@ -2186,14 +2190,14 @@ mutual
 of a chain, the rest has one value; a step of `Ty.den` is a bijection, which keeps it; at the data of
 a tree, each child's type has one value; and at a child, the data have one value and each other
 child's type has one. -/
-def Place.Path.determines : {s p : Place} → Place.Path s p → Bool
+@[expose] def Place.Path.determines : {s p : Place} → Place.Path s p → Bool
   | _, _, .self _ => true
   | _, _, .fst b q => b.unique && q.determines
   | _, _, .snd a q => a.unique && q.determines
   | _, _, .fields _ q => q.determines
 
 /-- Whether the component a path into a field selects determines the value. -/
-def Place.FieldPath.determines : {s p : Place} → Place.FieldPath s p → Bool
+@[expose] def Place.FieldPath.determines : {s p : Place} → Place.FieldPath s p → Bool
   | _, _, .head rest q => rest.unique && q.determines
   | _, _, .tail a q => a.unique && q.determines
   | _, _, .step _ q => q.determines
@@ -2279,7 +2283,7 @@ namespace Place.ArgPath
 
 /-- Whether the component a path into the arguments selects determines the tuple of them: it
 determines its argument, and every other argument's type has one value. -/
-def determines {p : Place} : {as : List Ty} → ArgPath p as → Bool
+@[expose] def determines {p : Place} : {as : List Ty} → ArgPath p as → Bool
   | _ :: as, .here q => q.determines && as.all Ty.unique
   | a :: _, .there q => a.unique && q.determines
 
@@ -2304,7 +2308,7 @@ namespace ArgClock
 
 /-- Whether a clock part's reading determines the tuple of arguments: its path selects a component
 that determines them, and its reading determines that component. -/
-def determines {as : List Ty} (k : ArgClock as) : Bool := k.path.determines && k.reading.determines
+@[expose] def determines {as : List Ty} (k : ArgClock as) : Bool := k.path.determines && k.reading.determines
 
 /-- A clock part's reading determines the arguments exactly when `determines` says so. -/
 theorem determines_iff {as : List Ty} (k : ArgClock as) :
@@ -2331,7 +2335,7 @@ end ArgClock
 
 /-- Whether the code is that of a `LeanIntent.Clock α`: a declared type of the name its code
 carries. -/
-def Ty.isClock : Ty → Bool
+@[expose] def Ty.isClock : Ty → Bool
   | .decl n _ _ => decide (n = Clock.codeName)
   | _ => false
 
@@ -2341,7 +2345,7 @@ theorem Ty.isClock_iff (t : Ty) : t.isClock = true ↔ ∃ ps r, t = .decl Clock
 
 /-- Whether a place holds values of a `LeanIntent.Clock α`: a code that is one. A tree of a group
 is not one, since `LeanIntent.Clock` is not recursive. -/
-def Place.isClock : Place → Bool
+@[expose] def Place.isClock : Place → Bool
   | .code t => t.isClock
   | .tree _ _ _ _ _ => false
 
@@ -2356,7 +2360,7 @@ namespace ArgClock
 
 /-- The project declared the clock part `k` its subject's clock: `k` reads a component of type
 `LeanIntent.Clock α` for some `α`, whose code is the declared type of the name `Clock.codeName`. -/
-def InClock {as : List Ty} (k : ArgClock as) : Prop :=
+@[expose] def InClock {as : List Ty} (k : ArgClock as) : Prop :=
   ∃ ps r, k.place = .code (.decl Clock.codeName ps r)
 
 instance {as : List Ty} (k : ArgClock as) : Decidable k.InClock :=
@@ -2368,7 +2372,7 @@ end ArgClock
 the declared type itself. A declared type's parameters are not read: a parameter is part of a value
 only through the fields that use it, which its representation holds. Its match has no catch-all
 case, so a code former added to `Ty` must say whether it holds one. -/
-def Ty.namesClock : Ty → Bool
+@[expose] def Ty.namesClock : Ty → Bool
   | .unit => false
   | .bool => false
   | .nat => false
@@ -2394,7 +2398,7 @@ reaches it, given whether its base (`baseS`), the data of the first constructor 
 its base does; where every value is a node of one constructor, its data or a child does, a child at a
 field that holds a function holding one wherever the field's arguments or the group name one; and
 otherwise, one does wherever the group names one. -/
-def Place.treeStrayAt (b g r : Ty) (o : Nat) (baseS : Bool) (dataS : Nat → Bool)
+@[expose] def Place.treeStrayAt (b g r : Ty) (o : Nat) (baseS : Bool) (dataS : Nat → Bool)
     (kid : Nat → Bool) (l : Nat) : Bool :=
   if l = o ∧ r.muN l = 0 then baseS
   else if l ≠ o ∧ r.muN l = 1 then
@@ -2405,7 +2409,7 @@ def Place.treeStrayAt (b g r : Ty) (o : Nat) (baseS : Bool) (dataS : Nat → Boo
 
 /-- `treeStrayAt` for the clock parts that descend into at most `n` more children: past that bound,
 a child holds one wherever the group names one. -/
-def Place.treeStray (b g r : Ty) (o : Nat) (baseS : Bool) (dataS : Nat → Bool) :
+@[expose] def Place.treeStray (b g r : Ty) (o : Nat) (baseS : Bool) (dataS : Nat → Bool) :
     (n l : Nat) → Bool
   | 0, l => Place.treeStrayAt b g r o baseS dataS (fun _ => b.namesClock || g.namesClock) l
   | n + 1, l => Place.treeStrayAt b g r o baseS dataS (Place.treeStray b g r o baseS dataS n) l
@@ -2414,13 +2418,13 @@ def Place.treeStray (b g r : Ty) (o : Nat) (baseS : Bool) (dataS : Nat → Bool)
 given whether its base (`baseS`) and the data of the first constructor of each type of its group
 (`dataS`) hold one so, as its paths into fields go (`Place.muFieldPaths`): as its tree does where it
 grows, and as its base does where it does not. -/
-def Place.muStray (b g r : Ty) (i : Nat) (baseS : Bool) (dataS : Nat → Bool) : Bool :=
+@[expose] def Place.muStray (b g r : Ty) (i : Nat) (baseS : Bool) (dataS : Nat → Bool) : Bool :=
   if r.grows i = true then Place.treeStray b g r i baseS dataS r.items i else baseS
 
 /-- Whether a value of a type of a group without a base of its own holds a `LeanIntent.Clock` where
 no clock part reaches it, as its paths into fields go (`Place.muAtFieldPaths`): as its tree does
 where it grows, and never where it denotes the unit type. -/
-def Place.muAtStray (b g r : Ty) (j i : Nat) (baseS : Bool) (dataS : Nat → Bool) : Bool :=
+@[expose] def Place.muAtStray (b g r : Ty) (j i : Nat) (baseS : Bool) (dataS : Nat → Bool) : Bool :=
   if r.growsAt j i = true then Place.treeStray b g r j baseS dataS r.items i else false
 
 mutual
@@ -2435,7 +2439,7 @@ in a recursive type's values through a type with several shapes hold it again wh
 reach. A parameter of a declared type is not a part of its values except through the fields that
 hold it, which are read instead. It follows the paths (`Ty.paths`): a code that is not a pair is its
 value, which reads a `LeanIntent.Clock` it is, and its fields (`Ty.fieldStrayClock`). -/
-def Ty.strayClock : Ty → Bool
+@[expose] def Ty.strayClock : Ty → Bool
   | .prod a b => Ty.strayClock a || Ty.strayClock b
   | .decl _ _ r => Ty.fieldStrayClock r
   | .mu b g r i => Place.muStray b g r i (Ty.fieldStrayClock b) (fun l => Ty.dataStrayClock g l)
@@ -2449,7 +2453,7 @@ declared type, as its representation does, and where it is itself a `LeanIntent.
 clock part reads as one; in a recursive type, as `Place.muStray` and `Place.muAtStray` say, from its
 base and the data of its constructors; and in any other representation, that of a type with several
 constructors, wherever it names one. -/
-def Ty.fieldStrayClock : Ty → Bool
+@[expose] def Ty.fieldStrayClock : Ty → Bool
   | .prod a rest => Ty.strayClock a || Ty.fieldStrayClock rest
   | .decl n _ rep => decide (n = Clock.codeName) || Ty.fieldStrayClock rep
   | .mu b g r i => Place.muStray b g r i (Ty.fieldStrayClock b) (fun l => Ty.dataStrayClock g l)
@@ -2459,18 +2463,18 @@ def Ty.fieldStrayClock : Ty → Bool
 
 /-- `fieldStrayClock` of the data of the `l`-th type's first constructor in the chain `g`, by
 recursion on `g`. -/
-def Ty.dataStrayClock : Ty → Nat → Bool
+@[expose] def Ty.dataStrayClock : Ty → Nat → Bool
   | .prod t _, 0 => Ty.ctorStrayClock t
   | .prod _ rest, l + 1 => Ty.dataStrayClock rest l
   | _, _ => false
 
 /-- `fieldStrayClock` of the data of the first constructor in the chain `t`. -/
-def Ty.ctorStrayClock : Ty → Bool
+@[expose] def Ty.ctorStrayClock : Ty → Bool
   | .prod c _ => Ty.chainStrayClock c
   | _ => false
 
 /-- `fieldStrayClock` of the first item of the chain `c`. -/
-def Ty.chainStrayClock : Ty → Bool
+@[expose] def Ty.chainStrayClock : Ty → Bool
   | .prod d _ => Ty.fieldStrayClock d
   | _ => false
 
@@ -2479,7 +2483,7 @@ end
 /-- Whether an argument of the type `σ` denotes holds a `LeanIntent.Clock` where no clock part
 reaches it: a declaration of a clock that the trivial-witness check cannot read, so it refuses every
 verdict about the type. -/
-def Sig.strayClock (σ : Sig) : Bool := σ.args.any Ty.strayClock
+@[expose] def Sig.strayClock (σ : Sig) : Bool := σ.args.any Ty.strayClock
 
 /-! ## Scripts of timed actions -/
 
@@ -2487,7 +2491,7 @@ namespace Sig
 
 /-- The function `f` of the arguments `as` reads only the clock part `k`: two tuples of arguments
 that read the same there give the same value. -/
-def Fn.ReadsOnly {b : Ty} {as : List Ty} (f : Fn b as) (k : ArgClock as) : Prop :=
+@[expose] def Fn.ReadsOnly {b : Ty} {as : List Ty} (f : Fn b as) (k : ArgClock as) : Prop :=
   ∀ xs ys, k.read xs = k.read ys → f.apply xs = f.apply ys
 
 /-- A function of the arguments is the function that returns what it returns on the tuple of them.
@@ -2509,7 +2513,7 @@ open Sig
 
 /-- The script of timed actions that takes the action `s n` whenever the clock part `k` reads `n`,
 as a function of the arguments. -/
-def script {b : Ty} {as : List Ty} (k : ArgClock as) (s : k.Out → b.denote) : Fn b as :=
+@[expose] def script {b : Ty} {as : List Ty} (k : ArgClock as) (s : k.Out → b.denote) : Fn b as :=
   Fn.curry b as fun xs => s (k.read xs)
 
 /-- A script returns its action at the clock's reading. -/

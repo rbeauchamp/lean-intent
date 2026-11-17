@@ -1,4 +1,6 @@
-import LeanIntent.Progress
+module
+
+public import LeanIntent.Progress
 
 /-!
 # Refinement links from an intent record to an implementation
@@ -31,6 +33,8 @@ is one the record states, where the owner confirms it with the restatement of th
 it recorded as a decision made on their behalf.
 -/
 
+public section
+
 namespace LeanIntent
 
 universe u v w
@@ -40,12 +44,12 @@ variable {W : Type u} {A : Sort v} {C : Sort w}
 /-- `S`, a specification of implementations of type `A`, refines the intent record `r` through the
 mapping `m`: every implementation meeting `S`, wherever the record's domain hypotheses hold of its
 subject, has a subject that meets every property of `r`. -/
-def Refines (r : IntentRecord W) (m : A → W) (S : A → Prop) : Prop :=
+@[expose] def Refines (r : IntentRecord W) (m : A → W) (S : A → Prop) : Prop :=
   ∀ a, S a → r.Dom (m a) → r.Props (m a)
 
 /-- `L`, a specification of implementations of type `C`, refines `S` through `n`, under the domain
 hypotheses of `r` read at the subject `m (n c)`. -/
-def RefinesSpec (r : IntentRecord W) (m : A → W) (S : A → Prop) (n : C → A) (L : C → Prop) :
+@[expose] def RefinesSpec (r : IntentRecord W) (m : A → W) (S : A → Prop) (n : C → A) (L : C → Prop) :
     Prop :=
   ∀ c, L c → r.Dom (m (n c)) → S (n c)
 

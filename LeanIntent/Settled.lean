@@ -1,4 +1,6 @@
-import LeanIntent.Statement
+module
+
+public import LeanIntent.Statement
 
 /-!
 # Who settled each thing
@@ -51,6 +53,8 @@ recorded term is argued from `LeanIntent.Render`'s code, not stated as a theorem
 reason: a reason is a model's or a person's words, printed as written.
 -/
 
+public section
+
 namespace LeanIntent
 
 universe u
@@ -62,11 +66,11 @@ inductive Answerer where
   /-- The principal named, acting under the delegation named: a decision made on the owner's behalf,
   for the reason given. -/
   | onBehalf (principal delegation : Ident) (reason : String)
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- The answerer an authority of the owners' log names: a principal acting as owner, or one acting
 under its delegation, for the reason given, which the owner's own answer does not need. -/
-def Authority.answerer (a : Authority) (reason : String) : Answerer :=
+@[expose] def Authority.answerer (a : Authority) (reason : String) : Answerer :=
   match a.delegation with
   | none => .owner a.principal
   | some d => .onBehalf a.principal d reason
@@ -94,7 +98,7 @@ inductive Restatement where
   | unconfirmed
   /-- The owner named confirmed it. -/
   | confirmed (owner : Ident)
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- Who settled a consequence shown with a record whose restatement stands as the index. -/
 inductive Settled : Restatement → Type where
@@ -125,10 +129,10 @@ inductive Claim where
   | fork
   /-- Nothing settled it. -/
   | unsettled
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- The words a printed status of each claim starts with. -/
-def Claim.phrase : Claim → List Char
+@[expose] def Claim.phrase : Claim → List Char
   | .ownerConfirmed => chars!"Confirmed by the owner "
   | .ownerDeclined => chars!"Declined by the owner "
   | .behalfConfirmed => chars!"Confirmed on the owner's behalf by "
@@ -143,7 +147,7 @@ theorem Claim.phrase_diverge {k k' : Claim} (h : k ≠ k') : Diverge k.phrase k'
   cases k <;> cases k' <;> first | exact absurd rfl h | decide
 
 /-- What the status `x` claims. -/
-def claim {s : Restatement} : Settled s → Claim
+@[expose] def claim {s : Restatement} : Settled s → Claim
   | .answered (.owner _) .confirmed => .ownerConfirmed
   | .answered (.owner _) .declined => .ownerDeclined
   | .answered (.onBehalf ..) .confirmed => .behalfConfirmed
@@ -154,7 +158,7 @@ def claim {s : Restatement} : Settled s → Claim
 
 /-- What the printed status says after its claim's phrase: the names and reason it holds, and each
 on one line, since an identifier holds no line break and `Codec.line` escapes each in a reason. -/
-def details : {s : Restatement} → Settled s → List Char
+@[expose] def details : {s : Restatement} → Settled s → List Char
   | _, .answered (.owner p) _ => p.toString.toList ++ chars!".\n"
   | _, .answered (.onBehalf p d why) _ =>
     p.toString.toList ++ chars!", under the delegation " ++ d.toString.toList ++
@@ -168,7 +172,7 @@ def details : {s : Restatement} → Settled s → List Char
       confirmed.\n"
 
 /-- The printed status: its claim's phrase, then its details. -/
-def words {s : Restatement} (x : Settled s) : List Char := x.claim.phrase ++ x.details
+@[expose] def words {s : Restatement} (x : Settled s) : List Char := x.claim.phrase ++ x.details
 
 /-- **The printed words say what the status claims:** they start with a claim's phrase exactly when
 the status makes that claim, whatever names and reason it holds. -/
@@ -257,7 +261,7 @@ theorem names_derived (o : Ident) : o.toString.toList <:+: (Settled.derived (own
 end Settled
 
 /-- The words that say whether a record's restatement stands as confirmed. -/
-def Restatement.words : Restatement → List Char
+@[expose] def Restatement.words : Restatement → List Char
   | .unconfirmed => chars!"No confirmation by an owner is recorded.\n"
   | .confirmed o => Settled.Claim.ownerConfirmed.phrase ++ o.toString.toList ++ chars!".\n"
 
@@ -277,12 +281,12 @@ theorem Restatement.names_confirmed (o : Ident) :
 
 /-- How the answerer's answer is titled where it is printed alone: an answer of the owner only when
 the recorded answerer is the owner. -/
-def Answerer.title : Answerer → String
+@[expose] def Answerer.title : Answerer → String
   | .owner _ => "An answer of the owner"
   | .onBehalf .. => "A decision made on the owner's behalf"
 
 /-- The words that say this answerer gave this verdict, as a consequence of a record prints them. -/
-def Answerer.says (a : Answerer) (v : Verdict) : List Char :=
+@[expose] def Answerer.says (a : Answerer) (v : Verdict) : List Char :=
   (Settled.answered (s := .unconfirmed) a v).words
 
 end LeanIntent

@@ -1,5 +1,8 @@
-import LeanIntent.Declared
-import LeanIntentExamples.Recursive
+module
+
+public import LeanIntent.Declared
+public import LeanIntentExamples.Recursive
+import all Init.Prelude
 
 /-!
 # Records about recursive types without a base constructor
@@ -30,7 +33,15 @@ nothing, and the check reports it (`keepsValue_verdicts`, `keepsValue_possibilit
 A type with no value has no code: the handler refuses `inductive Never | mk (n : Never)`, saying
 that it has no value, since every code denotes a type with a value and Lean's kernel checks the
 isomorphism between the code and the type.
+
+The module imports `Init.Prelude` with `import all`: its proofs reduce the codes of the types it
+declares, whose equality compares the types' names with `Lean.Name.beq`, a function whose body
+Lean's prelude does not expose to a `module` file. A theorem here that such a reduction proves is
+written `:= by rfl`, since Lean checks one written `:= rfl` in the public scope, which that import
+does not reach.
 -/
+
+public section
 
 namespace LeanIntentExamples.WithoutBase
 
@@ -103,12 +114,12 @@ deriving instance LeanIntent.HasCode for Stmt
 
 mutual
 /-- The value of an expression: a block's is that of its statements. -/
-def Expr.eval : Expr → Nat
+@[expose] def Expr.eval : Expr → Nat
   | .lit n => n
   | .add a b => a.eval + b.eval
   | .block s => s.eval
 /-- The value of a statement: that of its expression, or of the last of two statements. -/
-def Stmt.eval : Stmt → Nat
+@[expose] def Stmt.eval : Stmt → Nat
   | .seq _ b => b.eval
   | .expr e => e.eval
 end
@@ -129,7 +140,7 @@ theorem optimize_degenerate :
   simp only [Iso.inv_to]
 
 /-- The optimized statement has the value of the statement. -/
-def keepsValue : IntentRecord (Stmt → Stmt) where
+@[expose] def keepsValue : IntentRecord (Stmt → Stmt) where
   shape := .function _ _
   dom := []
   props := [⟨"keeps the value", fun f => ∀ s, (f s).eval = s.eval⟩]
@@ -151,6 +162,6 @@ theorem keepsValue_verdicts : Verdicts keepsValue [false, true] := by
 confirmed or declined. -/
 theorem keepsValue_possibilities :
     (possibilities keepsValue_verdicts).map Consequence.holds =
-      [fun f => f = fun s => (HasCode.iso (α := Stmt)).inv ((HasCode.iso (α := Stmt)).to s)] := rfl
+      [fun f => f = fun s => (HasCode.iso (α := Stmt)).inv ((HasCode.iso (α := Stmt)).to s)] := by rfl
 
 end LeanIntentExamples.WithoutBase

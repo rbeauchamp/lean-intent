@@ -1,5 +1,8 @@
-import LeanIntentExamples.TrivialWitnesses
-import LeanIntentExamples.WithoutBase
+module
+
+public import LeanIntentExamples.TrivialWitnesses
+public import LeanIntentExamples.WithoutBase
+import all Init.Prelude
 
 /-!
 # Scripts of timed actions whose clock sits inside an argument or is the only argument
@@ -51,7 +54,15 @@ follow them, each of a type whose class held no script of timed actions before t
 
 A `LeanIntent.Clock` inside a list, where no clock part reaches, is a declaration the class cannot
 read, and no verdict about such a type can be proved (`stray_refused`).
+
+The module imports `Init.Prelude` with `import all`: its proofs reduce the codes of the types it
+declares, whose equality compares the types' names with `Lean.Name.beq`, a function whose body
+Lean's prelude does not expose to a `module` file. A theorem here that such a reduction proves is
+written `:= by rfl`, since Lean checks one written `:= rfl` in the public scope, which that import
+does not reach.
 -/
+
+public section
 
 namespace LeanIntentExamples.Clocks
 
@@ -63,19 +74,19 @@ open LeanIntent LeanIntentExamples.TrivialWitnesses
 abbrev Historied := List Bool → Bool
 
 /-- What the agent has seen by the step `t` of the course `v`, oldest first. -/
-def history (v : Course) (t : Fin 2) : List Bool :=
+@[expose] def history (v : Course) (t : Fin 2) : List Bool :=
   if t.val = 0 then [v.sight 0] else [v.sight 0, v.sight 1]
 
 /-- The agent `a` follows the course `v`: at each step, on its history, it takes the action that
 step needs. -/
-def FollowsH (a : Historied) (v : Course) : Prop := ∀ t, a (history v t) = v.need t
+@[expose] def FollowsH (a : Historied) (v : Course) : Prop := ∀ t, a (history v t) = v.need t
 
 /-- The property that the agent follows every readable course. -/
-def followsReadableH : Clause Historied :=
+@[expose] def followsReadableH : Clause Historied :=
   ⟨"follows every readable course", fun a => ∀ v, Readable v → FollowsH a v⟩
 
 /-- The record of an agent with a history that follows every readable course. -/
-def historied : IntentRecord Historied where
+@[expose] def historied : IntentRecord Historied where
   shape := .function _ _
   dom := []
   props := [followsReadableH]
@@ -83,7 +94,7 @@ def historied : IntentRecord Historied where
     ⟨"Follows", Historied × Course, fun p => FollowsH p.1 p.2⟩]
 
 /-- The pair the property gives for each course. -/
-def perCourseH : Pair Historied := ⟨Course, Readable, fun v a => FollowsH a v⟩
+@[expose] def perCourseH : Pair Historied := ⟨Course, Readable, fun v a => FollowsH a v⟩
 
 /-- `perCourseH` is a pair of the property. -/
 theorem perCourseH_pairOf : historied.PairOf followsReadableH perCourseH :=
@@ -91,7 +102,7 @@ theorem perCourseH_pairOf : historied.PairOf followsReadableH perCourseH :=
     ⟨fun h v hv => h (fun _ hd => nomatch hd) v hv, fun h _ => h⟩⟩
 
 /-- The script that takes, at each length of the history, the action the course `v` needs then. -/
-def scriptFor (v : Course) : Historied := fun h => if h.length = 1 then v.need 0 else v.need 1
+@[expose] def scriptFor (v : Course) : Historied := fun h => if h.length = 1 then v.need 0 else v.need 1
 
 /-- The per-course pair is met by the script of timed actions on the history's length fixed to each
 course, and by no other member: not by every agent, the table or a constant. -/
@@ -169,7 +180,7 @@ abbrev Glancer := Glance → Bool
 
 /-- The pair that asks, for each readable course, that the agent take at each step the action that
 step needs, on the glance it has then. -/
-def perCourseG : Pair Glancer :=
+@[expose] def perCourseG : Pair Glancer :=
   ⟨Course, Readable, fun v a => ∀ t, a ⟨t, v.sight t⟩ = v.need t⟩
 
 /-- The per-course pair is met by the projection onto what the agent sees, by the script on the time
@@ -202,7 +213,7 @@ structure TickView where
 
 /-- The pair that asks, for each input bit `b`, that the agent answer `b` at time `0` and its negation
 at time `1`, seeing `false` both times. -/
-def tickPair : Pair (TickView → Bool) :=
+@[expose] def tickPair : Pair (TickView → Bool) :=
   ⟨Bool, fun _ => True, fun b a => a ⟨0, false⟩ = b ∧ a ⟨1, false⟩ = !b⟩
 
 /-- The pair is met by the script on the time fixed to each input bit, and by no other member: not
@@ -245,7 +256,7 @@ abbrev Policy := Clock Nat → Bool
 
 /-- The pair that gives each policy one schedule, the action each of two ticks needs, and asks it to
 keep that schedule. -/
-def perSchedule : Pair Policy := ⟨Fin 2 → Bool, fun _ => True, fun s a => ∀ t, a ⟨t.val⟩ = s t⟩
+@[expose] def perSchedule : Pair Policy := ⟨Fin 2 → Bool, fun _ => True, fun s a => ∀ t, a ⟨t.val⟩ = s t⟩
 
 /-- Every policy keeps its own schedule, so the script on the clock meets the per-schedule pair, as
 no constant, table or every policy does. -/
@@ -283,13 +294,13 @@ theorem perScheduleNat_witnesses :
 
 open LeanIntentExamples.WithoutBase in
 /-- A rose tree's label. -/
-def label : Rose → Nat
+@[expose] def label : Rose → Nat
   | .node n _ => n
 
 open LeanIntentExamples.WithoutBase in
 /-- The pair that asks, for each input bit `b`, that the agent answer `b` at the leaf labelled `0`
 and its negation at the leaf labelled `1`. -/
-def rosePair : Pair (Rose → Bool) :=
+@[expose] def rosePair : Pair (Rose → Bool) :=
   ⟨Bool, fun _ => True, fun b a => a (.node 0 []) = b ∧ a (.node 1 []) = !b⟩
 
 open LeanIntentExamples.WithoutBase in
@@ -355,7 +366,7 @@ open LeanIntentExamples.WithoutBase in
 /-- A link's one field, `next`, holds all of the link, so its reading determines the argument and the
 type alone reads it as what the agent sees; and `Option Link` has two constructors, so no clock part
 reaches inside it. So the class of `Link → Bool` holds no script of timed actions. -/
-theorem link_clocks : (Covered.sig (W := Link → Bool)).clocks = [] := rfl
+theorem link_clocks : (Covered.sig (W := Link → Bool)).clocks = [] := by rfl
 
 /-! ## An agent that sees a history of a type the project declares -/
 
@@ -367,7 +378,7 @@ inductive History where
 
 /-- The pair that asks, for each input bit `b`, that the agent answer `b` on the empty history and
 its negation on the history that saw `false` once. -/
-def historyPair : Pair (History → Bool) :=
+@[expose] def historyPair : Pair (History → Bool) :=
   ⟨Bool, fun _ => True, fun b a => a .nil = b ∧ a (.cons false .nil) = !b⟩
 
 /-- The clock part on a history's length: the number of `cons` nodes along its tails, a count of the

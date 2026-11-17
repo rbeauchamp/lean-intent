@@ -1,4 +1,6 @@
-import LeanIntent.Pairs
+module
+
+public import LeanIntent.Pairs
 
 /-!
 # The pairs of an agent's property, and the class that must serve them
@@ -27,6 +29,8 @@ its pair whose only input is trivial (`every_not_oPair`), although each world al
 an agent that ignores what it sees (`everyPerWorld_blind`).
 -/
 
+public section
+
 namespace LeanIntentExamples.Pairs
 
 open LeanIntent
@@ -42,21 +46,21 @@ structure World where
 abbrev Agent := Bool → Bool
 
 /-- The agent `a` reaches the goal of the world `v`. -/
-def Reaches (a : Agent) (v : World) : Prop := a v.sight = v.need
+@[expose] def Reaches (a : Agent) (v : World) : Prop := a v.sight = v.need
 
 /-- A legible world: what the agent sees there is the action it needs. -/
-def Legible (v : World) : Prop := v.need = v.sight
+@[expose] def Legible (v : World) : Prop := v.need = v.sight
 
 /-- An agent that ignores what it sees, taking one action whatever it sees, as a script fixed in
 advance does. -/
-def Blind (a : Agent) : Prop := ∀ s t, a s = a t
+@[expose] def Blind (a : Agent) : Prop := ∀ s t, a s = a t
 
 /-- The property that the agent reaches the goal of every legible world. -/
-def reachesLegible : Clause Agent :=
+@[expose] def reachesLegible : Clause Agent :=
   ⟨"reaches the goal of every legible world", fun a => ∀ v, Legible v → Reaches a v⟩
 
 /-- The record of an agent that reaches the goal of every legible world. -/
-def agent : IntentRecord Agent where
+@[expose] def agent : IntentRecord Agent where
   shape := .function _ _
   dom := []
   props := [reachesLegible]
@@ -64,7 +68,7 @@ def agent : IntentRecord Agent where
 
 /-- The pair the property gives for each world: the input is the world, the precondition that it is
 legible, and the postcondition that the agent reaches its goal. -/
-def perWorld : Pair Agent := ⟨World, Legible, fun v a => Reaches a v⟩
+@[expose] def perWorld : Pair Agent := ⟨World, Legible, fun v a => Reaches a v⟩
 
 /-- `perWorld` is a pair of the property. -/
 theorem perWorld_pairOf : agent.PairOf reachesLegible perWorld :=
@@ -106,10 +110,10 @@ theorem any_not_blind :
   ⟨whole_any, whole_not_blind⟩
 
 /-- The property that the agent reaches the goal of every world. -/
-def reachesEvery : Clause Agent := ⟨"reaches the goal of every world", fun a => ∀ v, Reaches a v⟩
+@[expose] def reachesEvery : Clause Agent := ⟨"reaches the goal of every world", fun a => ∀ v, Reaches a v⟩
 
 /-- The record of an agent that reaches the goal of every world. -/
-def every : IntentRecord Agent where
+@[expose] def every : IntentRecord Agent where
   shape := .function _ _
   dom := []
   props := [reachesEvery]
@@ -126,7 +130,7 @@ theorem every_not_oPair (C : Agent → Prop) : ¬ OPair (Pair.whole every reache
     seenAlike a ⟨h (fun _ hd => nomatch hd) _, h (fun _ hd => nomatch hd) _⟩
 
 /-- The pair of the record of every world whose input is the world. -/
-def everyPerWorld : Pair Agent := ⟨World, fun _ => True, fun v a => Reaches a v⟩
+@[expose] def everyPerWorld : Pair Agent := ⟨World, fun _ => True, fun v a => Reaches a v⟩
 
 /-- Each world alone is still reached by an agent that ignores what it sees. -/
 theorem everyPerWorld_blind : OPair everyPerWorld Blind :=

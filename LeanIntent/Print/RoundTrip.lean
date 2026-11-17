@@ -1,4 +1,6 @@
-import LeanIntent.Print.Term
+module
+
+public import LeanIntent.Print.Term
 
 /-!
 # The printer's output parses back to the term it printed
@@ -8,6 +10,8 @@ precedence, exactly that term, for every term, every scope and every choice of `
 The proof is by induction on the term, with one claim per precedence (`ClaimA`, `ClaimH`,
 `ClaimS` and `ClaimT`).
 -/
+
+public section
 
 namespace LeanIntent.Print
 
@@ -254,7 +258,7 @@ theorem psUnivs_prUnivs {us : List Level} {ts : List Tok} (h : prUnivs us = some
 /-! ## Terms -/
 
 /-- Whether `e` printed at `p` is in parentheses. -/
-def needsParen : Expr → Prec → Bool
+@[expose] def needsParen : Expr → Prec → Bool
   | .app .., p => p.isArg
   | .sort l, p => !isZero l && p.tight
   | .lit (.natVal _), p => p.tight
@@ -306,20 +310,20 @@ theorem pr_prec (bare : Name → Bool) (sc : List Name) (e : Expr) (p : Prec) :
     · simp
 
 /-- What may follow a term: nothing, a closing bracket, or the `:=` or `;` of a `let`. -/
-def FollowsTerm (rest : List Tok) : Prop :=
+@[expose] def FollowsTerm (rest : List Tok) : Prop :=
   ∀ t, rest.head? = some t →
     t = .rparen ∨ t = .rbrace ∨ t = .rbrack ∨ t = .rstrict ∨ t = .colonEq ∨ t = .semicolon
 
 /-- What may follow a term before `→`: what may follow a term, or `→`. -/
-def FollowsSimple (rest : List Tok) : Prop :=
+@[expose] def FollowsSimple (rest : List Tok) : Prop :=
   ∀ t, rest.head? = some t → t = .rparen ∨ t = .rbrace ∨ t = .rbrack ∨ t = .rstrict ∨
     t = .colonEq ∨ t = .semicolon ∨ t = .arrow
 
 /-- The application of `h` to the arguments `as`, in order. -/
-def mkApps (h : Expr) (as : List Expr) : Expr := as.foldl .app h
+@[expose] def mkApps (h : Expr) (as : List Expr) : Expr := as.foldl .app h
 
 /-- `ta` is an argument's tokens, which `psAtom` reads back as `a` before anything but `.{`. -/
-def ArgOk (sc : List Name) (a : Expr) (ta : List Tok) : Prop :=
+@[expose] def ArgOk (sc : List Name) (a : Expr) (ta : List Tok) : Prop :=
   atomStart ta = true ∧ ∀ rest, rest.head? ≠ some .dotBrace → ∀ f, 4 * ta.length + 1 ≤ f →
     psAtom f sc (ta ++ rest) = some (a, rest)
 
@@ -375,7 +379,7 @@ theorem followsSimple_of_term {rest : List Tok} (h : FollowsTerm rest) : Follows
   fun t ht => by rcases h t ht with h | h | h | h | h | h <;> simp [h]
 
 /-- Whether a token starts a binder form: `fun`, `∀`, `let` or `have`. -/
-def bindStart : Tok → Bool
+@[expose] def bindStart : Tok → Bool
   | .kwFun | .pi | .kwLet | .kwHave => true
   | _ => false
 
@@ -456,23 +460,23 @@ theorem psArgs_loop {sc : List Name} {as : List Expr} {tas : List (List Tok)}
 /-! ## The claims, at each precedence -/
 
 /-- At an argument's precedence, `psAtom` reads `e` back. -/
-def ClaimA (bare : Name → Bool) (sc : List Name) (e : Expr) : Prop :=
+@[expose] def ClaimA (bare : Name → Bool) (sc : List Name) (e : Expr) : Prop :=
   ∀ ts, pr bare sc e .arg = some ts → ArgOk sc e ts
 
 /-- At a function's precedence, `psSimple` reads back `e` applied to the arguments after it. -/
-def ClaimH (bare : Name → Bool) (sc : List Name) (e : Expr) : Prop :=
+@[expose] def ClaimH (bare : Name → Bool) (sc : List Name) (e : Expr) : Prop :=
   ∀ ts, pr bare sc e .head = some ts → ∀ as tas, ArgsOk sc as tas →
     ∀ rest, rest.head? ≠ some .dotBrace → atomStart rest = false →
     ∀ f, 4 * (ts.length + tas.flatten.length) + 2 ≤ f →
     psSimple f sc (ts ++ tas.flatten ++ rest) = some (mkApps e as, rest)
 
 /-- Before `→`, `psSimple` reads `e` back. -/
-def ClaimS (bare : Name → Bool) (sc : List Name) (e : Expr) : Prop :=
+@[expose] def ClaimS (bare : Name → Bool) (sc : List Name) (e : Expr) : Prop :=
   ∀ ts, pr bare sc e .simple = some ts → ∀ rest, FollowsSimple rest → ∀ f, 4 * ts.length + 2 ≤ f →
     psSimple f sc (ts ++ rest) = some (e, rest)
 
 /-- At the lowest precedence, `psTerm` reads `e` back. -/
-def ClaimT (bare : Name → Bool) (sc : List Name) (e : Expr) : Prop :=
+@[expose] def ClaimT (bare : Name → Bool) (sc : List Name) (e : Expr) : Prop :=
   ∀ ts, pr bare sc e .term = some ts → ∀ rest, FollowsTerm rest → ∀ f, 4 * ts.length + 3 ≤ f →
     psTerm f sc (ts ++ rest) = some (e, rest)
 

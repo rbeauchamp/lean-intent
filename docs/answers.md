@@ -2,7 +2,7 @@
 
 **The owner's answers** (`LeanIntent.Answer`, `LeanIntent.Accepted`): each consequence of a record that is confirmed or declined, by the owner or on the owner's behalf, stays a requirement of every later revision, and a revision that breaks one is refused, by the answer it breaks.
 
-Module: `LeanIntent/Answers.lean`; an answer's canonical text is written by `LeanIntent/Render.lean`.
+Module: `LeanIntent/Answers.lean`; an answer's canonical text is written by `LeanIntent/Render/Text.lean`.
 
 **Complete in this version:** the owner's answers with the type of the revisions that keep them, and the canonical text of an answer.
 

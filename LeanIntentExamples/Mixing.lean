@@ -1,4 +1,6 @@
-import LeanIntent.Progress
+module
+
+public import LeanIntent.Progress
 
 /-!
 # O2 before running, for a property over all 64-bit inputs
@@ -36,6 +38,8 @@ mixing function meets it is a separate obligation of the implementation (`Intent
 which this recipe leaves as open as it found it.
 -/
 
+public section
+
 namespace LeanIntentExamples.Mixing
 
 open LeanIntent
@@ -68,7 +72,7 @@ inductive Order where
   | cab
 
 /-- The inputs put in the order `o`. -/
-def Order.apply : Order → Inputs → Inputs
+@[expose] def Order.apply : Order → Inputs → Inputs
   | .abc, (a, b, c) => (a, b, c)
   | .bac, (a, b, c) => (b, a, c)
   | .acb, (a, b, c) => (a, c, b)
@@ -84,7 +88,7 @@ inductive Shift where
   | add
 
 /-- One input shifted by `d`. -/
-def Shift.apply : Shift → UInt64 → UInt64 → UInt64
+@[expose] def Shift.apply : Shift → UInt64 → UInt64 → UInt64
   | .flip, x, d => x ^^^ d
   | .add, x, d => x + d
 
@@ -98,26 +102,26 @@ structure Rule where
   amount : Inputs
 
 /-- The inputs the rule `r` moves `x` to. -/
-def Rule.apply (r : Rule) (x : Inputs) : Inputs :=
+@[expose] def Rule.apply (r : Rule) (x : Inputs) : Inputs :=
   let (a, b, c) := r.order.apply x
   (r.shift.apply a r.amount.1, r.shift.apply b r.amount.2.1, r.shift.apply c r.amount.2.2)
 
 /-- The rule `r` moves inputs: it is not the rule that keeps the inputs in their given order and
 shifts them by nothing. -/
-def Rule.Moves (r : Rule) : Prop := ¬ (r.order = .abc ∧ r.amount = (0, 0, 0))
+@[expose] def Rule.Moves (r : Rule) : Prop := ¬ (r.order = .abc ∧ r.amount = (0, 0, 0))
 
 /-- Changing exactly one input of `f`, the others kept, always changes the spot. -/
-def OneInputMoves (f : Inputs → UInt64) : Prop :=
+@[expose] def OneInputMoves (f : Inputs → UInt64) : Prop :=
   (∀ a a' b c, f (a, b, c) = f (a', b, c) → a = a') ∧
     (∀ a b b' c, f (a, b, c) = f (a, b', c) → b = b') ∧
     (∀ a b c c', f (a, b, c) = f (a, b, c') → c = c')
 
 /-- No rule that moves inputs keeps the spot of every input of `f`. -/
-def NoRuleKeepsSpots (f : Inputs → UInt64) : Prop :=
+@[expose] def NoRuleKeepsSpots (f : Inputs → UInt64) : Prop :=
   ∀ r : Rule, r.Moves → ∃ x, f (r.apply x) ≠ f x
 
 /-- The intent record of the two functions, a description made of functions with no state. -/
-def hashes : IntentRecord Hashes where
+@[expose] def hashes : IntentRecord Hashes where
   shape := .bundle (fun _ => ()) ⟨"hash2", Inputs, UInt64, fun w => w.hash2⟩
     [⟨"hash3", Inputs, UInt64, fun w => w.hash3⟩]
   dom := []
@@ -150,27 +154,27 @@ inductive Place where
   | first
   | second
   | third
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- What tells the places apart: the difference of the second pair `scramble` exchanges. -/
-def Place.mask : Place → UInt64
+@[expose] def Place.mask : Place → UInt64
   | .first => 6
   | .second => 10
   | .third => 18
 
 /-- What `scramble` flips in a word. -/
-def kick (p : Place) (x : UInt64) : UInt64 :=
+@[expose] def kick (p : Place) (x : UInt64) : UInt64 :=
   if x = 0 ∨ x = 1 then 1 else if x = 2 ∨ x = 2 ^^^ p.mask then p.mask else 0
 
 /-- The identity, except that 0 and 1 are exchanged, and 2 and `2 ^^^ p.mask`. -/
-def scramble (p : Place) (x : UInt64) : UInt64 := x ^^^ kick p x
+@[expose] def scramble (p : Place) (x : UInt64) : UInt64 := x ^^^ kick p x
 
 /-- A function of three inputs, one scrambled word for each. -/
-def mix (x : Inputs) : UInt64 :=
+@[expose] def mix (x : Inputs) : UInt64 :=
   scramble .first x.1 ^^^ scramble .second x.2.1 ^^^ scramble .third x.2.2
 
 /-- The model of the record. It is no hash function. -/
-def model : Hashes := ⟨mix, mix⟩
+@[expose] def model : Hashes := ⟨mix, mix⟩
 
 /-! ## Exclusive or -/
 
@@ -299,7 +303,7 @@ theorem rigid_flip (i j : Place) (d : UInt64)
   rcases hd with rfl | rfl <;> revert h2 <;> cases i <;> cases j <;> decide
 
 /-- The words whose double lies below 32. -/
-def candidate (k : Fin 32) : UInt64 :=
+@[expose] def candidate (k : Fin 32) : UInt64 :=
   UInt64.ofNat (if k.val < 16 then k.val else 9223372036854775808 + k.val - 16)
 
 /-- A word whose double lies below 32 is a candidate. -/
@@ -317,10 +321,10 @@ theorem exists_candidate {d : UInt64} (h : (d + d).toNat < 32) : ∃ k, d = cand
       d.toNat by omega, UInt64.ofNat_toNat]
 
 /-- The inputs at which each candidate is refuted. -/
-def probes : List UInt64 := [1, 2, 3, 4, 5, 8, 16, 1024]
+@[expose] def probes : List UInt64 := [1, 2, 3, 4, 5, 8, 16, 1024]
 
 /-- The difference at `x` of an input shifted by adding `d`. -/
-def addDifference (i j : Place) (d x : UInt64) : UInt64 := scramble i (x + d) ^^^ scramble j x
+@[expose] def addDifference (i j : Place) (d x : UInt64) : UInt64 := scramble i (x + d) ^^^ scramble j x
 
 /-- Lean's kernel refutes each candidate at the probes, for every pair of places, except no shift at
 one place. These are 288 evaluations at a few words each. -/
@@ -435,7 +439,7 @@ theorem hashes_o2Run : O2Run hashes :=
 /-! ## The other obligations -/
 
 /-- The pair whose functions both send every input to spot 0. -/
-def constantZero : Hashes := ⟨fun _ => 0, fun _ => 0⟩
+@[expose] def constantZero : Hashes := ⟨fun _ => 0, fun _ => 0⟩
 
 /-- O2: the record has a model of its (empty) domain hypotheses and an instance of its one
 vocabulary predicate. -/

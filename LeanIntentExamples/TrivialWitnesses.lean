@@ -1,5 +1,7 @@
-import LeanIntentExamples.Pairs
-import LeanIntent.TrivialWitnesses
+module
+
+public import LeanIntentExamples.Pairs
+public import LeanIntent.TrivialWitnesses
 
 /-!
 # The trivial witnesses of an agent's pairs
@@ -33,6 +35,8 @@ what it sees does, and with it the members that do not read the clock and that r
 agent sees (`wholeCourse_witnesses`). `LeanIntentExamples.Clocks` shows the scripts whose clock
 sits inside an argument or is the subject's only argument.
 -/
+
+public section
 
 namespace LeanIntentExamples.TrivialWitnesses
 
@@ -92,24 +96,24 @@ structure Course where
 abbrev Clocked := Fin 2 → Bool → Bool
 
 /-- The agent `a` follows the course `v`: at each step, it takes the action that step needs. -/
-def Follows (a : Clocked) (v : Course) : Prop := ∀ t, a t (v.sight t) = v.need t
+@[expose] def Follows (a : Clocked) (v : Course) : Prop := ∀ t, a t (v.sight t) = v.need t
 
 /-- A readable course: what the agent sees at each step is the action it needs then. -/
-def Readable (v : Course) : Prop := ∀ t, v.need t = v.sight t
+@[expose] def Readable (v : Course) : Prop := ∀ t, v.need t = v.sight t
 
 /-- The property that the agent follows every readable course. -/
-def followsReadable : Clause Clocked :=
+@[expose] def followsReadable : Clause Clocked :=
   ⟨"follows every readable course", fun a => ∀ v, Readable v → Follows a v⟩
 
 /-- The record of an agent with a clock that follows every readable course. -/
-def clocked : IntentRecord Clocked where
+@[expose] def clocked : IntentRecord Clocked where
   shape := .function _ _
   dom := []
   props := [followsReadable]
   vocab := [⟨"Readable", Course, Readable⟩, ⟨"Follows", Clocked × Course, fun p => Follows p.1 p.2⟩]
 
 /-- The pair the property gives for each course. -/
-def perCourse : Pair Clocked := ⟨Course, Readable, fun v a => Follows a v⟩
+@[expose] def perCourse : Pair Clocked := ⟨Course, Readable, fun v a => Follows a v⟩
 
 /-- `perCourse` is a pair of the property. -/
 theorem perCourse_pairOf : clocked.PairOf followsReadable perCourse :=
@@ -117,13 +121,13 @@ theorem perCourse_pairOf : clocked.PairOf followsReadable perCourse :=
     ⟨fun h v hv => h (fun _ hd => nomatch hd) v hv, fun h _ => h⟩⟩
 
 /-- The course that needs `true` and then `false`, and shows it. -/
-def zigzag : Course := ⟨fun t => t.val == 0, fun t => t.val == 0⟩
+@[expose] def zigzag : Course := ⟨fun t => t.val == 0, fun t => t.val == 0⟩
 
 /-- The course that needs `true` at each step, and shows it. -/
-def allTrue : Course := ⟨fun _ => true, fun _ => true⟩
+@[expose] def allTrue : Course := ⟨fun _ => true, fun _ => true⟩
 
 /-- The course that needs `false` at each step, and shows it. -/
-def allFalse : Course := ⟨fun _ => false, fun _ => false⟩
+@[expose] def allFalse : Course := ⟨fun _ => false, fun _ => false⟩
 
 /-- No constant follows the course that needs `true` and then `false`. -/
 theorem zigzag_not_constant {a : Clocked} (h : Witness.Constant a) : ¬ Follows a zigzag := by
