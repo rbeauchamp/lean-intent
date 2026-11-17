@@ -1,5 +1,7 @@
-import LeanIntent.Degenerate
-import LeanIntent.Refinement
+module
+
+public import LeanIntent.Degenerate
+public import LeanIntent.Refinement
 
 /-!
 # A sorting function whose rearrangement property is forgotten
@@ -30,47 +32,49 @@ hypothesis fails O2 (`contraDom_not_o2`), and a record whose property nothing fa
 (`anything_not_o3`).
 -/
 
+public section
+
 namespace LeanIntentExamples.Sorting
 
 open LeanIntent
 
 /-- A list is in ascending order. -/
-def Sorted (l : List Int) : Prop := l.Pairwise (· ≤ ·)
+@[expose] def Sorted (l : List Int) : Prop := l.Pairwise (· ≤ ·)
 
 /-- Every output is in ascending order. -/
-def sortedClause : Clause (List Int → List Int) := ⟨"sorted", fun f => ∀ l, Sorted (f l)⟩
+@[expose] def sortedClause : Clause (List Int → List Int) := ⟨"sorted", fun f => ∀ l, Sorted (f l)⟩
 
 /-- Every output is a rearrangement of its input. -/
-def permClause : Clause (List Int → List Int) := ⟨"rearranges", fun f => ∀ l, (f l).Perm l⟩
+@[expose] def permClause : Clause (List Int → List Int) := ⟨"rearranges", fun f => ∀ l, (f l).Perm l⟩
 
 /-- The vocabulary predicate `Sorted`. -/
-def sortedPred : Pred := ⟨"Sorted", List Int, Sorted⟩
+@[expose] def sortedPred : Pred := ⟨"Sorted", List Int, Sorted⟩
 
 /-- The vocabulary predicate `Perm`, over pairs of lists. -/
-def permPred : Pred := ⟨"Perm", List Int × List Int, fun p => p.1.Perm p.2⟩
+@[expose] def permPred : Pred := ⟨"Perm", List Int × List Int, fun p => p.1.Perm p.2⟩
 
 /-- The record as first written: it forgets the rearrangement property. -/
-def sortedOnly : IntentRecord (List Int → List Int) where
+@[expose] def sortedOnly : IntentRecord (List Int → List Int) where
   shape := .function _ _
   dom := []
   props := [sortedClause]
   vocab := [sortedPred]
 
 /-- The corrected record. -/
-def sorting : IntentRecord (List Int → List Int) where
+@[expose] def sorting : IntentRecord (List Int → List Int) where
   shape := .function _ _
   dom := []
   props := [sortedClause, permClause]
   vocab := [sortedPred, permPred]
 
 /-- The comparison the implementation sorts by. -/
-def le (a b : Int) : Bool := decide (a ≤ b)
+@[expose] def le (a b : Int) : Bool := decide (a ≤ b)
 
 /-- An implementation: Lean's merge sort. -/
-def sort (l : List Int) : List Int := l.mergeSort le
+@[expose] def sort (l : List Int) : List Int := l.mergeSort le
 
 /-- The degenerate implementation that returns the empty list for every input. -/
-def nilSort (_ : List Int) : List Int := []
+@[expose] def nilSort (_ : List Int) : List Int := []
 
 theorem sort_sorted (l : List Int) : Sorted (sort l) :=
   (List.pairwise_mergeSort (le := le)
@@ -220,7 +224,7 @@ theorem sorting_metBy_nil : metBy (List Int → List Int) [false, false] = [] :=
 /-! ## Records the obligations refuse -/
 
 /-- The record under a domain hypothesis nothing satisfies. -/
-def contraDom : IntentRecord (List Int → List Int) where
+@[expose] def contraDom : IntentRecord (List Int → List Int) where
   shape := .function _ _
   dom := [⟨"impossible", fun _ => False⟩]
   props := [sortedClause]
@@ -232,7 +236,7 @@ theorem contraDom_not_o2 : ¬ O2 contraDom := fun h =>
   hw _ (List.mem_singleton.mpr rfl)
 
 /-- The record whose one property every function meets. -/
-def anything : IntentRecord (List Int → List Int) where
+@[expose] def anything : IntentRecord (List Int → List Int) where
   shape := .function _ _
   dom := []
   props := [⟨"anything", fun _ => True⟩]
@@ -247,7 +251,7 @@ theorem anything_not_o3 : ¬ O3 anything := fun h =>
 
 /-- The implementation's specification, which states its code; below the intent record that is
 harmless, since the link to the record is proved. -/
-def ImplSpec (f : List Int → List Int) : Prop := ∀ l, f l = l.mergeSort le
+@[expose] def ImplSpec (f : List Int → List Int) : Prop := ∀ l, f l = l.mergeSort le
 
 theorem implSpec_refines : Refines sorting (fun f => f) ImplSpec := by
   intro f hf _
@@ -272,14 +276,14 @@ confirmation, and that it is Lean's merge sort is a decision the assistant made 
 behalf, since the owner never saw that consequence. -/
 
 /-- The plain words for a function from lists of integers to lists of integers. -/
-def listFunctionShape : Gloss where
+@[expose] def listFunctionShape : Gloss where
   requires := "The subject is a function from lists of integers to lists of integers."
   rulesOut := "Any subject of another kind, such as a step of a system with state."
   allows := "Every function of that type, until the properties narrow it."
   freedom := "None of its own: the shape fixes only what kind of thing the subject is."
 
 /-- The plain words for the property `sorted`. -/
-def sortedGloss : Gloss where
+@[expose] def sortedGloss : Gloss where
   requires := "For every input list, the output is in ascending order: each element is at most \
     every element after it."
   rulesOut := "Any function that, for some input, returns a list with an element greater than \
@@ -290,7 +294,7 @@ def sortedGloss : Gloss where
     return different sorted lists for the same input."
 
 /-- The plain words for the property `rearranges`. -/
-def permGloss : Gloss where
+@[expose] def permGloss : Gloss where
   requires := "For every input list, the output holds exactly the input's elements, each as many \
     times as the input does, in some order."
   rulesOut := "Any function that drops, adds or changes an element, such as the function \
@@ -300,14 +304,14 @@ def permGloss : Gloss where
     same input differently."
 
 /-- The plain words for the predicate `Sorted`. -/
-def sortedPredGloss : Gloss where
+@[expose] def sortedPredGloss : Gloss where
   requires := "Sorted holds of a list when each of its elements is at most every element after it."
   rulesOut := "A list with an element greater than one after it, such as [1, 0]."
   allows := "The empty list, any list of one element, and lists with repeated elements."
   freedom := "None: it is a definition, which fixes which lists it holds of."
 
 /-- The plain words for the predicate `Perm`. -/
-def permPredGloss : Gloss where
+@[expose] def permPredGloss : Gloss where
   requires := "Perm holds of a pair of lists when the first is a rearrangement of the second: \
     the same elements, each as many times."
   rulesOut := "A pair whose lists differ in some element or in how many times it occurs, such \
@@ -316,7 +320,7 @@ def permPredGloss : Gloss where
   freedom := "None: it is a definition, which fixes which pairs it holds of."
 
 /-- The record as first written, explained. -/
-def sortedOnlyExplained : Explanation sortedOnly where
+@[expose] def sortedOnlyExplained : Explanation sortedOnly where
   shape := listFunctionShape
   dom := []
   props := [sortedGloss]
@@ -338,7 +342,7 @@ def sortedOnlyExplained : Explanation sortedOnly where
       settled := .answered (.owner (.of "richard")) .declined }]
 
 /-- The corrected record, explained. -/
-def sortingExplained : Explanation sorting where
+@[expose] def sortingExplained : Explanation sorting where
   shape := listFunctionShape
   dom := []
   props := [sortedGloss, permGloss]

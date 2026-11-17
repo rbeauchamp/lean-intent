@@ -1,4 +1,7 @@
-import LeanIntent.Declared
+module
+
+public import LeanIntent.Declared
+import all Init.Prelude
 
 /-!
 # Records about types the project declares
@@ -18,7 +21,13 @@ constant at each light, since `Light` has finitely many values, and the identity
 (`light_degenerate`); a record that asks only that red follow green is met by the constant at red,
 which the check reports (`afterGreen_verdicts`). The projections of a structure reach into the
 fields of its fields (`labelled_degenerate`).
+
+The module imports `Init.Prelude` with `import all`, as a project's `module` file does where a proof
+reduces the code of a type it declares: deciding that two such codes are equal compares the types'
+names with `Lean.Name.beq`, whose body Lean's prelude does not expose.
 -/
+
+public section
 
 namespace LeanIntentExamples.Declared
 
@@ -37,7 +46,7 @@ inductive Light where
   | red
   | amber
   | green
-  deriving DecidableEq, LeanIntent.HasCode
+  deriving @[expose] DecidableEq, LeanIntent.HasCode
 
 /-- Two values of one type. -/
 structure Pair (α : Type) where
@@ -94,7 +103,7 @@ theorem point_degenerate :
   rfl
 
 /-- The result is at least the first coordinate. -/
-def atLeastX : IntentRecord (Point → Nat) where
+@[expose] def atLeastX : IntentRecord (Point → Nat) where
   shape := .function _ _
   dom := []
   props := [⟨"at least the first coordinate", fun f => ∀ p, p.x ≤ f p⟩]
@@ -129,7 +138,7 @@ theorem light_degenerate :
   simp only [Iso.inv_to]
 
 /-- Red follows green. -/
-def afterGreen : IntentRecord (Light → Light) where
+@[expose] def afterGreen : IntentRecord (Light → Light) where
   shape := .function _ _
   dom := []
   props := [⟨"red follows green", fun f => f .green = .red⟩]

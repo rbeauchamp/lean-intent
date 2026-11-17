@@ -2,7 +2,7 @@
 
 **A record generic in its parameters** (`LeanIntent.Family`), such as the types a world is made of: what its obligations mean, what checking or rendering it at representative values establishes, and what it does not.
 
-Modules: `LeanIntent/Generic.lean`, and `LeanIntent/Render.lean` for the rendering. Worked example: [`LeanIntentExamples/DayWorld.lean`](../LeanIntentExamples/DayWorld.lean).
+Modules: `LeanIntent/Generic.lean`, and `LeanIntent/Render/Text.lean` for the rendering. Worked example: [`LeanIntentExamples/DayWorld.lean`](../LeanIntentExamples/DayWorld.lean).
 
 **Complete in this version:** the link between a family and its instances, for every obligation, and the rendering of a generic explanation, in general and at representative values.
 

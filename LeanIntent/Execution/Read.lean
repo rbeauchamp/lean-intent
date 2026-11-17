@@ -1,7 +1,9 @@
-import Lean
-import LeanIntent.Execution
-import LeanIntent.Execution.Code
-import LeanIntent.Implementation.Read
+module
+
+public import Lean
+public import LeanIntent.Execution
+public import LeanIntent.Execution.Code
+public import LeanIntent.Implementation.Read
 
 /-!
 # Reading what a project's executables run from the finished build
@@ -105,6 +107,8 @@ modules given are all the project's, as the other readers trust. An executable w
 Lean cannot import is an error.
 -/
 
+public section
+
 namespace LeanIntent.Execution.Read
 
 open Lean Meta LeanIntent.Render LeanIntent.Confirmation.Read
@@ -141,7 +145,7 @@ def claims (mods : Array Name) : MetaM (Array Claim) := do
 
 /-- The declarations the IR expression `e` calls (`IR.Expr.fap`) or makes a closure of
 (`IR.Expr.pap`). -/
-def exprRefs : IR.Expr → List Name
+@[expose] def exprRefs : IR.Expr → List Name
   | .fap c _ | .pap c _ => [c]
   | .ctor .. | .reset .. | .reuse .. | .proj .. | .uproj .. | .sproj .. | .ap .. | .box ..
   | .unbox .. | .lit .. | .isShared .. => []
@@ -160,14 +164,14 @@ partial def bodyRefs : IR.FnBody → List Name
 /-- The declarations that the IR the build stored for `n`, as Lean finds it (`IR.findEnvDecl`),
 calls or makes a closure of: none where Lean finds no IR for `n`, or where its IR declares it
 implemented in another language (`extern`). -/
-def irRefs (env : Environment) (n : Name) : List Name :=
+@[expose] def irRefs (env : Environment) (n : Name) : List Name :=
   match IR.findEnvDecl env n with
   | some (.fdecl _ _ _ body _) => bodyRefs body
   | some (.extern ..) | none => []
 
 /-- The modules of `env` whose imports reach the module `m`, `m` included: those whose code can
 call a declaration of `m`. -/
-def importersOf (env : Environment) (m : Name) : Std.HashSet Name := Id.run do
+@[expose] def importersOf (env : Environment) (m : Name) : Std.HashSet Name := Id.run do
   let names := env.header.moduleNames
   let mut importers : Std.HashMap Name (Array Name) := {}
   for h : i in [0:names.size] do
@@ -189,7 +193,7 @@ def importersOf (env : Environment) (m : Name) : Std.HashSet Name := Id.run do
 /-- The module of `env` that `n` belongs to, where `env` imports it: the module that declares the
 constant `n`, or, for a declaration the environment holds no constant of, the module whose IR holds
 it. -/
-def importedModuleOf (env : Environment) (n : Name) : Option Name :=
+@[expose] def importedModuleOf (env : Environment) (n : Name) : Option Name :=
   env.getModuleIdxFor? n |>.bind fun i => env.header.moduleNames[i.toNat]?
 
 /-- **Whether `main` reaches the implementation `c`** in the current environment, through the

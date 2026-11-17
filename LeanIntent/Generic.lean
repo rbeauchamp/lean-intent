@@ -1,4 +1,6 @@
-import LeanIntent.Progress
+module
+
+public import LeanIntent.Progress
 
 /-!
 # Records generic in a world's types, and what an instance of one establishes
@@ -30,6 +32,8 @@ So a representative instance is a check that can find a counterexample and a rea
 not in general a proof of the generic record.
 -/
 
+public section
+
 namespace LeanIntent
 
 universe u v
@@ -44,7 +48,7 @@ variable {P : Sort v} {W : P → Type u}
 
 /-- The generic claim for the obligation `O`: it holds of the record at every parameter that meets
 `Good`. -/
-def HoldsWhere (r : Family P W) (Good : P → Prop) (O : (p : P) → IntentRecord (W p) → Prop) : Prop :=
+@[expose] def HoldsWhere (r : Family P W) (Good : P → Prop) (O : (p : P) → IntentRecord (W p) → Prop) : Prop :=
   ∀ p, Good p → O p (r p)
 
 /-- The generic claim gives the obligation at every instance meeting its condition. -/
@@ -83,20 +87,20 @@ theorem o2Run_along {r : Family P W} {p q : P} (φ : W p → W q)
 /-! ## An instance does not establish the generic claim -/
 
 /-- A record that asks of a subject of type `T` that a type `A` has a value. -/
-def inhabitedRecord (A T : Type) (shape : Shape T) : IntentRecord T where
+@[expose] def inhabitedRecord (A T : Type) (shape : Shape T) : IntentRecord T where
   shape := shape
   dom := []
   props := [⟨"the parameter has a value", fun _ => Nonempty A⟩]
   vocab := []
 
 /-- The family over types of `inhabitedRecord`, about a subject of the plain value `Unit`. -/
-def inhabitedValue : Family Type (fun _ => Unit) := fun A => inhabitedRecord A Unit (.value _)
+@[expose] def inhabitedValue : Family Type (fun _ => Unit) := fun A => inhabitedRecord A Unit (.value _)
 
 /-- The family over types of `inhabitedRecord`, about a step of a state of two values. -/
-def inhabitedStep : Family Type (fun _ => Bool → Bool) := fun A => inhabitedRecord A _ (.step Bool)
+@[expose] def inhabitedStep : Family Type (fun _ => Bool → Bool) := fun A => inhabitedRecord A _ (.step Bool)
 
 /-- The family over types whose hypothesis asks that the type has a value. -/
-def inhabitedDom : Family Type (fun _ => Unit) := fun A =>
+@[expose] def inhabitedDom : Family Type (fun _ => Unit) := fun A =>
   ⟨.value _, [⟨"the parameter has a value", fun _ => Nonempty A⟩], [], []⟩
 
 /-- For each obligation, a family of which it holds at one parameter and fails at another, so none

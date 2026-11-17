@@ -1,4 +1,6 @@
-import LeanIntent.Degenerate
+module
+
+public import LeanIntent.Degenerate
 
 /-!
 # A counter: progress refuses a record that a step doing nothing meets
@@ -16,19 +18,21 @@ on the subject's type and not on its declared shape, it still reports that step 
 (`neverDecreasesAsValue_o4`, `neverDecreasesAsValue_verdicts`).
 -/
 
+public section
+
 namespace LeanIntentExamples.Counter
 
 open LeanIntent
 
 /-- The counter never decreases: a safety property, which doing nothing meets. -/
-def neverDecreases : IntentRecord (Nat → Nat) where
+@[expose] def neverDecreases : IntentRecord (Nat → Nat) where
   shape := .step Nat
   dom := []
   props := [⟨"never decreases", fun tick => ∀ n, n ≤ tick n⟩]
   vocab := []
 
 /-- Each step adds one. -/
-def advances : IntentRecord (Nat → Nat) where
+@[expose] def advances : IntentRecord (Nat → Nat) where
   shape := .step Nat
   dom := []
   props := [⟨"adds one", fun tick => ∀ n, tick n = n + 1⟩]
@@ -73,7 +77,7 @@ theorem advances_verdicts : Verdicts advances [false, false] := by
     fun h => absurd (h.2 _ (List.mem_singleton.mpr rfl) 0) (by decide), trivial⟩
 
 /-- `neverDecreases` declared with the wrong shape, as a plain value. -/
-def neverDecreasesAsValue : IntentRecord (Nat → Nat) := { neverDecreases with shape := .value _ }
+@[expose] def neverDecreasesAsValue : IntentRecord (Nat → Nat) := { neverDecreases with shape := .value _ }
 
 /-- O4 asks a plain value nothing, so the record declared with the wrong shape meets it. -/
 theorem neverDecreasesAsValue_o4 : O4 neverDecreasesAsValue := trivial

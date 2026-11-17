@@ -1,4 +1,6 @@
-import LeanIntent.Record
+module
+
+public import LeanIntent.Record
 
 /-!
 # The adequacy obligations and their goal formers
@@ -40,6 +42,8 @@ Lean's kernel checks that pairing when the record is declared, so O1 holds of ev
 construction (`o1_wellTyped`), and `o1_correct` fixes which statements and types `o1` lists.
 -/
 
+public section
+
 namespace LeanIntent
 
 universe u
@@ -49,7 +53,7 @@ variable {W : Type u}
 /-! ## Goals -/
 
 /-- Every goal of the list holds: their conjunction, `True` for none. -/
-def Goals : List Prop → Prop
+@[expose] def Goals : List Prop → Prop
   | [] => True
   | g :: gs => g ∧ Goals gs
 
@@ -64,26 +68,26 @@ theorem goals_map {α : Sort _} (f : α → Prop) : (l : List α) → (Goals (l.
 theorem goals_singleton (g : Prop) : Goals [g] ↔ g := by simp [Goals]
 
 /-- `P` has an instance. -/
-def HasInstance {α : Sort _} (P : α → Prop) : Prop := ∃ a, P a
+@[expose] def HasInstance {α : Sort _} (P : α → Prop) : Prop := ∃ a, P a
 
 /-- `P` has a non-instance. -/
-def HasNonInstance {α : Sort _} (P : α → Prop) : Prop := ∃ a, ¬ P a
+@[expose] def HasNonInstance {α : Sort _} (P : α → Prop) : Prop := ∃ a, ¬ P a
 
 /-! ## O1, well formed -/
 
 /-- A clause with the type it is admitted at. -/
-def Clause.typed (c : Clause W) : (T : Type u) × T := ⟨W → Prop, c.holds⟩
+@[expose] def Clause.typed (c : Clause W) : (T : Type u) × T := ⟨W → Prop, c.holds⟩
 
 /-- A predicate with the type it is admitted at. -/
-def Pred.typed (p : Pred.{u}) : (T : Type u) × T := ⟨p.Arg → Prop, p.holds⟩
+@[expose] def Pred.typed (p : Pred.{u}) : (T : Type u) × T := ⟨p.Arg → Prop, p.holds⟩
 
 /-- O1's goals: every statement of the record, the domain hypotheses, the properties and the
 vocabulary in that order, each paired with the type it is admitted at. -/
-def o1 (r : IntentRecord W) : List ((T : Type u) × T) :=
+@[expose] def o1 (r : IntentRecord W) : List ((T : Type u) × T) :=
   r.dom.map Clause.typed ++ r.props.map Clause.typed ++ r.vocab.map Pred.typed
 
 /-- What O1 asks, written apart from the former. -/
-def intendedO1 : IntentRecord W → List ((T : Type u) × T)
+@[expose] def intendedO1 : IntentRecord W → List ((T : Type u) × T)
   | ⟨_, dom, props, vocab⟩ =>
     dom.map (fun c => ⟨W → Prop, c.holds⟩) ++ props.map (fun c => ⟨W → Prop, c.holds⟩) ++
       vocab.map (fun p => ⟨p.Arg → Prop, p.holds⟩)
@@ -102,14 +106,14 @@ theorem o1_wellTyped (r : IntentRecord W) : ∀ g ∈ o1 r, Nonempty g.1 :=
 /-- O2's goals when a revision is confirmed: a joint model of the domain hypotheses, then an
 instance of each predicate of the vocabulary. The record's own joint model is asked for only
 before a deliverable runs (`o2Run`), since it may be the very thing the work is to find. -/
-def o2 (r : IntentRecord W) : List Prop :=
+@[expose] def o2 (r : IntentRecord W) : List Prop :=
   HasInstance r.Dom :: r.vocab.map fun p => HasInstance p.holds
 
 /-- O2 holds of `r`. -/
-def O2 (r : IntentRecord W) : Prop := Goals (o2 r)
+@[expose] def O2 (r : IntentRecord W) : Prop := Goals (o2 r)
 
 /-- What O2 asks at confirmation, written apart from the former. -/
-def intendedO2 (r : IntentRecord W) : Prop :=
+@[expose] def intendedO2 (r : IntentRecord W) : Prop :=
   (∃ w, ∀ d ∈ r.dom, d.holds w) ∧ ∀ p ∈ r.vocab, ∃ a, p.holds a
 
 /-- O2's former states O2. -/
@@ -117,13 +121,13 @@ theorem o2_correct (r : IntentRecord W) : O2 r ↔ intendedO2 r := by
   simp only [O2, o2, Goals, goals_map, HasInstance, IntentRecord.Dom, intendedO2]
 
 /-- O2's goal before a deliverable runs: a model of the whole record. -/
-def o2Run (r : IntentRecord W) : List Prop := [HasInstance r.Meets]
+@[expose] def o2Run (r : IntentRecord W) : List Prop := [HasInstance r.Meets]
 
 /-- O2 before running holds of `r`. -/
-def O2Run (r : IntentRecord W) : Prop := Goals (o2Run r)
+@[expose] def O2Run (r : IntentRecord W) : Prop := Goals (o2Run r)
 
 /-- What O2 asks before a deliverable runs, written apart from the former. -/
-def intendedO2Run (r : IntentRecord W) : Prop :=
+@[expose] def intendedO2Run (r : IntentRecord W) : Prop :=
   ∃ w, (∀ d ∈ r.dom, d.holds w) ∧ ∀ p ∈ r.props, p.holds w
 
 /-- O2's former before running states it. -/
@@ -134,13 +138,13 @@ theorem o2Run_correct (r : IntentRecord W) : O2Run r ↔ intendedO2Run r := by
 /-! ## O3, refutable -/
 
 /-- O3's goals: a non-instance of each property. -/
-def o3 (r : IntentRecord W) : List Prop := r.props.map fun p => HasNonInstance p.holds
+@[expose] def o3 (r : IntentRecord W) : List Prop := r.props.map fun p => HasNonInstance p.holds
 
 /-- O3 holds of `r`. -/
-def O3 (r : IntentRecord W) : Prop := Goals (o3 r)
+@[expose] def O3 (r : IntentRecord W) : Prop := Goals (o3 r)
 
 /-- What O3 asks, written apart from the former. -/
-def intendedO3 (r : IntentRecord W) : Prop := ∀ p ∈ r.props, ∃ w, ¬ p.holds w
+@[expose] def intendedO3 (r : IntentRecord W) : Prop := ∀ p ∈ r.props, ∃ w, ¬ p.holds w
 
 /-- O3's former states O3. -/
 theorem o3_correct (r : IntentRecord W) : O3 r ↔ intendedO3 r := by
@@ -149,28 +153,28 @@ theorem o3_correct (r : IntentRecord W) : O3 r ↔ intendedO3 r := by
 /-! ## O4, progress -/
 
 /-- The function `m` of the subject `w` ignores its input: it returns the same for every one. -/
-def Member.Ignores (m : Member W) (w : W) : Prop := ∀ x y, m.get w x = m.get w y
+@[expose] def Member.Ignores (m : Member W) (w : W) : Prop := ∀ x y, m.get w x = m.get w y
 
 /-- The plain values and the functions of a description determine the subject, so no part of it lies
 outside them. -/
-def Shape.Covers {D : Type u} (data : W → D) (ms : List (Member W)) : Prop :=
+@[expose] def Shape.Covers {D : Type u} (data : W → D) (ms : List (Member W)) : Prop :=
   ∀ u v, data u = data v → (∀ m ∈ ms, m.get u = m.get v) → u = v
 
 /-- Each of the functions of a description can be any function of its type, so none is a decoy whose
 behaviour is fixed whatever the subject is. -/
-def Shape.Free (ms : List (Member W)) : Prop := ∀ m ∈ ms, ∀ f : m.In → m.Out, ∃ w, m.get w = f
+@[expose] def Shape.Free (ms : List (Member W)) : Prop := ∀ m ∈ ms, ∀ f : m.In → m.Out, ∃ w, m.get w = f
 
 /-- What a shape must itself satisfy for O4 to ask what it says: for a description made of functions,
 that they and its plain values are the whole subject and that each function is free; nothing of
 any other shape. -/
-def Shape.Sound : {W : Type u} → Shape W → Prop
+@[expose] def Shape.Sound : {W : Type u} → Shape W → Prop
   | _, .bundle data first rest => Shape.Covers data (first :: rest) ∧ Shape.Free (first :: rest)
   | _, _ => True
 
 /-- The subjects of a shape that do nothing: for a subject with state, those that leave the state
 unchanged on every state and input; for a description made of functions, those in which one of the
 functions ignores its input; a plain value or a function has none. -/
-def Shape.Idle : {W : Type u} → Shape W → W → Prop
+@[expose] def Shape.Idle : {W : Type u} → Shape W → W → Prop
   | _, .value _, _ => False
   | _, .function _ _, _ => False
   | _, .step _, f => ∀ s, f s = s
@@ -180,10 +184,10 @@ def Shape.Idle : {W : Type u} → Shape W → W → Prop
   | _, .bundle _ first rest, w => ∃ m ∈ first :: rest, m.Ignores w
 
 /-- Every function of a Π-type gives every input an output. -/
-def Total (A : Type u) (B : A → Type u) : Prop := ∀ f : (x : A) → B x, ∀ x, ∃ y, f x = y
+@[expose] def Total (A : Type u) (B : A → Type u) : Prop := ∀ f : (x : A) → B x, ∀ x, ∃ y, f x = y
 
 /-- O4's goals for a subject of shape `s` whose models `meets` describes. -/
-def Shape.progress : {W : Type u} → Shape W → (W → Prop) → List Prop
+@[expose] def Shape.progress : {W : Type u} → Shape W → (W → Prop) → List Prop
   | _, .value _, _ => []
   | _, .function A B, _ => [Total A B]
   | _, s@(.bundle data first rest), meets =>
@@ -195,13 +199,13 @@ every Lean function is total (`o4_function`); for a subject with state, that eve
 the state unchanged fails the record; and for a description made of functions, that they and its
 plain values are the whole subject, that each function can be any function of its type, and that
 every subject in which one of them ignores its input fails the record. -/
-def o4 (r : IntentRecord W) : List Prop := r.shape.progress r.Meets
+@[expose] def o4 (r : IntentRecord W) : List Prop := r.shape.progress r.Meets
 
 /-- O4 holds of `r`. -/
-def O4 (r : IntentRecord W) : Prop := Goals (o4 r)
+@[expose] def O4 (r : IntentRecord W) : Prop := Goals (o4 r)
 
 /-- What O4 asks of a record of shape `s`, written apart from the former. -/
-def intendedO4At : {W : Type u} → Shape W → IntentRecord W → Prop
+@[expose] def intendedO4At : {W : Type u} → Shape W → IntentRecord W → Prop
   | _, .value _, _ => True
   | _, .function A B, _ => ∀ f : (x : A) → B x, ∀ x, ∃ y, f x = y
   | _, .step S, r => ∀ f : S → S, (∀ s, f s = s) →
@@ -219,7 +223,7 @@ def intendedO4At : {W : Type u} → Shape W → IntentRecord W → Prop
         ¬ ((∀ d ∈ r.dom, d.holds w) ∧ ∀ p ∈ r.props, p.holds w)
 
 /-- What O4 asks, written apart from the former. -/
-def intendedO4 (r : IntentRecord W) : Prop := intendedO4At r.shape r
+@[expose] def intendedO4 (r : IntentRecord W) : Prop := intendedO4At r.shape r
 
 /-- O4's former states O4. -/
 theorem o4_correct (r : IntentRecord W) : O4 r ↔ intendedO4 r := by
@@ -294,20 +298,20 @@ inductive Freedom (W : Type u) where
   | rel (R : W → W → Prop)
 
 /-- What the freedom relates, for the record `r`. -/
-def Freedom.relates (r : IntentRecord W) : Freedom W → W → W → Prop
+@[expose] def Freedom.relates (r : IntentRecord W) : Freedom W → W → W → Prop
   | .eq, u, v => u = v
   | .widest, u, v => r.Meets u ∧ r.Meets v
   | .rel R, u, v => R u v
 
 /-- O5's goal: any two models of the record are related by the freedom. -/
-def o5 (r : IntentRecord W) (R : Freedom W) : List Prop :=
+@[expose] def o5 (r : IntentRecord W) (R : Freedom W) : List Prop :=
   [∀ u v, r.Meets u → r.Meets v → R.relates r u v]
 
 /-- O5 holds of `r` with the freedom `R`. -/
-def O5 (r : IntentRecord W) (R : Freedom W) : Prop := Goals (o5 r R)
+@[expose] def O5 (r : IntentRecord W) (R : Freedom W) : Prop := Goals (o5 r R)
 
 /-- What O5 asks, written apart from the former. -/
-def intendedO5 (r : IntentRecord W) (R : Freedom W) : Prop :=
+@[expose] def intendedO5 (r : IntentRecord W) (R : Freedom W) : Prop :=
   ∀ u v, ((∀ d ∈ r.dom, d.holds u) ∧ ∀ p ∈ r.props, p.holds u) →
     ((∀ d ∈ r.dom, d.holds v) ∧ ∀ p ∈ r.props, p.holds v) →
     match R with

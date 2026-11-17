@@ -1,5 +1,8 @@
-import LeanIntent.Implementation
-import LeanIntentExamples.Confirmation
+module
+
+public import LeanIntent.Implementation
+public import LeanIntentExamples.Confirmation
+import all Init.Prelude
 
 /-!
 # The sorting deliverable awaiting its implementation, and what the decision refuses
@@ -30,7 +33,13 @@ Once the program exists, the project retires the declaration by replacing it wit
 `Implementation sortingDeliverable`, as `LeanIntentExamples.Implementation` declares; the decision
 then finds nothing again (`retired`), by `Implementation.replace_nil_iff`, and no answer's text
 changes, since the deliverable is the same constant holding the same terms.
+
+The module imports `Init.Prelude` with `import all`: its proofs run the check's decision over names,
+which it compares with `Lean.Name.beq`, a function whose body Lean's prelude does not expose to a
+`module` file.
 -/
+
+public section
 
 namespace LeanIntentExamples.Awaiting
 
@@ -39,11 +48,11 @@ open LeanIntent LeanIntent.Implementation LeanIntentExamples.Confirmation
 /-! ## The declaration -/
 
 /-- Why the sorting deliverable has no implementation yet. -/
-def waitReason : String := "The owner has confirmed the record; its program is not written yet."
+@[expose] def waitReason : String := "The owner has confirmed the record; its program is not written yet."
 
 /-- The sorting deliverable awaits its implementation. The reason's proof that it is not blank is
 the default one. -/
-def sortingAwaiting : AwaitingImplementation sortingDeliverable where
+@[expose] def sortingAwaiting : AwaitingImplementation sortingDeliverable where
   reason := waitReason
 
 /-- No value declares the deliverable awaiting its implementation with a blank reason. -/
@@ -54,12 +63,12 @@ theorem blank_unrepresentable :
 /-! ## What the decision reads, accepts and refuses -/
 
 /-- What the build shows of `sortingAwaiting`. -/
-def awaited : AwaitingEntry := ⟨``sortingAwaiting, some ``sortingDeliverable, waitReason⟩
+@[expose] def awaited : AwaitingEntry := ⟨``sortingAwaiting, some ``sortingDeliverable, waitReason⟩
 
 /-- What the build shows, once the program exists, of the value that records it as the
 implementation (`LeanIntentExamples.Implementation.sortingImplementation`), which this module does
 not import. -/
-def implemented : Entry :=
+@[expose] def implemented : Entry :=
   ⟨`LeanIntentExamples.Implementation.sortingImplementation, some ``sortingDeliverable,
     some ⟨`LeanIntentExamples.Implementation, `LeanIntentExamples.Implementation.sortProgram⟩⟩
 

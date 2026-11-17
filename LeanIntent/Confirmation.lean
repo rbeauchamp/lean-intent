@@ -1,5 +1,7 @@
-import LeanIntent.Explain
-import LeanIntent.Trace
+module
+
+public import LeanIntent.Explain
+public import LeanIntent.Trace
 
 /-!
 # The check that a project's deliverables are confirmed
@@ -85,6 +87,8 @@ of the current build, which `LeanIntent.Confirmation.Read` computes from Lean's 
 a rendering's text determines its meaning, which `LeanIntent.Render` lists as what it trusts.
 -/
 
+public section
+
 namespace LeanIntent
 
 universe u
@@ -110,11 +114,11 @@ structure OwnersLog where
   statements : List String
 
 /-- What a source says. -/
-def Source.text : Source → String
+@[expose] def Source.text : Source → String
   | .words t | .reference t => t
 
 /-- A source that says something. -/
-def Source.recorded (s : Source) : Bool :=
+@[expose] def Source.recorded (s : Source) : Bool :=
   s.text.toList.any (!·.isWhitespace)
 
 namespace Confirmation
@@ -127,11 +131,11 @@ structure Question where
   kind : Consequence.Kind
   /-- The text of what its predicate means (`LeanIntent.Render.consequenceText`). -/
   predicate : String
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 /-- The question every revision asks: whether its rendering, as it stands, is the plain restatement
 of the owner's intent. Its predicate is this fixed text, which no consequence's text is. -/
-def restatement : Question :=
+@[expose] def restatement : Question :=
   ⟨"the record's plain restatement", .entailment, "the record, as its revision prints it"⟩
 
 /-- A deliverable's current revision, as the build shows it. -/
@@ -149,31 +153,31 @@ structure Revision where
   kept : List (Question × Verdict × Answerer)
 
 /-- The answer `a` is to the question `q`. -/
-def Question.names (q : Question) (a : Statement.Answer) : Bool :=
+@[expose] def Question.names (q : Question) (a : Statement.Answer) : Bool :=
   a.consequence == q.consequence && a.kind == q.kind && a.predicate == q.predicate
 
 /-- The answer `a` answers the question `q` of the revision `rev`: it names the record, the
 revision's exact text and the question. An answer to an older revision does not. -/
-def Revision.answersNow (rev : Revision) (q : Question) (a : Statement.Answer) : Bool :=
+@[expose] def Revision.answersNow (rev : Revision) (q : Question) (a : Statement.Answer) : Bool :=
   a.record == rev.record && a.revision == rev.text && q.names a
 
 /-- The answer `a` backs a kept answer to `q` with the verdict `v`, of the revision `rev`: it names
 the record and the question, with the same text and verdict, at any revision. -/
-def Revision.backs (rev : Revision) (q : Question) (v : Verdict) (a : Statement.Answer) : Bool :=
+@[expose] def Revision.backs (rev : Revision) (q : Question) (v : Verdict) (a : Statement.Answer) : Bool :=
   a.record == rev.record && q.names a && a.verdict == v
 
 /-- The answerer the statement `s`, stating the answer `a`, shows: its author, for the reason its
 source gives. -/
-def answererOf (s : Statement) (a : Statement.Answer) : Answerer :=
+@[expose] def answererOf (s : Statement) (a : Statement.Answer) : Answerer :=
   a.author.answerer s.source.text
 
 /-- The owners declarations of a log. -/
-def declarations (log : List Statement) : List (Statement × Statement.Owners) :=
+@[expose] def declarations (log : List Statement) : List (Statement × Statement.Owners) :=
   log.filterMap fun s => match s.body with | .owners o => some (s, o) | _ => none
 
 /-- The log `log` declares the owners `o` of the project `p`: exactly one declaration, which names at
 least one principal, every statement of the log is of that project, and no two share an id. -/
-def Declares (log : List Statement) (p : Ident) (o : Statement.Owners) : Prop :=
+@[expose] def Declares (log : List Statement) (p : Ident) (o : Statement.Owners) : Prop :=
   (∃ s, declarations log = [(s, o)] ∧ s.project = p) ∧ o.principals ≠ [] ∧
     (∀ s ∈ log, s.project = p) ∧ (log.map (·.id)).Nodup
 
@@ -183,20 +187,20 @@ variable (p : Ident) (o : Statement.Owners) (log : List Statement)
 
 /-- **The statement `s` counts**: `Trace` accepts it, so it is an answer whose authority traces back
 to a declared owner and which no retraction with authority retracts. -/
-def Counts (s : Statement) : Prop := Trace.Accepted p o log s
+@[expose] def Counts (s : Statement) : Prop := Trace.Accepted p o log s
 
 /-- `Counts`, decided. -/
-def counts (s : Statement) : Bool :=
+@[expose] def counts (s : Statement) : Bool :=
   match Trace.check p o log s with | .ok _ => true | .error _ => false
 
 /-- An answer that counts meets `test`, which reads the statement and its answer. -/
-def AnswerWhere (test : Statement → Statement.Answer → Prop) : Prop :=
+@[expose] def AnswerWhere (test : Statement → Statement.Answer → Prop) : Prop :=
   ∃ s ∈ log, Counts p o log s ∧ ∃ a, s.body = .answer a ∧ test s a
 
 /-- The status `x` of the question `q` holds of the revision `rev`: answered and confirmed, by the
 answerer it names, at this revision; or derived, with no answer at this revision. A status that
 declines, a fork and a consequence not settled do not pass. -/
-def Revision.Settles (rev : Revision) (q : Question) {s : Restatement} : Settled s → Prop
+@[expose] def Revision.Settles (rev : Revision) (q : Question) {s : Restatement} : Settled s → Prop
   | .answered ans .confirmed => AnswerWhere p o log fun t a =>
       rev.answersNow q a = true ∧ a.verdict = .confirmed ∧ answererOf t a = ans
   | .derived => ¬ AnswerWhere p o log fun _ a => rev.answersNow q a = true
@@ -204,7 +208,7 @@ def Revision.Settles (rev : Revision) (q : Question) {s : Restatement} : Settled
 
 /-- The recorded standing `s` of the restatement of the revision `rev` holds: a confirmation of this
 revision by the owner it names; or, where it names none, by a delegate, and by no owner. -/
-def Revision.Stands (rev : Revision) : Restatement → Prop
+@[expose] def Revision.Stands (rev : Revision) : Restatement → Prop
   | .confirmed n => AnswerWhere p o log fun _ a =>
       rev.answersNow restatement a = true ∧ a.verdict = .confirmed ∧ a.author = ⟨n, none⟩
   | .unconfirmed =>
@@ -216,7 +220,7 @@ def Revision.Stands (rev : Revision) : Restatement → Prop
 /-- The status `x` of the question `q` agrees with the answers the revision `rev` keeps: an answer it
 records is one of them, and one it records as derived, which says no one answered it, is one none of
 them answers. -/
-def Revision.Agrees (rev : Revision) (q : Question) {s : Restatement} : Settled s → Prop
+@[expose] def Revision.Agrees (rev : Revision) (q : Question) {s : Restatement} : Settled s → Prop
   | .answered ans v => (q, v, ans) ∈ rev.kept
   | .derived => ∀ k ∈ rev.kept, k.1 ≠ q
   | _ => True
@@ -225,7 +229,7 @@ def Revision.Agrees (rev : Revision) (q : Question) {s : Restatement} : Settled 
 shown is settled as recorded, with no answer that counts declining either at this revision; each
 answer it keeps is backed by an answer that counts, by the answerer it names; each answer that counts
 on its record, but a restatement, is one it keeps; and each status agrees with the answers it keeps. -/
-def Revision.Confirmed (rev : Revision) : Prop :=
+@[expose] def Revision.Confirmed (rev : Revision) : Prop :=
   rev.Stands p o log rev.standing ∧
   (¬ AnswerWhere p o log fun _ a =>
     rev.answersNow restatement a = true ∧ a.verdict = .declined) ∧
@@ -242,7 +246,7 @@ end
 /-- **The deliverables are confirmed**: the log declares the project's owners, there is at least one
 deliverable, each answer that counts records its source, and the current revision of each deliverable
 is confirmed. -/
-def Confirmed (log : List Statement) (revs : List Revision) : Prop :=
+@[expose] def Confirmed (log : List Statement) (revs : List Revision) : Prop :=
   ∃ p o, Declares log p o ∧ revs ≠ [] ∧ (∀ s ∈ log, Counts p o log s → s.source.recorded = true) ∧
     ∀ rev ∈ revs, rev.Confirmed p o log
 
@@ -291,38 +295,38 @@ inductive Finding where
   /-- This value of the project says who settled something, and no deliverable holds it, so nothing
   here asks whether the log agrees. -/
   | undeclared (name : String)
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 section
 
 variable (p : Ident) (o : Statement.Owners) (log : List Statement)
 
 /-- The statements of the log whose answer meets `test`, with the answer. -/
-def answersWhere (test : Statement.Answer → Bool) : List (Statement × Statement.Answer) :=
+@[expose] def answersWhere (test : Statement.Answer → Bool) : List (Statement × Statement.Answer) :=
   log.filterMap fun s => match s.body with
     | .answer a => if test a then some (s, a) else none
     | _ => none
 
 /-- The answers that count and answer `q` of the revision `rev`. -/
-def countedNow (rev : Revision) (q : Question) : List (Statement × Statement.Answer) :=
+@[expose] def countedNow (rev : Revision) (q : Question) : List (Statement × Statement.Answer) :=
   (answersWhere log (rev.answersNow q)).filter fun x => counts p o log x.1
 
 /-- The ids of a list of statements with their answers. -/
-def idsOf (l : List (Statement × Statement.Answer)) : List Ident := l.map (·.1.id)
+@[expose] def idsOf (l : List (Statement × Statement.Answer)) : List Ident := l.map (·.1.id)
 
 /-- That the question `q` of the revision `rev` has no answer that holds. -/
-def unansweredFinding (rev : Revision) (q : Question) : Finding :=
+@[expose] def unansweredFinding (rev : Revision) (q : Question) : Finding :=
   .unanswered rev.record q.consequence
     (idsOf (answersWhere log fun a =>
       a.record == rev.record && a.consequence == q.consequence && !rev.answersNow q a))
     (idsOf ((answersWhere log (rev.answersNow q)).filter fun x => !counts p o log x.1))
 
 /-- The answers among `c` that decline. -/
-def decliners (c : List (Statement × Statement.Answer)) : List (Statement × Statement.Answer) :=
+@[expose] def decliners (c : List (Statement × Statement.Answer)) : List (Statement × Statement.Answer) :=
   c.filter fun x => x.2.verdict == .declined
 
 /-- What is wrong with the restatement of the revision `rev`, given its recorded standing `s`. -/
-def restatementFindings (rev : Revision) (s : Restatement) : List Finding :=
+@[expose] def restatementFindings (rev : Revision) (s : Restatement) : List Finding :=
   let c := countedNow p o log rev restatement
   let d := decliners c
   let owners := c.filter fun x => x.2.verdict == .confirmed && x.2.author.delegation == none
@@ -339,7 +343,7 @@ def restatementFindings (rev : Revision) (s : Restatement) : List Finding :=
   else [.declined rev.record restatement.consequence (idsOf d)]
 
 /-- What is wrong with the status `x` of the question `q` of the revision `rev`. -/
-def statusFindings (rev : Revision) (q : Question) {s : Restatement} (x : Settled s) :
+@[expose] def statusFindings (rev : Revision) (q : Question) {s : Restatement} (x : Settled s) :
     List Finding :=
   let c := countedNow p o log rev q
   let d := decliners c
@@ -356,7 +360,7 @@ def statusFindings (rev : Revision) (q : Question) {s : Restatement} (x : Settle
   else [.declined rev.record q.consequence (idsOf d)]
 
 /-- What is wrong with the kept answer `k` of the revision `rev`. -/
-def keptFindings (rev : Revision) (k : Question × Verdict × Answerer) : List Finding :=
+@[expose] def keptFindings (rev : Revision) (k : Question × Verdict × Answerer) : List Finding :=
   if ((answersWhere log (rev.backs k.1 k.2.1)).filter fun x => counts p o log x.1).any
       (fun x => answererOf x.1 x.2 == k.2.2) then []
   else
@@ -365,26 +369,26 @@ def keptFindings (rev : Revision) (k : Question × Verdict × Answerer) : List F
 
 /-- What is wrong with the answers that count on the record of the revision `rev`: those it does not
 keep. -/
-def unkeptFindings (rev : Revision) : List Finding :=
+@[expose] def unkeptFindings (rev : Revision) : List Finding :=
   ((answersWhere log fun a => a.record == rev.record && !restatement.names a &&
       !rev.kept.any fun k => rev.backs k.1 k.2.1 a).filter fun x => counts p o log x.1).map
     fun x => .unkept rev.record x.1.id
 
 /-- The answers of the log that count and record no source. -/
-def sourcelessFindings : List Finding :=
+@[expose] def sourcelessFindings : List Finding :=
   ((log.filter fun s => counts p o log s).filter fun s => !s.source.recorded).map
     fun s => .sourceless s.id
 
 /-- What is wrong with the status `x` of the question `q` of the revision `rev`, against the answers
 it keeps. -/
-def agreeFindings (rev : Revision) (q : Question) {s : Restatement} : Settled s → List Finding
+@[expose] def agreeFindings (rev : Revision) (q : Question) {s : Restatement} : Settled s → List Finding
   | .answered ans v =>
     if (q, v, ans) ∈ rev.kept then [] else [.keptDisagrees rev.record q.consequence]
   | .derived => if ∀ k ∈ rev.kept, k.1 ≠ q then [] else [.keptDisagrees rev.record q.consequence]
   | _ => []
 
 /-- What is wrong with the revision `rev`. -/
-def revisionFindings (rev : Revision) : List Finding :=
+@[expose] def revisionFindings (rev : Revision) : List Finding :=
   restatementFindings p o log rev rev.standing ++
     rev.shown.flatMap (fun x => statusFindings p o log rev x.1 x.2) ++
     rev.kept.flatMap (keptFindings p o log rev) ++ unkeptFindings p o log rev ++
@@ -393,12 +397,12 @@ def revisionFindings (rev : Revision) : List Finding :=
 end
 
 /-- A finding for each id more than one statement of the log has, once. -/
-def repeatedFindings (log : List Statement) : List Finding :=
+@[expose] def repeatedFindings (log : List Statement) : List Finding :=
   let ids := log.map (·.id)
   ((ids.filter fun i => 2 ≤ ids.count i).eraseDups).map .repeated
 
 /-- The owners in force: the project and the declaration, or what is wrong with the log. -/
-def inForce (log : List Statement) : Except (List Finding) (Ident × Statement.Owners) :=
+@[expose] def inForce (log : List Statement) : Except (List Finding) (Ident × Statement.Owners) :=
   match declarations log with
   | [] => .error (.noOwners :: repeatedFindings log)
   | [(s, o)] =>
@@ -411,7 +415,7 @@ def inForce (log : List Statement) : Except (List Finding) (Ident × Statement.O
   | ds => .error (.severalOwners (ds.map (·.1.id)) :: repeatedFindings log)
 
 /-- **The decision**: everything wrong with the project's confirmations. -/
-def findings (log : List Statement) (revs : List Revision) : List Finding :=
+@[expose] def findings (log : List Statement) (revs : List Revision) : List Finding :=
   match inForce log with
   | .error fs => fs
   | .ok (p, o) =>
@@ -421,19 +425,19 @@ def findings (log : List Statement) (revs : List Revision) : List Finding :=
 /-! ## Reading the log -/
 
 /-- The statements of a log's texts, or `none` when `Statement.parse` refuses one. -/
-def parseAll : List String → Option (List Statement)
+@[expose] def parseAll : List String → Option (List Statement)
   | [] => some []
   | t :: ts => (Statement.parse t).bind fun s => (parseAll ts).map (s :: ·)
 
 /-- A finding for each text `Statement.parse` refuses, by its position, counted from `n`. -/
-def unreadableFrom (n : Nat) : List String → List Finding
+@[expose] def unreadableFrom (n : Nat) : List String → List Finding
   | [] => []
   | t :: ts =>
     (if (Statement.parse t).isNone then [.unreadable n] else []) ++ unreadableFrom (n + 1) ts
 
 /-- The statements of a log's texts, or the positions of those `Statement.parse` refuses. A log with
 a text it refuses is refused whole: the text could be a revocation. -/
-def parseLog (texts : List String) : Except (List Finding) (List Statement) :=
+@[expose] def parseLog (texts : List String) : Except (List Finding) (List Statement) :=
   match parseAll texts with
   | some log => .ok log
   | none => .error (unreadableFrom 0 texts)
@@ -442,14 +446,14 @@ def parseLog (texts : List String) : Except (List Finding) (List Statement) :=
 
 /-- The origins of a log, each with whether its adoption traces back to a declared owner, as
 confirming a consequence of its record would. -/
-def origins (p : Ident) (o : Statement.Owners) (log : List Statement) :
+@[expose] def origins (p : Ident) (o : Statement.Owners) (log : List Statement) :
     List (Statement × Statement.Origin × Bool) :=
   log.filterMap fun s => match s.body with
     | .origin x => some (s, x, Trace.traces p o log ⟨.confirm, x.record⟩ x.author)
     | _ => none
 
 /-- A log's statements of what an external tool did, or of what is open, for a consequence. -/
-def tools (log : List Statement) : List (Statement × Statement.ToolBasis) :=
+@[expose] def tools (log : List Statement) : List (Statement × Statement.ToolBasis) :=
   log.filterMap fun s => match s.body with | .tool t => some (s, t) | _ => none
 
 /-- Everything a checker reads of a project's confirmations. -/
@@ -469,7 +473,7 @@ structure Report where
   tools : List (Statement × Statement.ToolBasis)
 
 /-- **What a checker reads**, given the texts of the log and the current revisions. -/
-def report (texts : List String) (revs : List Revision) : Report :=
+@[expose] def report (texts : List String) (revs : List Revision) : Report :=
   match parseLog texts with
   | .error fs => ⟨fs, [], [], [], []⟩
   | .ok log =>
@@ -482,7 +486,7 @@ def report (texts : List String) (revs : List Revision) : Report :=
 
 /-- The report `r`, with a finding for each value named that says who settled something and that no
 deliverable holds. -/
-def Report.withUndeclared (r : Report) (names : List String) : Report :=
+@[expose] def Report.withUndeclared (r : Report) (names : List String) : Report :=
   { r with findings := names.map Finding.undeclared ++ r.findings }
 
 /-- Those findings stop the report passing, and nothing else changes what it finds. -/
@@ -498,21 +502,21 @@ variable (p : Ident) (o : Statement.Owners) (log : List Statement)
 
 /-- The standing the log gives the restatement of the revision `rev`: an owner's confirmation of this
 revision that counts, or none. -/
-def logStanding (rev : Revision) : Restatement :=
+@[expose] def logStanding (rev : Revision) : Restatement :=
   match (countedNow p o log rev restatement).find? (fun x =>
       x.2.verdict == .confirmed && x.2.author.delegation == none) with
   | some x => .confirmed x.2.author.principal
   | none => .unconfirmed
 
 /-- A consequence derived from the standing `t`, where it allows one. -/
-def derivedAt : (t : Restatement) → Settled t
+@[expose] def derivedAt : (t : Restatement) → Settled t
   | .confirmed _ => .derived
   | .unconfirmed => .unsettled
 
 /-- The status `x` of the question `q` of the revision `rev`, as the log holds it: an answer stays
 only when the log holds it at this revision, and a derived one only with no answer and an owner's
 confirmation of this revision. What is printed from this says nothing the log does not hold. -/
-def checked (rev : Revision) (q : Question) {s : Restatement} (x : Settled s) :
+@[expose] def checked (rev : Revision) (q : Question) {s : Restatement} (x : Settled s) :
     Settled (logStanding p o log rev) :=
   match x with
   | .answered ans v =>
@@ -902,7 +906,7 @@ theorem findings_eq_nil_iff {revs : List Revision} :
 /-! ## What a finding says -/
 
 /-- What the finding `f`, about the revision `rev`, says of the log and of `rev`. -/
-def Finding.Names (p : Ident) (o : Statement.Owners) (log : List Statement) (rev : Revision) :
+@[expose] def Finding.Names (p : Ident) (o : Statement.Owners) (log : List Statement) (rev : Revision) :
     Finding → Prop
   | .unanswered r c older refused => r = rev.record ∧
       (∀ i ∈ older, ∃ s ∈ log, s.id = i ∧ ∃ a, s.body = .answer a ∧ a.record = r ∧
@@ -931,7 +935,7 @@ def Finding.Names (p : Ident) (o : Statement.Owners) (log : List Statement) (rev
 
 /-- What the finding `f` states of the log `log` and the revisions `revs`: about the log, what is
 wrong with it, and about a revision, that it is not confirmed and what the finding names. -/
-def Finding.Holds (log : List Statement) (revs : List Revision) : Finding → Prop
+@[expose] def Finding.Holds (log : List Statement) (revs : List Revision) : Finding → Prop
   | .noOwners => ¬ ∃ p o, Declares log p o
   | .severalOwners ids => ids = (declarations log).map (·.1.id) ∧ 2 ≤ ids.length
   | .foreign id => (¬ ∃ p o, Declares log p o) ∧ ∃ s ∈ log, s.id = id ∧

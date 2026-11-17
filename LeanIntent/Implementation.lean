@@ -1,4 +1,6 @@
-import LeanIntent.Confirmation
+module
+
+public import LeanIntent.Confirmation
 
 /-!
 # The implementation of a deliverable
@@ -82,6 +84,8 @@ deliverable declared awaiting its implementation goes on, or for how long it may
 declaration is accepted for as long as it stands, and its reason is what a reader sees of it.
 -/
 
+public section
+
 namespace LeanIntent
 
 universe u
@@ -134,7 +138,7 @@ structure Constant where
   module : Lean.Name
   /-- Its name. -/
   name : Lean.Name
-  deriving DecidableEq, Repr
+  deriving @[expose] DecidableEq, Repr
 
 /-- A value of an `Implementation` type that a project declares, as the build shows it. -/
 structure Entry where
@@ -144,7 +148,7 @@ structure Entry where
   deliverable : Option Lean.Name
   /-- The constant its subject is, where it is one. -/
   subject : Option Constant
-  deriving DecidableEq, Repr
+  deriving @[expose] DecidableEq, Repr
 
 /-- A value of an `AwaitingImplementation` type that a project declares, as the build shows it. -/
 structure AwaitingEntry where
@@ -154,7 +158,7 @@ structure AwaitingEntry where
   deliverable : Option Lean.Name
   /-- The reason it gives. -/
   reason : String
-  deriving DecidableEq, Repr
+  deriving @[expose] DecidableEq, Repr
 
 /-- What is wrong with a project's implementations. -/
 inductive Finding where
@@ -177,29 +181,29 @@ inductive Finding where
   /-- The type of this value, which declares a deliverable awaiting its implementation, names no
   deliverable of the project. -/
   | untiedAwaiting (value : Lean.Name)
-  deriving DecidableEq, Repr
+  deriving @[expose] DecidableEq, Repr
 
 /-- The entries among `vs` that record the implementation of the deliverable `d`. -/
-def implementing (vs : List Entry) (d : Lean.Name) : List Entry :=
+@[expose] def implementing (vs : List Entry) (d : Lean.Name) : List Entry :=
   vs.filter fun v => v.deliverable == some d
 
 /-- The entries among `as` that declare that the deliverable `d` awaits its implementation. -/
-def awaitingFor (as : List AwaitingEntry) (d : Lean.Name) : List AwaitingEntry :=
+@[expose] def awaitingFor (as : List AwaitingEntry) (d : Lean.Name) : List AwaitingEntry :=
   as.filter fun a => a.deliverable == some d
 
 /-- The deliverable `o` names, where it names one, is one of the deliverables `ds`. -/
-def tiesTo (ds : List Lean.Name) : Option Lean.Name → Bool
+@[expose] def tiesTo (ds : List Lean.Name) : Option Lean.Name → Bool
   | some d => ds.contains d
   | none => false
 
 /-- The entry `v` names one of the deliverables `ds`. -/
-def Entry.ties (ds : List Lean.Name) (v : Entry) : Bool := tiesTo ds v.deliverable
+@[expose] def Entry.ties (ds : List Lean.Name) (v : Entry) : Bool := tiesTo ds v.deliverable
 
 /-- The entry `a` names one of the deliverables `ds`. -/
-def AwaitingEntry.ties (ds : List Lean.Name) (a : AwaitingEntry) : Bool := tiesTo ds a.deliverable
+@[expose] def AwaitingEntry.ties (ds : List Lean.Name) (a : AwaitingEntry) : Bool := tiesTo ds a.deliverable
 
 /-- What is wrong with the deliverable `d`, given the entries `vs` and `as`. -/
-def deliverableFindings (vs : List Entry) (as : List AwaitingEntry) (d : Lean.Name) :
+@[expose] def deliverableFindings (vs : List Entry) (as : List AwaitingEntry) (d : Lean.Name) :
     List Finding :=
   (if (implementing vs d).isEmpty && (awaitingFor as d).isEmpty then [.unimplemented d] else []) ++
     (if 2 ≤ (implementing vs d).length then
@@ -210,17 +214,17 @@ def deliverableFindings (vs : List Entry) (as : List AwaitingEntry) (d : Lean.Na
       [.awaitingImplemented d ((awaitingFor as d).map (·.name))] else [])
 
 /-- What is wrong with the entry `v`, given the deliverables `ds`. -/
-def entryFindings (ds : List Lean.Name) (v : Entry) : List Finding :=
+@[expose] def entryFindings (ds : List Lean.Name) (v : Entry) : List Finding :=
   (if v.ties ds then [] else [.untied v.name]) ++
     (if v.subject.isSome then [] else [.notConstant v.name])
 
 /-- What is wrong with the entry `a`, given the deliverables `ds`. -/
-def awaitingFindings (ds : List Lean.Name) (a : AwaitingEntry) : List Finding :=
+@[expose] def awaitingFindings (ds : List Lean.Name) (a : AwaitingEntry) : List Finding :=
   if a.ties ds then [] else [.untiedAwaiting a.name]
 
 /-- **The decision**: everything wrong with the implementations the entries `vs` record, and the
 entries `as` declare awaited, of the deliverables `ds`. -/
-def findings (ds : List Lean.Name) (vs : List Entry) (as : List AwaitingEntry) : List Finding :=
+@[expose] def findings (ds : List Lean.Name) (vs : List Entry) (as : List AwaitingEntry) : List Finding :=
   (if ds.isEmpty then [.noDeliverable] else []) ++ ds.flatMap (deliverableFindings vs as) ++
     vs.flatMap (entryFindings ds) ++ as.flatMap (awaitingFindings ds)
 
@@ -229,7 +233,7 @@ implementations, and `as`, which declare implementations awaited: there is at le
 each has exactly one implementation and no declaration that it awaits one, or no implementation and
 exactly one such declaration; each entry names one of the deliverables; and each implementation
 records a constant. It is stated over the lists alone, with no definition the decision uses. -/
-def Accounted (ds : List Lean.Name) (vs : List Entry) (as : List AwaitingEntry) : Prop :=
+@[expose] def Accounted (ds : List Lean.Name) (vs : List Entry) (as : List AwaitingEntry) : Prop :=
   ds ≠ [] ∧
     (∀ d ∈ ds,
       (vs.countP (fun v => decide (v.deliverable = some d)) = 1 ∧
@@ -241,14 +245,14 @@ def Accounted (ds : List Lean.Name) (vs : List Entry) (as : List AwaitingEntry) 
 
 /-- The value that records the implementation of the deliverable `d`, and the constant it records,
 where exactly one entry does and records a constant. -/
-def implementationOf (vs : List Entry) (d : Lean.Name) : Option (Lean.Name × Constant) :=
+@[expose] def implementationOf (vs : List Entry) (d : Lean.Name) : Option (Lean.Name × Constant) :=
   match implementing vs d with
   | [v] => v.subject.map fun c => (v.name, c)
   | _ => none
 
 /-- The value that declares that the deliverable `d` awaits its implementation, and the reason it
 gives, where exactly one entry declares it. -/
-def awaitedOf (as : List AwaitingEntry) (d : Lean.Name) : Option (Lean.Name × String) :=
+@[expose] def awaitedOf (as : List AwaitingEntry) (d : Lean.Name) : Option (Lean.Name × String) :=
   match awaitingFor as d with
   | [a] => some (a.name, a.reason)
   | _ => none
@@ -267,7 +271,7 @@ structure Report where
   deriving Repr
 
 /-- **What a gate reads**, given the project's deliverables and the entries of its values. -/
-def report (ds : List Lean.Name) (vs : List Entry) (as : List AwaitingEntry) : Report :=
+@[expose] def report (ds : List Lean.Name) (vs : List Entry) (as : List AwaitingEntry) : Report :=
   ⟨findings ds vs as, ds.filterMap fun d => (implementationOf vs d).map fun x => (d, x),
     ds.filterMap fun d => (awaitedOf as d).map fun x => (d, x)⟩
 
@@ -371,7 +375,7 @@ theorem replace_nil_iff {as₁ as₂ : List AwaitingEntry} {a : AwaitingEntry} {
 /-! ## What a finding says -/
 
 /-- What the finding `f` states of the deliverables `ds` and the entries `vs` and `as`. -/
-def Finding.Holds (ds : List Lean.Name) (vs : List Entry) (as : List AwaitingEntry) :
+@[expose] def Finding.Holds (ds : List Lean.Name) (vs : List Entry) (as : List AwaitingEntry) :
     Finding → Prop
   | .noDeliverable => ds = []
   | .unimplemented d =>

@@ -1,4 +1,6 @@
-import LeanIntent.Obligations
+module
+
+public import LeanIntent.Obligations
 
 /-!
 # Precondition-postcondition pairs, and the obligation that each admitted input can be served
@@ -63,6 +65,8 @@ What the obligation does not establish:
   in `C` serves each admitted input of each pair (`PairOf.served_of_meets`).
 -/
 
+public section
+
 namespace LeanIntent
 
 universe u
@@ -82,14 +86,14 @@ structure Pair (W : Type u) where
 namespace Pair
 
 /-- The subject `w` meets the pair `q`: the postcondition at every input the precondition admits. -/
-def Met (q : Pair W) (w : W) : Prop := ∀ x, q.pre x → q.post x w
+@[expose] def Met (q : Pair W) (w : W) : Prop := ∀ x, q.pre x → q.post x w
 
 /-- The pair `q` says exactly the statement `S`: a subject meets `q` exactly when `S` holds of it. -/
-def Says (q : Pair W) (S : W → Prop) : Prop := ∀ w, S w ↔ q.Met w
+@[expose] def Says (q : Pair W) (S : W → Prop) : Prop := ∀ w, S w ↔ q.Met w
 
 /-- The pair of the property `c` of the record `r` whose only input is trivial: its postcondition is
 the property wherever the record's domain hypotheses hold. -/
-def whole (r : IntentRecord W) (c : Clause W) : Pair W :=
+@[expose] def whole (r : IntentRecord W) (c : Clause W) : Pair W :=
   ⟨PUnit, fun _ => True, fun _ w => r.Dom w → c.holds w⟩
 
 end Pair
@@ -97,7 +101,7 @@ end Pair
 /-- `q` is a pair of the property `c` of the record `r`: `c` is one of the record's properties, and
 `q` says exactly what an implementation must prove of it, that it holds wherever the domain
 hypotheses do. -/
-def IntentRecord.PairOf (r : IntentRecord W) (c : Clause W) (q : Pair W) : Prop :=
+@[expose] def IntentRecord.PairOf (r : IntentRecord W) (c : Clause W) (q : Pair W) : Prop :=
   c ∈ r.props ∧ q.Says fun w => r.Dom w → c.holds w
 
 /-! ## The obligation -/
@@ -105,14 +109,14 @@ def IntentRecord.PairOf (r : IntentRecord W) (c : Clause W) (q : Pair W) : Prop 
 /-- The pair obligation's goals for the pair `q` and the implementation class `C`: an input the
 precondition admits, and, for each input the precondition admits, a subject in `C` that meets the
 postcondition there. -/
-def oPair (q : Pair W) (C : W → Prop) : List Prop :=
+@[expose] def oPair (q : Pair W) (C : W → Prop) : List Prop :=
   [HasInstance q.pre, ∀ x, q.pre x → HasInstance fun w => C w ∧ q.post x w]
 
 /-- The pair obligation holds of `q` in the class `C`. -/
-def OPair (q : Pair W) (C : W → Prop) : Prop := Goals (oPair q C)
+@[expose] def OPair (q : Pair W) (C : W → Prop) : Prop := Goals (oPair q C)
 
 /-- What the pair obligation asks, written apart from the former. -/
-def intendedOPair : Pair W → (W → Prop) → Prop
+@[expose] def intendedOPair : Pair W → (W → Prop) → Prop
   | ⟨_, pre, post⟩, C => (∃ x, pre x) ∧ ∀ x, pre x → ∃ w, C w ∧ post x w
 
 /-- The pair obligation's former states it, for every pair and every class. -/
@@ -207,7 +211,7 @@ theorem IntentRecord.PairOf.served_of_meets {r : IntentRecord W} {c : Clause W} 
 
 /-- A pair of the property `c` of the record `r` whose input names a subject: at the subject `v` it
 asks the property only of `v` itself, and holds emptily of every other subject. -/
-def Pair.selfNamed (r : IntentRecord W) (c : Clause W) : Pair W :=
+@[expose] def Pair.selfNamed (r : IntentRecord W) (c : Clause W) : Pair W :=
   ⟨W, fun _ => True, fun v w => v = w → r.Dom w → c.holds w⟩
 
 /-- `Pair.selfNamed` is a pair of the property, since `PairOf` checks only what a pair says. -/

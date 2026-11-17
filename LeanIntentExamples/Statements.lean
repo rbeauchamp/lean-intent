@@ -1,4 +1,6 @@
-import LeanIntent.Statement
+module
+
+public import LeanIntent.Statement
 
 /-!
 # A statement of the owners' log, and its text
@@ -10,12 +12,14 @@ them. By `Statement.parse_eq_some_iff`, that text is the only one the parser rea
 statement, and the parser reads it as nothing else.
 -/
 
+public section
+
 namespace LeanIntentExamples.Statements
 
 open LeanIntent
 
 /-- The owner's answer, as a statement. -/
-def declined : Statement where
+@[expose] def declined : Statement where
   project := .of "lean-intent"
   id := .of "sorting-empty-list"
   date := ⟨2026, 10, 28, by decide⟩

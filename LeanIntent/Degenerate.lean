@@ -1,5 +1,7 @@
-import LeanIntent.Codes
-import LeanIntent.Explain
+module
+
+public import LeanIntent.Codes
+public import LeanIntent.Explain
 
 /-!
 # The degenerate subjects of a subject's type
@@ -84,6 +86,8 @@ one is kept by exactly the revisions that no subject of the member meets
 member (`not_meets_of_metBy_eq_nil`).
 -/
 
+public section
+
 namespace LeanIntent
 
 /-- The code of a subject's type: functions of the arguments `args`, in order, to `out`. With no
@@ -93,30 +97,30 @@ structure Sig where
   args : List Ty
   /-- The code of the output type. -/
   out : Ty
-  deriving DecidableEq
+  deriving @[expose] DecidableEq
 
 namespace Sig
 
 /-- Functions of the arguments `as`, in order, to values of `b`. -/
-@[reducible] def Fn (b : Ty) : List Ty → Type
+@[expose, reducible] def Fn (b : Ty) : List Ty → Type
   | [] => b.denote
   | a :: as => a.denote → Fn b as
 
 /-- The type a subject's code denotes, through which it stands for the subject's type. -/
-@[reducible] def denote (σ : Sig) : Type := Fn σ.out σ.args
+@[expose, reducible] def denote (σ : Sig) : Type := Fn σ.out σ.args
 
 /-- A tuple of arguments of the types `as`. -/
-@[reducible] def Args : List Ty → Type
+@[expose, reducible] def Args : List Ty → Type
   | [] => Unit
   | a :: as => a.denote × Args as
 
 /-- A function applied to a tuple of its arguments. -/
-def Fn.apply {b : Ty} : {as : List Ty} → Fn b as → Args as → b.denote
+@[expose] def Fn.apply {b : Ty} : {as : List Ty} → Fn b as → Args as → b.denote
   | [], f, _ => f
   | _ :: _, f, xs => Fn.apply (f xs.1) xs.2
 
 /-- The function of the arguments `as` that returns `v` whatever they are. -/
-def Fn.const (b : Ty) (v : b.denote) : (as : List Ty) → Fn b as
+@[expose] def Fn.const (b : Ty) (v : b.denote) : (as : List Ty) → Fn b as
   | [] => v
   | _ :: as => fun _ => Fn.const b v as
 
@@ -126,7 +130,7 @@ theorem Fn.apply_const {b : Ty} (v : b.denote) :
   | _ :: as, xs => Fn.apply_const v as xs.2
 
 /-- The function of the arguments `as` that returns what `g` returns of the tuple of them. -/
-def Fn.curry (b : Ty) : (as : List Ty) → (Args as → b.denote) → Fn b as
+@[expose] def Fn.curry (b : Ty) : (as : List Ty) → (Args as → b.denote) → Fn b as
   | [], g => g ()
   | _ :: as, g => fun x => Fn.curry b as fun xs => g (x, xs)
 
@@ -138,7 +142,7 @@ theorem Fn.apply_curry {b : Ty} : (as : List Ty) → (g : Args as → b.denote) 
 /-- The code of a subject whose type has the code `t`: a function's argument followed by the
 arguments of its result, down to a result that is not a function, so that a function returning a
 function is a function of more arguments. -/
-@[reducible] def ofTy : Ty → Sig
+@[expose, reducible] def ofTy : Ty → Sig
   | .arrow a b => ⟨a :: (ofTy b).args, (ofTy b).out⟩
   | .unit => ⟨[], .unit⟩
   | .bool => ⟨[], .bool⟩
@@ -158,7 +162,7 @@ function is a function of more arguments. -/
   | .muAt b g r j i => ⟨[], .muAt b g r j i⟩
 
 /-- A type's denotation and that of the subject's code `ofTy` computes from it are one type. -/
-def flat : (t : Ty) → Iso t.denote (ofTy t).denote
+@[expose] def flat : (t : Ty) → Iso t.denote (ofTy t).denote
   | .arrow a b => (Iso.refl a.denote).arrow (flat b)
   | .unit | .bool | .nat | .int | .string | .list _ | .array _ | .option _ | .prod _ _ | .sum _ _
   | .decl _ _ _ | .fin _ | .atom _ | .ref _ | .mu _ _ _ _ | .muAt _ _ _ _ _ => Iso.refl _
@@ -207,7 +211,7 @@ end
 mutual
 
 /-- The component a path selects, where `ev` gives the value of each source. -/
-def Ty.Proj.get {S : Ty → Type} (ev : (a : Ty) → S a → a.denote) :
+@[expose] def Ty.Proj.get {S : Ty → Type} (ev : (a : Ty) → S a → a.denote) :
     {t c : Ty} → Ty.Proj S t c → t.denote → c.denote
   | _, _, .self _, x => x
   | _, _, .fst _ p, x => p.get ev x.1
@@ -216,7 +220,7 @@ def Ty.Proj.get {S : Ty → Type} (ev : (a : Ty) → S a → a.denote) :
   | _, _, .app s p, f => p.get ev (f (ev _ s))
 
 /-- The component a path into a field selects. -/
-def Ty.FieldProj.get {S : Ty → Type} (ev : (a : Ty) → S a → a.denote) :
+@[expose] def Ty.FieldProj.get {S : Ty → Type} (ev : (a : Ty) → S a → a.denote) :
     {r c : Ty} → Ty.FieldProj S r c → r.denote → c.denote
   | _, _, .head _ p, x => p.get ev x.1
   | _, _, .tail _ q, x => q.get ev x.2
@@ -224,18 +228,18 @@ def Ty.FieldProj.get {S : Ty → Type} (ev : (a : Ty) → S a → a.denote) :
 end
 
 /-- The path to the value itself, between two equal codes. -/
-def Ty.Proj.ofEq {S : Ty → Type} : {t c : Ty} → t = c → Ty.Proj S t c
+@[expose] def Ty.Proj.ofEq {S : Ty → Type} : {t c : Ty} → t = c → Ty.Proj S t c
   | _, _, rfl => .self _
 
 /-- The paths to the value itself when `t` is `c`: one, or none. -/
-def Ty.selfProjs {S : Ty → Type} (c t : Ty) : List (Ty.Proj S t c) :=
+@[expose] def Ty.selfProjs {S : Ty → Type} (c t : Ty) : List (Ty.Proj S t c) :=
   if h : t = c then [.ofEq h] else []
 
 mutual
 
 /-- Every path to a component of type `c` inside a value of type `t`, each function on each source
 `src` lists. -/
-def Ty.projs {S : Ty → Type} (src : (a : Ty) → List (S a)) (c : Ty) :
+@[expose] def Ty.projs {S : Ty → Type} (src : (a : Ty) → List (S a)) (c : Ty) :
     (t : Ty) → List (Ty.Proj S t c)
   | .prod a b =>
     Ty.selfProjs c (.prod a b) ++ (Ty.projs src c a).map (.fst b) ++ (Ty.projs src c b).map (.snd a)
@@ -245,7 +249,7 @@ def Ty.projs {S : Ty → Type} (src : (a : Ty) → List (S a)) (c : Ty) :
   | t => Ty.selfProjs c t
 
 /-- Every path to a component of type `c` inside a field of the chain of fields `r`. -/
-def Ty.fieldProjs {S : Ty → Type} (src : (a : Ty) → List (S a)) (c : Ty) :
+@[expose] def Ty.fieldProjs {S : Ty → Type} (src : (a : Ty) → List (S a)) (c : Ty) :
     (r : Ty) → List (Ty.FieldProj S r c)
   | .prod a rest => (Ty.projs src c a).map (.head rest) ++ (Ty.fieldProjs src c rest).map (.tail a)
   | _ => []
@@ -305,12 +309,12 @@ namespace ArgPath
 variable {S : Ty → Type} {c : Ty}
 
 /-- The component a path selects from a tuple of arguments, where `ev` gives each source's value. -/
-def read (ev : (a : Ty) → S a → a.denote) : {as : List Ty} → ArgPath S c as → Args as → c.denote
+@[expose] def read (ev : (a : Ty) → S a → a.denote) : {as : List Ty} → ArgPath S c as → Args as → c.denote
   | _ :: _, .here p, xs => p.get ev xs.1
   | _ :: _, .there q, xs => q.read ev xs.2
 
 /-- Every path to a component of type `c` of the arguments `as`, whose sources `src` lists. -/
-def all (src : (a : Ty) → List (S a)) (c : Ty) : (as : List Ty) → List (ArgPath S c as)
+@[expose] def all (src : (a : Ty) → List (S a)) (c : Ty) : (as : List Ty) → List (ArgPath S c as)
   | [] => []
   | a :: as => (Ty.projs src c a).map .here ++ (all src c as).map .there
 
@@ -333,12 +337,12 @@ abbrev ArgSource (Γ : List Ty) (a : Ty) : Type := Option (ArgPath NoSource a Γ
 namespace ArgSource
 
 /-- The value a source gives on a tuple of arguments. -/
-def val {Γ : List Ty} (xs : Args Γ) (a : Ty) : ArgSource Γ a → a.denote
+@[expose] def val {Γ : List Ty} (xs : Args Γ) (a : Ty) : ArgSource Γ a → a.denote
   | none => a.empty
   | some p => p.read (fun _ s => nomatch s) xs
 
 /-- Every source of a value of type `a` among the arguments `Γ`. -/
-def all (Γ : List Ty) (a : Ty) : List (ArgSource Γ a) :=
+@[expose] def all (Γ : List Ty) (a : Ty) : List (ArgSource Γ a) :=
   none :: (ArgPath.all (fun _ => []) a Γ).map some
 
 /-- `all` lists every source. -/
@@ -358,14 +362,14 @@ namespace ArgProj
 variable {c : Ty}
 
 /-- The component a projection selects from a tuple of arguments. -/
-def read {as : List Ty} (p : ArgProj c as) (xs : Args as) : c.denote :=
+@[expose] def read {as : List Ty} (p : ArgProj c as) (xs : Args as) : c.denote :=
   ArgPath.read (ArgSource.val xs) p xs
 
 /-- A projection as a function of its arguments. -/
-def fn {as : List Ty} (p : ArgProj c as) : Fn c as := Fn.curry c as p.read
+@[expose] def fn {as : List Ty} (p : ArgProj c as) : Fn c as := Fn.curry c as p.read
 
 /-- Every projection of functions of the arguments `as` to values of `c`. -/
-def all (c : Ty) (as : List Ty) : List (ArgProj c as) := ArgPath.all (ArgSource.all as) c as
+@[expose] def all (c : Ty) (as : List Ty) : List (ArgProj c as) := ArgPath.all (ArgSource.all as) c as
 
 /-- `all` lists every projection. -/
 theorem mem_all {as : List Ty} (p : ArgProj c as) : p ∈ all c as :=
@@ -392,15 +396,15 @@ inductive Degenerate (σ : Sig) where
 /-- The constant members of the class: the constant function at each value of the output type's part
 where `count` is at most `Ty.listBound`; and otherwise the constant at its empty value, the empty
 output, and all the other constants the rule `Ty.Small` admits as one member. -/
-def Sig.constants (σ : Sig) : List (Degenerate σ) :=
+@[expose] def Sig.constants (σ : Sig) : List (Degenerate σ) :=
   if σ.out.count ≤ Ty.listBound then σ.out.part.map .const else [.const σ.out.empty, .others]
 
 /-- The degenerate subjects of the type `σ` denotes: its constant members, then each projection. -/
-def Sig.degenerate (σ : Sig) : List (Degenerate σ) :=
+@[expose] def Sig.degenerate (σ : Sig) : List (Degenerate σ) :=
   σ.constants ++ (ArgProj.all σ.out σ.args).map .proj
 
 /-- A tuple of the empty values of the types `as`. -/
-def Sig.Args.empty : (as : List Ty) → Args as
+@[expose] def Sig.Args.empty : (as : List Ty) → Args as
   | [] => ()
   | a :: as => (a.empty, Sig.Args.empty as)
 
@@ -659,17 +663,17 @@ instance {α : Type} [h : HasCode α] : Covered α :=
 
 /-- The degenerate subjects of the type `W`, by their descriptions: the class of `W`'s code. It
 takes no record, so it is the same for every record about `W`. -/
-def degenerate (W : Type) [c : Covered W] : List (Degenerate c.sig) := c.sig.degenerate
+@[expose] def degenerate (W : Type) [c : Covered W] : List (Degenerate c.sig) := c.sig.degenerate
 
 /-- The constant subject of type `W` at the value `v`, carried back to `W` through the isomorphism by
 which `W`'s code stands for `W`. It takes a value and no member, so it cannot be given a member
 standing for many subjects. -/
-def Degenerate.constantSubject {W : Type} [c : Covered W] (v : c.sig.out.denote) : W :=
+@[expose] def Degenerate.constantSubject {W : Type} [c : Covered W] (v : c.sig.out.denote) : W :=
   c.iso.inv (Fn.const c.sig.out v c.sig.args)
 
 /-- The subject of type `W` that returns the component the path `p` selects, carried back to `W` as
 `Degenerate.constantSubject` is. -/
-def Degenerate.projSubject {W : Type} [c : Covered W] (p : ArgProj c.sig.out c.sig.args) : W :=
+@[expose] def Degenerate.projSubject {W : Type} [c : Covered W] (p : ArgProj c.sig.out c.sig.args) : W :=
   c.iso.inv p.fn
 
 /-- The constant subject is the constant function, carried to `W` through the isomorphism that
@@ -695,7 +699,7 @@ inductive Degenerate.Reading (W : Type) where
 
 /-- A member of the class read as what it says of `W`'s subjects. It is total, so reading a list keeps
 every member, a group among them. -/
-def Degenerate.reading {W : Type} [c : Covered W] : Degenerate c.sig → Degenerate.Reading W
+@[expose] def Degenerate.reading {W : Type} [c : Covered W] : Degenerate c.sig → Degenerate.Reading W
   | .const v => .subject (Degenerate.constantSubject v)
   | .proj p => .subject (Degenerate.projSubject p)
   | .others => .otherConstants
@@ -712,7 +716,7 @@ variable {W : Type} [c : Covered W]
 /-- `w` is a subject the description `d` stands for: for `.others`, the constant function at a value
 of the rule `Ty.Small` other than the output type's empty value, and otherwise the one subject `d`
 stands for. -/
-def Degenerate.Is (d : Degenerate c.sig) (w : W) : Prop :=
+@[expose] def Degenerate.Is (d : Degenerate c.sig) (w : W) : Prop :=
   match d with
   | .const v => w = Degenerate.constantSubject v
   | .proj p => w = Degenerate.projSubject p
@@ -721,7 +725,7 @@ def Degenerate.Is (d : Degenerate c.sig) (w : W) : Prop :=
 /-- A subject the description `d` stands for meets `r`. For a member standing for one subject this is
 that subject meeting `r`; for `.others`, some constant among them does, which a proof states of all
 of them at once, so that no value of the type is enumerated. -/
-def Degenerate.Meets (d : Degenerate c.sig) (r : IntentRecord W) : Prop :=
+@[expose] def Degenerate.Meets (d : Degenerate c.sig) (r : IntentRecord W) : Prop :=
   match d with
   | .const v => r.Meets (Degenerate.constantSubject v)
   | .proj p => r.Meets (Degenerate.projSubject p)
@@ -757,27 +761,27 @@ theorem Degenerate.reading_eq_otherConstants_iff (d : Degenerate c.sig) :
 
 /-- The goal that `b` is the verdict on the member `d` for `r`: that a subject of `d` meets `r` when
 `b` is `true`, and that none does when `b` is `false`. -/
-def verdictGoal (r : IntentRecord W) (d : Degenerate c.sig) : Bool → Prop
+@[expose] def verdictGoal (r : IntentRecord W) (d : Degenerate c.sig) : Bool → Prop
   | true => d.Meets r
   | false => ¬ d.Meets r
 
 /-- The goals that `bs` are, in order, the verdicts on the members that the descriptions `ds` state,
 and the goal `False` when the two lists differ in length. -/
-def verdictGoals (r : IntentRecord W) : List (Degenerate c.sig) → List Bool → List Prop
+@[expose] def verdictGoals (r : IntentRecord W) : List (Degenerate c.sig) → List Bool → List Prop
   | [], [] => []
   | d :: ds, b :: bs => verdictGoal r d b :: verdictGoals r ds bs
   | _, _ => [False]
 
 /-- The degenerate check's goals: that `bs` are, in order, the verdicts on the degenerate subjects
 of `W` for `r`. -/
-def verdicts (r : IntentRecord W) (bs : List Bool) : List Prop := verdictGoals r (degenerate W) bs
+@[expose] def verdicts (r : IntentRecord W) (bs : List Bool) : List Prop := verdictGoals r (degenerate W) bs
 
 /-- `bs` are the verdicts, in order, on the degenerate subjects of `W` for `r`. -/
-def Verdicts (r : IntentRecord W) (bs : List Bool) : Prop := Goals (verdicts r bs)
+@[expose] def Verdicts (r : IntentRecord W) (bs : List Bool) : Prop := Goals (verdicts r bs)
 
 /-- What the degenerate check asks, written apart from its former: one verdict for each member of the
 class, `true` exactly when a subject the member at the same position stands for meets the record. -/
-def intendedVerdicts (r : IntentRecord W) (bs : List Bool) : Prop :=
+@[expose] def intendedVerdicts (r : IntentRecord W) (bs : List Bool) : Prop :=
   bs.length = (degenerate W).length ∧
     ∀ (i : Nat) (hb : i < bs.length) (hd : i < (degenerate W).length),
       (bs[i] = true ↔ ∃ w, (degenerate W)[i].Is w ∧ (∀ x ∈ r.dom, x.holds w) ∧
@@ -811,13 +815,13 @@ theorem verdicts_correct (r : IntentRecord W) (bs : List Bool) :
     IntentRecord.Props]
 
 /-- The descriptions among `ds` whose verdict in `bs` is `true`. -/
-def metByGo : List (Degenerate c.sig) → List Bool → List (Degenerate c.sig)
+@[expose] def metByGo : List (Degenerate c.sig) → List Bool → List (Degenerate c.sig)
   | d :: ds, true :: bs => d :: metByGo ds bs
   | _ :: ds, false :: bs => metByGo ds bs
   | _, _ => []
 
 /-- The members of the class of `W` whose verdict in `bs` is that they meet the record. -/
-def metBy (W : Type) [c : Covered W] (bs : List Bool) : List (Degenerate c.sig) :=
+@[expose] def metBy (W : Type) [c : Covered W] (bs : List Bool) : List (Degenerate c.sig) :=
   metByGo (degenerate W) bs
 
 theorem mem_metByGo (r : IntentRecord W) (d : Degenerate c.sig) : (ds : List (Degenerate c.sig)) →
@@ -904,7 +908,7 @@ theorem not_meets_of_metBy_eq_nil {r : IntentRecord W} {bs : List Bool} (h : Ver
   fun hm => (metBy_eq_nil_iff h).mp he d hd ((d.meets_iff r).mpr ⟨w, hw, hm⟩)
 
 /-- The name a degenerate subject's consequence is read by: what kind of member it is. -/
-def Degenerate.name {σ : Sig} : Degenerate σ → String
+@[expose] def Degenerate.name {σ : Sig} : Degenerate σ → String
   | .const _ => "the record allows a subject that returns one value whatever its arguments"
   | .proj _ => "the record allows a subject that returns one of its arguments, what a function among \
       them returns, or a part of either"
@@ -913,7 +917,7 @@ def Degenerate.name {σ : Sig} : Degenerate σ → String
 
 /-- The consequence shown for a member of the class: the possibility that the subject is one the
 member stands for. -/
-def Degenerate.consequence (d : Degenerate c.sig) : Consequence W :=
+@[expose] def Degenerate.consequence (d : Degenerate c.sig) : Consequence W :=
   ⟨d.name, .possibility, d.Is⟩
 
 /-- Declining a member's consequence is kept by exactly the revisions that no subject of the member
@@ -926,7 +930,7 @@ theorem Degenerate.declined_keptBy_iff (d : Degenerate c.sig) (r : IntentRecord 
 /-- The consequences reported: one for each member the proved verdicts `bs` say meets the record, in
 order. It takes the proof of the verdicts, so no report exists for
 verdicts that are not proved. -/
-def possibilities {r : IntentRecord W} {bs : List Bool} (_ : Verdicts r bs) : List (Consequence W) :=
+@[expose] def possibilities {r : IntentRecord W} {bs : List Bool} (_ : Verdicts r bs) : List (Consequence W) :=
   (metBy W bs).map Degenerate.consequence
 
 /-- Under proved verdicts, the reported consequences are exactly those of the members of the class

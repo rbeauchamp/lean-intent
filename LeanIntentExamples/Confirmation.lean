@@ -1,5 +1,7 @@
-import LeanIntent.Confirmation
-import LeanIntentExamples.Sorting
+module
+
+public import LeanIntent.Confirmation
+public import LeanIntentExamples.Sorting
 
 /-!
 # A project's confirmations, and what the check refuses
@@ -54,6 +56,8 @@ ask for them (`carried_confirmed`). The owners' log as committed is the literal 
 `parseLog_printed`).
 -/
 
+public section
+
 namespace LeanIntentExamples.Confirmation
 
 open LeanIntent LeanIntent.Confirmation LeanIntentExamples.Sorting
@@ -61,19 +65,19 @@ open LeanIntent LeanIntent.Confirmation LeanIntentExamples.Sorting
 /-! ## The deliverable -/
 
 /-- Why the assistant decided that the record fixes the function, as `sortingExplained` records it. -/
-def reason : String :=
+@[expose] def reason : String :=
   "The owner confirmed that the output is an ascending rearrangement of the input, which leaves \
     one such function."
 
 /-- The assistant's decision on the owner's behalf. -/
-def assistantAnswerer : Answerer := .onBehalf (.of "claude") (.of "assistant") reason
+@[expose] def assistantAnswerer : Answerer := .onBehalf (.of "claude") (.of "assistant") reason
 
 /-- The answer the deliverable keeps. -/
-def sortingAnswers : List (Attributed (List Int → List Int)) :=
+@[expose] def sortingAnswers : List (Attributed (List Int → List Int)) :=
   [⟨⟨⟨"is Lean's merge sort", .entailment, fun f => f = sort⟩, .confirmed⟩, assistantAnswerer⟩]
 
 /-- The deliverable: the corrected record, its explanation and the answer it keeps. -/
-def sortingDeliverable : Deliverable (List Int → List Int) where
+@[expose] def sortingDeliverable : Deliverable (List Int → List Int) where
   record := sorting
   explanation := sortingExplained
   answers := sortingAnswers
@@ -85,70 +89,70 @@ def sortingDeliverable : Deliverable (List Int → List Int) where
 /-! ## The log -/
 
 /-- The project. -/
-def project : Ident := .of "sorting-project"
+@[expose] def project : Ident := .of "sorting-project"
 
 /-- The owners it declares: `richard` alone. -/
-def declared : Statement.Owners := ⟨[⟨.of "richard", []⟩], none⟩
+@[expose] def declared : Statement.Owners := ⟨[⟨.of "richard", []⟩], none⟩
 
 /-- A statement of the project, on 2026-10-30, with the source `text`. -/
-def mkWith (text : String) (id : Ident) (body : Statement.Body) : Statement :=
+@[expose] def mkWith (text : String) (id : Ident) (body : Statement.Body) : Statement :=
   { project, id, date := ⟨2026, 10, 30, by decide⟩, source := .words text, body }
 
 /-- A statement of the project, in the owner's words. -/
-def mk (id : Ident) (body : Statement.Body) : Statement := mkWith "As agreed." id body
+@[expose] def mk (id : Ident) (body : Statement.Body) : Statement := mkWith "As agreed." id body
 
 /-- The owners declaration. -/
-def owners : Statement := mk (.of "owners") (.owners declared)
+@[expose] def owners : Statement := mk (.of "owners") (.owners declared)
 
 /-- `richard`, as owner, lets `claude` answer for the sorting record. -/
-def assistant : Statement := mk (.of "assistant") <| .delegation
+@[expose] def assistant : Statement := mk (.of "assistant") <| .delegation
   { delegator := ⟨.of "richard", none⟩
     delegate := ⟨.of "claude", []⟩
     scope := ⟨.only ["sorting"], true, true, true⟩
     mayPassOn := false }
 
 /-- The answer by `author` to the consequence `q`, at the revision `revision`. -/
-def answerBody (author : Authority) (q : Question) (revision : String := "revision 2") :
+@[expose] def answerBody (author : Authority) (q : Question) (revision : String := "revision 2") :
     Statement.Body :=
   .answer
     { author, record := "sorting", revision, consequence := q.consequence, kind := q.kind,
       predicate := q.predicate, verdict := .confirmed }
 
 /-- The first consequence, with a short text for what its predicate means. -/
-def notEmpty : Question := ⟨"is not the empty-list function", .entailment, "fun f => f ≠ nilSort"⟩
+@[expose] def notEmpty : Question := ⟨"is not the empty-list function", .entailment, "fun f => f ≠ nilSort"⟩
 
 /-- The second consequence. -/
-def isSort : Question := ⟨"is Lean's merge sort", .entailment, "fun f => f = sort"⟩
+@[expose] def isSort : Question := ⟨"is Lean's merge sort", .entailment, "fun f => f = sort"⟩
 
 /-- `claude` acting under the delegation. -/
-def underDelegation : Authority := ⟨.of "claude", some (.of "assistant")⟩
+@[expose] def underDelegation : Authority := ⟨.of "claude", some (.of "assistant")⟩
 
 /-- `richard` confirms the plain restatement. -/
-def restated : Statement := mk (.of "restated") (answerBody ⟨.of "richard", none⟩ restatement)
+@[expose] def restated : Statement := mk (.of "restated") (answerBody ⟨.of "richard", none⟩ restatement)
 
 /-- `claude` confirms the second consequence, on the owner's behalf, for its reason. -/
-def sortAnswer : Statement := mkWith reason (.of "sort") (answerBody underDelegation isSort)
+@[expose] def sortAnswer : Statement := mkWith reason (.of "sort") (answerBody underDelegation isSort)
 
 /-- The project's log. -/
-def log : List Statement := [owners, assistant, restated, sortAnswer]
+@[expose] def log : List Statement := [owners, assistant, restated, sortAnswer]
 
 /-- The standing the explanation records. -/
 abbrev byOwner : Restatement := .confirmed (.of "richard")
 
 /-- The revision with the text `text`, showing `shown` and keeping `kept`. -/
-def revision (text : String) (shown : List (Question × Settled byOwner))
+@[expose] def revision (text : String) (shown : List (Question × Settled byOwner))
     (kept : List (Question × Verdict × Answerer)) : Revision :=
   { record := "sorting", text, standing := byOwner, shown, kept }
 
 /-- What the revision shows. -/
-def shownNow : List (Question × Settled byOwner) :=
+@[expose] def shownNow : List (Question × Settled byOwner) :=
   [(notEmpty, .derived), (isSort, .answered assistantAnswerer .confirmed)]
 
 /-- What the revision keeps. -/
-def keptNow : List (Question × Verdict × Answerer) := [(isSort, .confirmed, assistantAnswerer)]
+@[expose] def keptNow : List (Question × Verdict × Answerer) := [(isSort, .confirmed, assistantAnswerer)]
 
 /-- The current revision, as a build would show it. -/
-def current : Revision := revision "revision 2" shownNow keptNow
+@[expose] def current : Revision := revision "revision 2" shownNow keptNow
 
 /-- **The specification is met**: the owner's restatement, one consequence derived from it and one
 decision on their behalf confirm the deliverable. -/
@@ -158,7 +162,7 @@ theorem confirmed : Confirmed log [current] :=
 /-! ## What it refuses -/
 
 /-- The revision again, after a change to the record. -/
-def revised : Revision := revision "revision 3" shownNow keptNow
+@[expose] def revised : Revision := revision "revision 3" shownNow keptNow
 
 theorem revised_refused :
     findings log [revised] =
@@ -171,7 +175,7 @@ theorem revised_standing : logStanding project declared log revised = .unconfirm
   decide +kernel
 
 /-- The second consequence after a definition it reaches has changed. -/
-def isSort' : Question := { isSort with predicate := "fun f => f = sort, redefined" }
+@[expose] def isSort' : Question := { isSort with predicate := "fun f => f = sort, redefined" }
 
 theorem meaningChanged_refused :
     findings log [revision "revision 2"
@@ -226,7 +230,7 @@ theorem secondOwner_confirmed :
   findings_eq_nil_iff.mp (by decide +kernel)
 
 /-- `claude` writes its own confirmation of the restatement as an owner's. -/
-def selfConfirmed : Statement := mk (.of "self") (answerBody ⟨.of "claude", none⟩ restatement)
+@[expose] def selfConfirmed : Statement := mk (.of "self") (answerBody ⟨.of "claude", none⟩ restatement)
 
 theorem selfConfirmed_refused :
     findings [owners, assistant, selfConfirmed, sortAnswer] [current] =
@@ -237,7 +241,7 @@ theorem selfConfirmed_ignored : Confirmed (log ++ [selfConfirmed]) [current] :=
   findings_eq_nil_iff.mp (by decide +kernel)
 
 /-- The revision with the decision dropped from those it keeps. -/
-def dropped : Revision := revision "revision 2" [(notEmpty, .derived)] []
+@[expose] def dropped : Revision := revision "revision 2" [(notEmpty, .derived)] []
 
 theorem dropped_refused : findings log [dropped] = [.unkept "sorting" (.of "sort")] := by
   decide +kernel
@@ -264,7 +268,7 @@ theorem unsettled_refused :
   decide +kernel
 
 /-- `claude` confirms the second consequence, recording no source. -/
-def sourcelessAnswer : Statement := mkWith " " (.of "sort") (answerBody underDelegation isSort)
+@[expose] def sourcelessAnswer : Statement := mkWith " " (.of "sort") (answerBody underDelegation isSort)
 
 theorem sourceless_refused :
     findings [owners, assistant, restated, sourcelessAnswer] [current] =
@@ -278,7 +282,7 @@ theorem sourceless_counted :
   counts_iff.mp (by decide +kernel)
 
 /-- `claude` answers the consequence recorded as derived. -/
-def derivedAnswer : Statement := mk (.of "derived") (answerBody underDelegation notEmpty)
+@[expose] def derivedAnswer : Statement := mk (.of "derived") (answerBody underDelegation notEmpty)
 
 theorem derivedAnswered_refused :
     findings (log ++ [derivedAnswer]) [current] =
@@ -294,13 +298,13 @@ theorem ownerUnrecorded_refused :
   decide +kernel
 
 /-- The owner also confirms the second consequence. -/
-def ownerAnswer : Statement := mk (.of "owner-sort") (answerBody ⟨.of "richard", none⟩ isSort)
+@[expose] def ownerAnswer : Statement := mk (.of "owner-sort") (answerBody ⟨.of "richard", none⟩ isSort)
 
 /-- The owner, as the recorded answerer. -/
-def richardAnswerer : Answerer := .owner (.of "richard")
+@[expose] def richardAnswerer : Answerer := .owner (.of "richard")
 
 /-- The revision, recording the owner's answer to the second consequence, keeping `kept`. -/
-def byRichard (kept : List (Question × Verdict × Answerer)) : Revision :=
+@[expose] def byRichard (kept : List (Question × Verdict × Answerer)) : Revision :=
   revision "revision 2" [(notEmpty, .derived), (isSort, .answered richardAnswerer .confirmed)] kept
 
 /-- The status names the owner; the deliverable keeps only the assistant's answer. -/
@@ -316,11 +320,11 @@ theorem bothKept_confirmed :
   findings_eq_nil_iff.mp (by decide +kernel)
 
 /-- The owner confirms the restatement of the next revision. -/
-def restatedAgain : Statement :=
+@[expose] def restatedAgain : Statement :=
   mk (.of "restated-again") (answerBody ⟨.of "richard", none⟩ restatement "revision 3")
 
 /-- The next revision, recording the second consequence as derived, and keeping `kept`. -/
-def bothDerived (kept : List (Question × Verdict × Answerer)) : Revision :=
+@[expose] def bothDerived (kept : List (Question × Verdict × Answerer)) : Revision :=
   revision "revision 3" [(notEmpty, .derived), (isSort, .derived)] kept
 
 /-- It says no one answered the second consequence, and keeps an answer to it. -/
@@ -339,7 +343,7 @@ theorem derivedRetracted_confirmed :
 
 /-- Whose words the record's source is: the assistant wrote them, having read the code, and the
 owner adopted them, which is this statement's own source. -/
-def origin : Statement := mk (.of "origin") <| .origin
+@[expose] def origin : Statement := mk (.of "origin") <| .origin
   { author := ⟨.of "richard", none⟩
     record := "sorting"
     writer := "claude"
@@ -347,7 +351,7 @@ def origin : Statement := mk (.of "origin") <| .origin
     words := "The function sorts its input, and keeps its elements." }
 
 /-- A consequence that rests on an external tool, measured. -/
-def measured : Statement := mk (.of "measured") <| .tool
+@[expose] def measured : Statement := mk (.of "measured") <| .tool
   { author := underDelegation
     record := "sorting"
     consequence := isSort.consequence
@@ -356,7 +360,7 @@ def measured : Statement := mk (.of "measured") <| .tool
       "20 seconds, 4 GiB" }
 
 /-- A consequence whose tool is not yet measured. -/
-def unmeasured : Statement := mk (.of "unmeasured") <| .tool
+@[expose] def unmeasured : Statement := mk (.of "unmeasured") <| .tool
   { author := underDelegation
     record := "sorting"
     consequence := notEmpty.consequence
@@ -380,7 +384,7 @@ theorem origin_read :
 /-! ## An id two statements share -/
 
 /-- The log, with `dana` a second owner, who declines the restatement `richard` confirmed. -/
-def declinedLog : List Statement :=
+@[expose] def declinedLog : List Statement :=
   mk (.of "owners") (.owners ⟨[⟨.of "richard", []⟩, ⟨.of "dana", []⟩], none⟩) :: log.erase owners ++
     [mk (.of "decline") <| .answer
       { author := ⟨.of "dana", none⟩, record := "sorting", revision := "revision 2",
@@ -411,7 +415,7 @@ theorem delegationRepeated_refused :
 
 /-- A log's statement, as a project commits it: this literal is the text `Statement.print` writes of
 `owners`, so `parseLog` reads it back as that statement. -/
-def ownersText : String := r#"lean-intent statement 1
+@[expose] def ownersText : String := r#"lean-intent statement 1
 kind owners
 project sorting-project
 id owners
@@ -429,7 +433,7 @@ theorem parseLog_ownersText : parseLog [ownersText] = .ok [owners] :=
 
 /-- An owners' log as a project commits it: `LeanIntent.Confirmation.Read` reads each entry, which
 must reduce to a string literal, from the finished build. -/
-def committedLog : OwnersLog := ⟨[ownersText]⟩
+@[expose] def committedLog : OwnersLog := ⟨[ownersText]⟩
 
 /-- Every printed log reads back as its statements. -/
 theorem parseLog_printed : parseLog (log.map Statement.print) = .ok log :=

@@ -55,6 +55,7 @@ One interim stand-in remains, for the degenerate subjects of a type that check d
 
 Add lean-intent to the project's Lake configuration as a dependency pinned to a commit of its `main`, following the project's own rules for dependencies: its README shows the `lakefile.toml` form, and in a `lakefile.lean` it is `require "lean-intent" from git "https://github.com/rbeauchamp/lean-intent" @ "<commit>"`.
 lean-intent builds on the Lean release its `lean-toolchain` names; a project on another release cannot take it as it is, so report that instead of changing either toolchain.
+Every Lean file of lean-intent is a `module` file, so a project's `module` file can import it; where a file you write is one, lean-intent's README, under Module files, says what it imports with `import all` or with `meta`, and why a proof by reduction over a declared type's code needs `import all Init.Prelude`.
 
 ## Step 1. From the owner's words to an intent record
 

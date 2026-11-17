@@ -1,6 +1,9 @@
-import LeanIntent.Execution
-import LeanIntent.Execution.Code
-import LeanIntentExamples.Implementation
+module
+
+public import LeanIntent.Execution
+public import LeanIntent.Execution.Code
+public import LeanIntentExamples.Implementation
+import all Init.Prelude
 
 /-!
 # The executable that runs the sorting deliverable, and what the decision refuses
@@ -44,7 +47,13 @@ term (`sharedClosedTerm_not_counted`), a closed term extracted from its copy
 (`specialization_not_counted`, `specializationRedArg_not_counted`), whose remedy is
 `@[nospecialize]`, or a lambda lifted out of it, reached where a caller inlined it
 (`lambda_not_counted`), whose remedy is `@[noinline]`.
+
+The module imports `Init.Prelude` with `import all`: its proofs run the check's decision over names,
+which it compares with `Lean.Name.beq`, a function whose body Lean's prelude does not expose to a
+`module` file.
 -/
+
+public section
 
 namespace LeanIntentExamples.Execution
 
@@ -54,21 +63,21 @@ open LeanIntent LeanIntent.Execution LeanIntentExamples.Confirmation
 /-! ## The claim -/
 
 /-- The project's executable `sorter` runs the sorting deliverable. -/
-def sorterRuns : Runs sortingDeliverable where
+@[expose] def sorterRuns : Runs sortingDeliverable where
   executable := `sorter
 
 /-! ## What the decision reads, accepts and refuses -/
 
 /-- What the build shows of `sorterRuns`. -/
-def claim : Claim := ⟨``sorterRuns, some ``sortingDeliverable, `sorter⟩
+@[expose] def claim : Claim := ⟨``sorterRuns, some ``sortingDeliverable, `sorter⟩
 
 /-- The implementation recorded for the sorting deliverable, as the implementation check reports
 it: the program, by its module and its name. -/
-def implemented : List (Lean.Name × Implementation.Constant) := [(``sortingDeliverable, program)]
+@[expose] def implemented : List (Lean.Name × Implementation.Constant) := [(``sortingDeliverable, program)]
 
 /-- What the build shows of the executable `sorter`: its root module `Sorter` declares `main`,
 which reaches the program. -/
-def sorter : Executable := ⟨`sorter, `Sorter, true, [program]⟩
+@[expose] def sorter : Executable := ⟨`sorter, `Sorter, true, [program]⟩
 
 theorem runs : findings [``sortingDeliverable] implemented [] [sorter] [claim] = [] := by
   decide +kernel

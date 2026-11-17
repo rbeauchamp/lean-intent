@@ -1,4 +1,6 @@
-import LeanIntent.Trace
+module
+
+public import LeanIntent.Trace
 
 /-!
 # Tracing answers back to the owner
@@ -26,39 +28,41 @@ decisions show what the specification admits and what it refuses:
   refused at the link where the chain returns (`looping_refused`).
 -/
 
+public section
+
 namespace LeanIntentExamples.Trace
 
 open LeanIntent LeanIntent.Trace
 
-deriving instance DecidableEq for Except
+deriving instance @[expose] DecidableEq for Except
 
 /-- The project. -/
-def project : Ident := .of "lean-intent"
+@[expose] def project : Ident := .of "lean-intent"
 
 /-- Its owners declaration: `richard` alone. -/
-def owners : Statement.Owners := ⟨[⟨.of "richard", []⟩], none⟩
+@[expose] def owners : Statement.Owners := ⟨[⟨.of "richard", []⟩], none⟩
 
 /-- A statement of the project, on 2026-10-28. -/
-def mk (id : Ident) (body : Statement.Body) : Statement :=
+@[expose] def mk (id : Ident) (body : Statement.Body) : Statement :=
   { project, id, date := ⟨2026, 10, 28, by decide⟩, source := .words "As agreed.", body }
 
 /-- `richard`, as owner, lets `claude` confirm, decline and retract for the sorting record, and pass
 that on. -/
-def assistant : Statement := mk (.of "assistant") <| .delegation
+@[expose] def assistant : Statement := mk (.of "assistant") <| .delegation
   { delegator := ⟨.of "richard", none⟩
     delegate := ⟨.of "claude", []⟩
     scope := ⟨.only ["LeanIntentExamples.sorting"], true, true, true⟩
     mayPassOn := true }
 
 /-- `claude`, under `assistant`, lets `codex` confirm for every record, and not pass that on. -/
-def reviewer : Statement := mk (.of "reviewer") <| .delegation
+@[expose] def reviewer : Statement := mk (.of "reviewer") <| .delegation
   { delegator := ⟨.of "claude", some (.of "assistant")⟩
     delegate := ⟨.of "codex", []⟩
     scope := ⟨.all, true, false, false⟩
     mayPassOn := false }
 
 /-- `codex`, under `reviewer`, lets `gemini` confirm for every record. -/
-def helper : Statement := mk (.of "helper") <| .delegation
+@[expose] def helper : Statement := mk (.of "helper") <| .delegation
   { delegator := ⟨.of "codex", some (.of "reviewer")⟩
     delegate := ⟨.of "gemini", []⟩
     scope := ⟨.all, true, false, false⟩
@@ -66,41 +70,41 @@ def helper : Statement := mk (.of "helper") <| .delegation
 
 /-- An answer to the possibility of returning the empty list for every input, shown for the second
 revision of `record`. -/
-def answer (id : Ident) (author : Authority) (record : String) (verdict : Verdict) : Statement :=
+@[expose] def answer (id : Ident) (author : Authority) (record : String) (verdict : Verdict) : Statement :=
   mk id <| .answer
     { author, record, revision := "2", consequence := "returning the empty list for every input",
       kind := .possibility, predicate := "fun f => f = fun _ => []", verdict }
 
 /-- The owner declines it. -/
-def byOwner : Statement :=
+@[expose] def byOwner : Statement :=
   answer (.of "by-owner") ⟨.of "richard", none⟩ "LeanIntentExamples.sorting" .declined
 
 /-- `codex`, under `reviewer`, confirms it. -/
-def byReviewer : Statement :=
+@[expose] def byReviewer : Statement :=
   answer (.of "by-reviewer") ⟨.of "codex", some (.of "reviewer")⟩ "LeanIntentExamples.sorting"
     .confirmed
 
 /-- `codex`, under `reviewer`, declines it. -/
-def reviewerDeclines : Statement :=
+@[expose] def reviewerDeclines : Statement :=
   answer (.of "reviewer-declines") ⟨.of "codex", some (.of "reviewer")⟩
     "LeanIntentExamples.sorting" .declined
 
 /-- `codex`, under `reviewer`, confirms a consequence of the counter record. -/
-def otherRecord : Statement :=
+@[expose] def otherRecord : Statement :=
   answer (.of "other-record") ⟨.of "codex", some (.of "reviewer")⟩ "LeanIntentExamples.counter"
     .confirmed
 
 /-- `gemini`, under `helper`, confirms it. -/
-def byHelper : Statement :=
+@[expose] def byHelper : Statement :=
   answer (.of "by-helper") ⟨.of "gemini", some (.of "helper")⟩ "LeanIntentExamples.sorting"
     .confirmed
 
 /-- `mallory`, calling itself an owner, confirms it. -/
-def forged : Statement :=
+@[expose] def forged : Statement :=
   answer (.of "forged") ⟨.of "mallory", none⟩ "LeanIntentExamples.sorting" .confirmed
 
 /-- The project's log. -/
-def log : List Statement :=
+@[expose] def log : List Statement :=
   [assistant, reviewer, helper, byOwner, byReviewer, reviewerDeclines, otherRecord, byHelper,
     forged]
 
@@ -131,7 +135,7 @@ theorem forged_refused :
   decide +kernel
 
 /-- `claude`, under `assistant`, revokes `reviewer`, which it granted. -/
-def revokeReviewer : Statement :=
+@[expose] def revokeReviewer : Statement :=
   mk (.of "revoke-reviewer") <| .revocation ⟨⟨.of "claude", some (.of "assistant")⟩, .of "reviewer"⟩
 
 theorem byReviewer_revoked :
@@ -141,7 +145,7 @@ theorem byReviewer_revoked :
   decide +kernel
 
 /-- `claude`, under `assistant`, retracts the owner's answer. -/
-def retractOwner : Statement :=
+@[expose] def retractOwner : Statement :=
   mk (.of "retract-owner") <| .retraction ⟨⟨.of "claude", some (.of "assistant")⟩, .of "by-owner"⟩
 
 theorem byOwner_retracted :
@@ -150,21 +154,21 @@ theorem byOwner_retracted :
   decide +kernel
 
 /-- `x`, under `loop-b`, lets `y` confirm for every record and pass that on. -/
-def loopA : Statement := mk (.of "loop-a") <| .delegation
+@[expose] def loopA : Statement := mk (.of "loop-a") <| .delegation
   { delegator := ⟨.of "x", some (.of "loop-b")⟩
     delegate := ⟨.of "y", []⟩
     scope := ⟨.all, true, false, false⟩
     mayPassOn := true }
 
 /-- `y`, under `loop-a`, lets `x` confirm for every record and pass that on. -/
-def loopB : Statement := mk (.of "loop-b") <| .delegation
+@[expose] def loopB : Statement := mk (.of "loop-b") <| .delegation
   { delegator := ⟨.of "y", some (.of "loop-a")⟩
     delegate := ⟨.of "x", []⟩
     scope := ⟨.all, true, false, false⟩
     mayPassOn := true }
 
 /-- `y`, under `loop-a`, confirms it. -/
-def looping : Statement :=
+@[expose] def looping : Statement :=
   answer (.of "looping") ⟨.of "y", some (.of "loop-a")⟩ "LeanIntentExamples.sorting" .confirmed
 
 theorem looping_refused :

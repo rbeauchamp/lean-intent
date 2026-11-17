@@ -1,4 +1,6 @@
-import LeanIntent.Refinement
+module
+
+public import LeanIntent.Refinement
 
 /-!
 # What a refinement link does not carry
@@ -12,22 +14,24 @@ has no counterexample (`spec_not_refutable`) and two distinct implementations me
 (`spec_not_determinate`): no counterexample to the record lies in the image.
 -/
 
+public section
+
 namespace LeanIntentExamples.Transfer
 
 open LeanIntent
 
 /-- The record over `Nat` whose one property is `n = 0`. -/
-def isZero : IntentRecord Nat where
+@[expose] def isZero : IntentRecord Nat where
   shape := .value Nat
   dom := []
   props := [⟨"is zero", fun n => n = 0⟩]
   vocab := []
 
 /-- The specification that says nothing. -/
-def spec : Bool → Prop := fun _ => True
+@[expose] def spec : Bool → Prop := fun _ => True
 
 /-- The mapping that reads every boolean as `0`. -/
-def toZero : Bool → Nat := fun _ => 0
+@[expose] def toZero : Bool → Nat := fun _ => 0
 
 theorem isZero_props {n : Nat} : isZero.Props n ↔ n = 0 := by
   simp [IntentRecord.Props, isZero]

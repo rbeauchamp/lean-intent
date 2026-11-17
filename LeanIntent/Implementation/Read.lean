@@ -1,6 +1,8 @@
-import Lean
-import LeanIntent.Implementation
-import LeanIntent.Confirmation.Read
+module
+
+public import Lean
+public import LeanIntent.Implementation
+public import LeanIntent.Confirmation.Read
 
 /-!
 # Reading a project's implementations from the finished build
@@ -42,6 +44,8 @@ constant whose type is not one of these once unfolded, such as a function return
 records nothing.
 -/
 
+public section
+
 namespace LeanIntent.Implementation.Read
 
 open Lean Meta LeanIntent.Render LeanIntent.Confirmation.Read
@@ -60,7 +64,7 @@ def moduleOf (c : Name) : MetaM Name := do
     return env.mainModule
 
 /-- The constant `e` is, once its metadata is removed, or none. -/
-def constOf? (e : Expr) : Option Name :=
+@[expose] def constOf? (e : Expr) : Option Name :=
   match e.consumeMData with
   | .const c _ => some c
   | _ => none

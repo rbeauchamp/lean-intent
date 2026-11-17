@@ -1,5 +1,8 @@
-import LeanIntent.Implementation
-import LeanIntentExamples.Confirmation
+module
+
+public import LeanIntent.Implementation
+public import LeanIntentExamples.Confirmation
+import all Init.Prelude
 
 /-!
 # The implementation of the sorting deliverable, and what the decision refuses
@@ -31,7 +34,13 @@ program's module and name (`implemented_listed`). Each change below is refused b
 
 A constant may implement two deliverables, each value proving its own record of it
 (`oneConstant_accepted`).
+
+The module imports `Init.Prelude` with `import all`: its proofs run the check's decision over names,
+which it compares with `Lean.Name.beq`, a function whose body Lean's prelude does not expose to a
+`module` file.
 -/
+
+public section
 
 namespace LeanIntentExamples.Implementation
 
@@ -41,7 +50,7 @@ open LeanIntent LeanIntent.Implementation LeanIntentExamples.Sorting
 /-! ## The implementation -/
 
 /-- The program the project runs to sort, written once the record was confirmed: Lean's merge sort. -/
-def sortProgram (l : List Int) : List Int := l.mergeSort le
+@[expose] def sortProgram (l : List Int) : List Int := l.mergeSort le
 
 /-- The program fulfils the record. Its proof is the one of `sort`, which is the same function by
 definition, so the proposition proved is this one, about `sortProgram`. -/
@@ -49,7 +58,7 @@ theorem sortProgram_fulfils : sorting.Fulfilled sortProgram := sort_fulfils
 
 /-- The sorting deliverable's implementation: the program, and the proof that it fulfils the
 record. -/
-def sortingImplementation : Implementation sortingDeliverable where
+@[expose] def sortingImplementation : Implementation sortingDeliverable where
   subject := sortProgram
   fulfils := sortProgram_fulfils
 
@@ -62,10 +71,10 @@ theorem nilSort_unrecordable : ¬ ∃ v : Implementation sortingDeliverable, v.s
 /-! ## What the decision reads, accepts and refuses -/
 
 /-- The program, by its module and its name, as the build shows it. -/
-def program : Constant := ⟨`LeanIntentExamples.Implementation, ``sortProgram⟩
+@[expose] def program : Constant := ⟨`LeanIntentExamples.Implementation, ``sortProgram⟩
 
 /-- What the build shows of `sortingImplementation`. -/
-def entry : Entry := ⟨``sortingImplementation, some ``sortingDeliverable, some program⟩
+@[expose] def entry : Entry := ⟨``sortingImplementation, some ``sortingDeliverable, some program⟩
 
 theorem implemented : findings [``sortingDeliverable] [entry] [] = [] := by
   decide +kernel
@@ -84,7 +93,7 @@ theorem noDeliverable_refused :
   decide +kernel
 
 /-- A second value, recording `sort` as the implementation of the same deliverable. -/
-def second : Entry :=
+@[expose] def second : Entry :=
   ⟨`secondImplementation, some ``sortingDeliverable,
     some ⟨`LeanIntentExamples.Sorting, ``sort⟩⟩
 

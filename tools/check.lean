@@ -1,6 +1,10 @@
+module
+
 import Lean
 import Lake
 import Lake.Load.Package
+meta import Lake
+meta import Lake.Load.Package
 
 /-!
 # `check`: the repository's checks, and the listing of its tests
@@ -11,11 +15,14 @@ Run from the repository's top level as
     lean --run tools/check.lean --tests    # the listing of tests, for no-mistakes
 
 where `lean` is elan's, which runs the Lean that `lean-toolchain` names. It is not run through
-`lake env`, so that it reads the project's configuration before Lake loads it. The checks exit with
-status `0` when every rule holds and `1` when a rule rejects the project, after printing each
-rejection to standard output. When they cannot run they end through an uncaught error, which Lean
-prints to standard error and also ends with status `1`. Every input is read through the system that
-owns it, never by reading source text by hand:
+`lake env`, so that it reads the project's configuration before Lake loads it. It is a `module`
+file, as its own rule `LEAN-MODULE` requires of every Lean file: `main` is public, and Lake's
+modules are imported a second time with `meta`, since Lean loads the compiled code of an imported
+module, which `lean --run` runs, only where the import says `meta`. The checks exit with status `0`
+when every rule holds and `1` when a rule rejects the project, after printing each rejection to
+standard output. When they cannot run they end through an uncaught error, which Lean prints to
+standard error and also ends with status `1`. Every input is read through the system that owns it,
+never by reading source text by hand:
 
 * the project's Lean files, from Git's index (`git ls-files`); the library's are every one of them
   outside `tools/`, which holds this program;
@@ -23,7 +30,8 @@ owns it, never by reading source text by hand:
   (`Lake.loadPackage`, which resolves no dependency);
 * the modules each library target selects, from Lake (`Lake.LeanLib.getModuleArray`, which reads
   the target's globs over the working tree, as a build of the target does);
-* each file's module name, from Lean (`moduleNameOfFileName`), and its build, from Lake;
+* each file's module name, from Lean (`moduleNameOfFileName`), whether it is a `module` file, from
+  Lean's parser of its header (`Parser.parseHeader`), and its build, from Lake;
 * the axioms each declaration rests on, from Lean (`collectAxioms`) over the environment Lean
   imports from the built modules;
 * the compiled code of each declaration and what it uses, from Lean (`Lean.IR.findEnvDecl`,
@@ -46,6 +54,10 @@ The rules:
   outside the targets' directories, and a module a target selects that Git's index does not list,
   such as a file not yet added, are each refused. Lake rejects a file that is not a module of the
   workspace as an unknown target, and a `sorry` is a warning.
+* `LEAN-MODULE`: every Lean file Git's index lists, the library's and those under `tools/`, is a
+  `module` file, as Lean's parser reads its header (`Parser.parseHeader`,
+  `Elab.HeaderSyntax.isModule`). Lean refuses a `module` file's import of a file that is not one, so
+  a project's `module` file can import a module of the library only if the library's file is one.
 * `AXIOMS`: no library module declares an axiom, and every constant a library module declares rests
   only on `propext`, `Classical.choice` and `Quot.sound`, Lean's own axioms. So no claim the
   library makes about itself rests on `sorry` (`sorryAx`), on code run to decide it (the axiom
@@ -226,6 +238,20 @@ def checkModules (pkg : Lake.Package) (files : Array String) (mods : Array Name)
   for m in selected do
     unless mods.contains m do
       errs := errs.push (reject s!"a library target selects the module {m}, whose file Git's index does not list, so these rules do not build or audit it")
+  return errs
+
+/-- `LEAN-MODULE` for the Lean files `files`: each is a `module` file, as Lean's parser reads its
+header. A file whose header Lean's parser cannot read is an error, since the rule cannot decide it. -/
+def checkModuleFiles (files : Array String) : IO (Array Rejection) := do
+  let mut errs : Array Rejection := #[]
+  for f in files do
+    let input ← IO.FS.readFile f
+    let (header, _, messages) ← Parser.parseHeader (Parser.mkInputContext input f)
+    if messages.hasErrors then
+      throw <| IO.userError s!"{f}: Lean's parser could not read its header"
+    unless Elab.HeaderSyntax.isModule header do
+      errs := errs.push { rule := "LEAN-MODULE", message :=
+        s!"{f} is not a `module` file: its header does not begin with `module`" }
   return errs
 
 /-- `LEAN-BUILD`'s second part: Lake builds every file of `files`, each given as its target, with
@@ -600,6 +626,9 @@ def check : IO (Array Rejection) := do
   let selected ← checkModules pkg files mods
   unless selected.isEmpty do
     return selected
+  let notModules ← checkModuleFiles (← trackedLeanFiles)
+  unless notModules.isEmpty do
+    return notModules
   let built ← build files
   unless built.isEmpty do
     return built
@@ -627,7 +656,7 @@ end Check
 the file's modules with their environment extensions only after `enableInitializersExecution`,
 which is `unsafe`: it lets importing run the `initialize` declarations of the imported modules, as
 elaborating them did. -/
-unsafe def main (args : List String) : IO UInt32 := do
+public unsafe def main (args : List String) : IO UInt32 := do
   match args with
   | ["--tests"] =>
     for t in ← Check.projectTests do

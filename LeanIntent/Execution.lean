@@ -1,5 +1,7 @@
-import LeanIntent.Implementation
-import LeanIntent.Cone
+module
+
+public import LeanIntent.Implementation
+public import LeanIntent.Cone
 
 /-!
 # Which executable runs each deliverable
@@ -64,6 +66,8 @@ when it runs beyond which declarations of its compiled code its entry point reac
 branch it takes, or what code its module initializers run before `main`.
 -/
 
+public section
+
 namespace LeanIntent
 
 universe u
@@ -96,11 +100,11 @@ inductive Outcome where
   | unreached
   /-- More names are reached than the search was given fuel to visit. -/
   | exhausted
-  deriving DecidableEq, Repr
+  deriving @[expose] DecidableEq, Repr
 
 /-- The search: visits each name of `work` not yet in `visited`, stops at `target`, and otherwise
 adds the names `refs` gives it to the work, spending one unit of fuel on each name it visits. -/
-def search (refs : Name → List Name) (target : Name) :
+@[expose] def search (refs : Name → List Name) (target : Name) :
     Nat → Std.HashSet Name → List Name → Outcome
   | fuel, visited, work =>
     match Cone.nextNew visited work with
@@ -112,15 +116,15 @@ def search (refs : Name → List Name) (target : Name) :
         | fuel + 1 => search refs target fuel (visited.insert c) (refs c ++ rest)
 
 /-- Whether `target` is reached from `root` through `refs`, visiting at most `fuel` names. -/
-def reach (refs : Name → List Name) (root target : Name) (fuel : Nat) : Outcome :=
+@[expose] def reach (refs : Name → List Name) (root target : Name) (fuel : Nat) : Outcome :=
   search refs target fuel ∅ [root]
 
 /-- Some list of at most `fuel` names holds every name reached from `root`. -/
-def Within (refs : Name → List Name) (root : Name) (fuel : Nat) : Prop :=
+@[expose] def Within (refs : Name → List Name) (root : Name) (fuel : Nat) : Prop :=
   ∃ l : List Name, l.length ≤ fuel ∧ ∀ c, Reaches refs root c → c ∈ l
 
 /-- `refs`, restricted to the names `keep` accepts: a name it refuses refers to nothing. -/
-def prune (refs : Name → List Name) (keep : Name → Bool) (c : Name) : List Name :=
+@[expose] def prune (refs : Name → List Name) (keep : Name → Bool) (c : Name) : List Name :=
   if keep c then refs c else []
 
 section Reach
@@ -292,7 +296,7 @@ structure Executable where
   entry : Bool
   /-- The implementations asked about that its entry point reaches. -/
   reaches : List Constant
-  deriving DecidableEq, Repr
+  deriving @[expose] DecidableEq, Repr
 
 /-- A value of a `Runs` type that a project declares, as the build shows it. -/
 structure Claim where
@@ -302,7 +306,7 @@ structure Claim where
   deliverable : Option Name
   /-- The executable it names. -/
   executable : Name
-  deriving DecidableEq, Repr
+  deriving @[expose] DecidableEq, Repr
 
 /-- What is wrong with what a project's executables run. -/
 inductive Finding where
@@ -320,23 +324,23 @@ inductive Finding where
   /-- A claim says this executable runs this deliverable, and its entry point does not reach the
   recorded implementation. -/
   | unreached (deliverable : Name) (executable : Name) (implementation : Constant)
-  deriving DecidableEq, Repr
+  deriving @[expose] DecidableEq, Repr
 
 /-- The executables of `es` named `x`. -/
-def named (es : List Executable) (x : Name) : List Executable :=
+@[expose] def named (es : List Executable) (x : Name) : List Executable :=
   es.filter (·.name == x)
 
 /-- The constants `is` records as implementing the deliverable `d`. -/
-def implementationsOf (is : List (Name × Constant)) (d : Name) : List Constant :=
+@[expose] def implementationsOf (is : List (Name × Constant)) (d : Name) : List Constant :=
   is.filterMap fun p => if p.1 == d then some p.2 else none
 
 /-- The executables of `es` named `x`, with an entry point that does not reach `c`. -/
-def missing (es : List Executable) (x : Name) (c : Constant) : List Executable :=
+@[expose] def missing (es : List Executable) (x : Name) (c : Constant) : List Executable :=
   (named es x).filter fun e => e.entry && !e.reaches.contains c
 
 /-- What is wrong with the claim `cl`, given the deliverables `ds`, the implementations `is`
 recorded, the deliverables `as` declared awaiting theirs, and the executables `es`. -/
-def claimFindings (ds : List Name) (is : List (Name × Constant)) (as : List Name)
+@[expose] def claimFindings (ds : List Name) (is : List (Name × Constant)) (as : List Name)
     (es : List Executable) (cl : Claim) : List Finding :=
   match cl.deliverable with
   | none => [.untied cl.name]
@@ -349,13 +353,13 @@ def claimFindings (ds : List Name) (is : List (Name × Constant)) (as : List Nam
       (missing es cl.executable c).map fun _ => .unreached d cl.executable c
 
 /-- What is wrong with the executable `e`. -/
-def exeFindings (e : Executable) : List Finding :=
+@[expose] def exeFindings (e : Executable) : List Finding :=
   if e.entry then [] else [.noEntryPoint e.name e.root]
 
 /-- **The decision**: everything wrong with what the claims `cls` say the executables `es` run,
 given the deliverables `ds`, the implementations `is` recorded for them and the deliverables `as`
 declared awaiting theirs. -/
-def findings (ds : List Name) (is : List (Name × Constant)) (as : List Name)
+@[expose] def findings (ds : List Name) (is : List (Name × Constant)) (as : List Name)
     (es : List Executable) (cls : List Claim) : List Finding :=
   (if ds = [] then [.noDeliverable] else []) ++ es.flatMap exeFindings ++
     cls.flatMap (claimFindings ds is as es)
@@ -365,7 +369,7 @@ claim names a deliverable of the project and an executable of it, and either the
 declared awaiting its implementation, or some implementation is recorded for it and the entry point
 of every executable of that name reaches every implementation recorded for it. It is stated over
 the lists alone, with no definition the decision uses. -/
-def Accounted (ds : List Name) (is : List (Name × Constant)) (as : List Name)
+@[expose] def Accounted (ds : List Name) (is : List (Name × Constant)) (as : List Name)
     (es : List Executable) (cls : List Claim) : Prop :=
   ds ≠ [] ∧ (∀ e ∈ es, e.entry = true) ∧
     ∀ cl ∈ cls, ∃ d, cl.deliverable = some d ∧ d ∈ ds ∧ (∃ e ∈ es, e.name = cl.executable) ∧
@@ -375,7 +379,7 @@ def Accounted (ds : List Name) (is : List (Name × Constant)) (as : List Name)
 /-- The reaches the claim `cl` passes: its deliverable, its executable and each implementation
 recorded for the deliverable, once for each executable of that name whose entry point reaches it,
 where the deliverable is one of `ds` and not declared awaiting its implementation. -/
-def claimReached (ds : List Name) (is : List (Name × Constant)) (as : List Name)
+@[expose] def claimReached (ds : List Name) (is : List (Name × Constant)) (as : List Name)
     (es : List Executable) (cl : Claim) : List (Name × Name × Constant) :=
   match cl.deliverable with
   | none => []
@@ -387,7 +391,7 @@ def claimReached (ds : List Name) (is : List (Name × Constant)) (as : List Name
     else []
 
 /-- The claim `cl` of a deliverable of `ds` declared awaiting its implementation. -/
-def claimAwaiting (ds : List Name) (as : List Name) (cl : Claim) : Option (Name × Name) :=
+@[expose] def claimAwaiting (ds : List Name) (as : List Name) (cl : Claim) : Option (Name × Name) :=
   match cl.deliverable with
   | none => none
   | some d => if d ∈ ds ∧ d ∈ as then some (d, cl.executable) else none
@@ -410,7 +414,7 @@ structure Report where
 
 /-- **What a gate reads**, given the deliverables, the implementations recorded, the deliverables
 declared awaiting theirs, the executables and the claims. -/
-def report (ds : List Name) (is : List (Name × Constant)) (as : List Name)
+@[expose] def report (ds : List Name) (is : List (Name × Constant)) (as : List Name)
     (es : List Executable) (cls : List Claim) : Report :=
   ⟨findings ds is as es cls, cls.flatMap (claimReached ds is as es),
     cls.filterMap (claimAwaiting ds as),
@@ -507,7 +511,7 @@ theorem findings_eq_nil_iff : findings ds is as es cls = [] ↔ Accounted ds is 
 
 /-- What the finding `f` states of the deliverables `ds`, the implementations `is`, the deliverables
 `as` declared awaiting theirs, the executables `es` and the claims `cls`. -/
-def Finding.Holds (ds : List Name) (is : List (Name × Constant)) (as : List Name)
+@[expose] def Finding.Holds (ds : List Name) (is : List (Name × Constant)) (as : List Name)
     (es : List Executable) (cls : List Claim) : Finding → Prop
   | .noDeliverable => ds = []
   | .untied n => ∃ cl ∈ cls, cl.name = n ∧ ∀ d ∈ ds, cl.deliverable ≠ some d

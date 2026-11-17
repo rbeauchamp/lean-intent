@@ -1,3 +1,5 @@
+module
+
 /-!
 # Codecs: printers with parsers proved to read them back
 
@@ -24,6 +26,8 @@ with leading zeros. `Codec.read` closes that gap: it accepts a text only when pr
 gives back the same text, so it accepts exactly the printed texts (`Codec.read_eq_some_iff`).
 -/
 
+public section
+
 namespace LeanIntent
 
 open Lean in
@@ -39,13 +43,13 @@ macro:max "chars!" s:str : term => do
 character (Unicode's general category Cc, `U+0000` to `U+001F` and `U+007F` to `U+009F`), the line
 or paragraph separator (`U+2028`, `U+2029`), or a bidirectional formatting character (`U+061C`,
 `U+200E`, `U+200F`, `U+202A` to `U+202E`, `U+2066` to `U+2069`). -/
-def concealing (c : Char) : Bool :=
+@[expose] def concealing (c : Char) : Bool :=
   let n := c.toNat
   n < 0x20 || (0x7F ≤ n && n < 0xA0) || n == 0x2028 || n == 0x2029 || n == 0x061C ||
     n == 0x200E || n == 0x200F || (0x202A ≤ n && n ≤ 0x202E) || (0x2066 ≤ n && n ≤ 0x2069)
 
 /-- Every character of `l` is a line feed or not concealing. -/
-def Plain (l : List Char) : Prop := ∀ c ∈ l, c = '\n' ∨ concealing c = false
+@[expose] def Plain (l : List Char) : Prop := ∀ c ∈ l, c = '\n' ∨ concealing c = false
 
 instance (l : List Char) : Decidable (Plain l) :=
   inferInstanceAs (Decidable (∀ c ∈ l, c = '\n' ∨ concealing c = false))
@@ -64,7 +68,7 @@ theorem plain_flatten {ls : List (List Char)} (h : ∀ l ∈ ls, Plain l) : Plai
   exact h l hl c hc
 
 /-- `s` with the prefix `p` removed, or `none` when `s` does not start with `p`. -/
-def stripPrefix : List Char → List Char → Option (List Char)
+@[expose] def stripPrefix : List Char → List Char → Option (List Char)
   | [], s => some s
   | c :: p, d :: s => if c = d then stripPrefix p s else none
   | _ :: _, [] => none
@@ -75,7 +79,7 @@ def stripPrefix : List Char → List Char → Option (List Char)
   | cons c p ih => simp [stripPrefix, ih]
 
 /-- `k₁` and `k₂` differ at a position both have, so neither is a prefix of the other. -/
-def Diverge : List Char → List Char → Bool
+@[expose] def Diverge : List Char → List Char → Bool
   | a :: k₁, b :: k₂ => a != b || Diverge k₁ k₂
   | _, _ => false
 
@@ -111,21 +115,21 @@ namespace Codec
 variable {α β : Type}
 
 /-- The codec of the one value of `Unit`, whose text is empty. -/
-def unit : Codec Unit where
+@[expose] def unit : Codec Unit where
   print _ := []
   parse s := some ((), s)
   parse_print _ _ := rfl
   plain _ := plain_nil
 
 /-- `c` after the fixed text `k`. -/
-def keyed (k : List Char) (hk : Plain k := by decide) (c : Codec α) : Codec α where
+@[expose] def keyed (k : List Char) (hk : Plain k := by decide) (c : Codec α) : Codec α where
   print a := k ++ c.print a
   parse s := (stripPrefix k s).bind c.parse
   parse_print a rest := by simp [List.append_assoc, c.parse_print]
   plain a := plain_append hk (c.plain a)
 
 /-- A value of `c₁` followed by a value of `c₂`. -/
-def seq (c₁ : Codec α) (c₂ : Codec β) : Codec (α × β) where
+@[expose] def seq (c₁ : Codec α) (c₂ : Codec β) : Codec (α × β) where
   print p := c₁.print p.1 ++ c₂.print p.2
   parse s := (c₁.parse s).bind fun (a, r) => (c₂.parse r).map fun (b, r') => ((a, b), r')
   parse_print p rest := by simp [List.append_assoc, c₁.parse_print, c₂.parse_print]
@@ -133,14 +137,14 @@ def seq (c₁ : Codec α) (c₂ : Codec β) : Codec (α × β) where
 
 /-- The codec of `α` through `c`, given `f`, which encodes `α` in `β`, and `g`, which decodes every
 value `f` gives back. A value of `β` that `g` refuses fails to parse. -/
-def map (c : Codec β) (f : α → β) (g : β → Option α) (h : ∀ a, g (f a) = some a) : Codec α where
+@[expose] def map (c : Codec β) (f : α → β) (g : β → Option α) (h : ∀ a, g (f a) = some a) : Codec α where
   print a := c.print (f a)
   parse s := (c.parse s).bind fun (b, r) => (g b).map (·, r)
   parse_print a rest := by simp [c.parse_print, h]
   plain a := c.plain (f a)
 
 /-- A value `a` of `c` followed by a value of `k a`: the codec of a sum whose tag `c` reads. -/
-def dep {γ : α → Type} (c : Codec α) (k : (a : α) → Codec (γ a)) : Codec ((a : α) × γ a) where
+@[expose] def dep {γ : α → Type} (c : Codec α) (k : (a : α) → Codec (γ a)) : Codec ((a : α) × γ a) where
   print p := c.print p.1 ++ (k p.1).print p.2
   parse s := (c.parse s).bind fun (a, r) => ((k a).parse r).map fun (b, r') => (⟨a, b⟩, r')
   parse_print p rest := by simp [List.append_assoc, c.parse_print, (k p.1).parse_print]
@@ -159,7 +163,7 @@ theorem findSome?_of_unique {l : List α} {f : α → Option β} {a : α} {b : �
 
 /-- The codec of a type whose values are listed in `all`, each printed as its keyword `kw a`, where
 no two keywords are prefixes of one another. -/
-def keywords [DecidableEq α] (kw : α → List Char) (all : List α) (complete : ∀ a, a ∈ all)
+@[expose] def keywords [DecidableEq α] (kw : α → List Char) (all : List α) (complete : ∀ a, a ∈ all)
     (free : ∀ a ∈ all, ∀ b ∈ all, a ≠ b → Diverge (kw a) (kw b) = true)
     (plain : ∀ a, Plain (kw a)) : Codec α where
   print := kw
@@ -169,13 +173,13 @@ def keywords [DecidableEq α] (kw : α → List Char) (all : List α) (complete 
   plain := plain
 
 /-- What follows the tag of a sum: a value of `α` after `false`, a value of `β` after `true`. -/
-def SumBody (α β : Type) : Bool → Type
+@[expose] def SumBody (α β : Type) : Bool → Type
   | false => α
   | true => β
 
 /-- The codec of `α ⊕ β`: the fixed text `kl` followed by `cl` for a left value, and the fixed text
 `kr` followed by `cr` for a right one, where neither fixed text is a prefix of the other. -/
-def sum (kl kr : List Char) (h : Diverge kl kr = true ∧ Diverge kr kl = true)
+@[expose] def sum (kl kr : List Char) (h : Diverge kl kr = true ∧ Diverge kr kl = true)
     (hl : Plain kl := by decide) (hr : Plain kr := by decide) (cl : Codec α) (cr : Codec β) :
     Codec (α ⊕ β) :=
   map ((keywords (fun b => if b then kr else kl) [false, true]
@@ -189,7 +193,7 @@ def sum (kl kr : List Char) (h : Diverge kl kr = true ∧ Diverge kr kl = true)
 
 /-- The codec of `Option α`: the fixed text `kNone` for `none`, and the fixed text `kSome` followed
 by `c` for a value, where neither fixed text is a prefix of the other. -/
-def option (kNone kSome : List Char) (h : Diverge kNone kSome = true ∧ Diverge kSome kNone = true)
+@[expose] def option (kNone kSome : List Char) (h : Diverge kNone kSome = true ∧ Diverge kSome kNone = true)
     (hn : Plain kNone := by decide) (hs : Plain kSome := by decide) (c : Codec α) :
     Codec (Option α) :=
   map (sum kNone kSome h hn hs unit c) (fun | .none => .inl () | .some a => .inr a)
@@ -197,7 +201,7 @@ def option (kNone kSome : List Char) (h : Diverge kNone kSome = true ∧ Diverge
 
 /-- The text that `c` reads back, accepted only when printing what was read gives the same text,
 so that a text the printer does not print is refused rather than read leniently. -/
-def read (c : Codec α) (s : List Char) : Option α :=
+@[expose] def read (c : Codec α) (s : List Char) : Option α :=
   match c.parse s with
   | .some (a, _) => if c.print a = s then .some a else .none
   | .none => .none

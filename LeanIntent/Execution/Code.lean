@@ -1,3 +1,5 @@
+module
+
 /-!
 # Which compiled declarations are an implementation's code
 
@@ -24,11 +26,13 @@ never `c`'s compiled code (`isCompiledCodeOf_const`), so a project cannot make a
 own count as the implementation by naming it like the compiler's copy.
 -/
 
+public section
+
 namespace LeanIntent.Execution
 
 /-- `t` is the compiled code of `c`: it is `c`, or it is the name of a declaration that is,
 followed by `_redArg`, and `isConst` refuses it. -/
-def isCompiledCodeOf (isConst : Lean.Name → Bool) (c : Lean.Name) : Lean.Name → Bool
+@[expose] def isCompiledCodeOf (isConst : Lean.Name → Bool) (c : Lean.Name) : Lean.Name → Bool
   | t@(.str p s) => t == c || (s == "_redArg" && !isConst t && isCompiledCodeOf isConst c p)
   | t => t == c
 

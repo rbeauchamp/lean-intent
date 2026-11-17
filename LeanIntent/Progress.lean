@@ -1,4 +1,6 @@
-import LeanIntent.Obligations
+module
+
+public import LeanIntent.Obligations
 
 /-!
 # Progress: the obligations refuse no adequate record
@@ -11,6 +13,8 @@ is free); O5 is then met by the widest freedom, which is shown with the record (
 deliverable runs, the record's joint model is supplied by the deliverable itself
 (`o2Run_of_meets`), so no record is asked for a model before the work that finds one.
 -/
+
+public section
 
 namespace LeanIntent
 

@@ -1,3 +1,5 @@
+module
+
 /-!
 # Intent records
 
@@ -23,6 +25,8 @@ cone exclusion (`LeanIntent.Cone`). A later revision may change what a record sa
 every consequence confirmed or declined, by the owner or on the owner's behalf
 (`LeanIntent.Answers`).
 -/
+
+public section
 
 namespace LeanIntent
 
@@ -96,18 +100,18 @@ namespace IntentRecord
 variable {W : Type u}
 
 /-- Every domain hypothesis of `r` holds of `w`. -/
-def Dom (r : IntentRecord W) (w : W) : Prop := ∀ d ∈ r.dom, d.holds w
+@[expose] def Dom (r : IntentRecord W) (w : W) : Prop := ∀ d ∈ r.dom, d.holds w
 
 /-- Every property of `r` holds of `w`. -/
-def Props (r : IntentRecord W) (w : W) : Prop := ∀ p ∈ r.props, p.holds w
+@[expose] def Props (r : IntentRecord W) (w : W) : Prop := ∀ p ∈ r.props, p.holds w
 
 /-- `w` is a model of `r`: every domain hypothesis and every property holds of it. -/
-def Meets (r : IntentRecord W) (w : W) : Prop := r.Dom w ∧ r.Props w
+@[expose] def Meets (r : IntentRecord W) (w : W) : Prop := r.Dom w ∧ r.Props w
 
 /-- `w` fulfils `r`: wherever the domain hypotheses hold of it, so does every property. This is what
 an implementation proves of its subject, since the domain hypotheses are facts about the world that
 no implementation can establish. -/
-def Fulfilled (r : IntentRecord W) (w : W) : Prop := r.Dom w → r.Props w
+@[expose] def Fulfilled (r : IntentRecord W) (w : W) : Prop := r.Dom w → r.Props w
 
 theorem meets_of_fulfilled {r : IntentRecord W} {w : W} (h : r.Fulfilled w) (hd : r.Dom w) :
     r.Meets w := ⟨hd, h hd⟩

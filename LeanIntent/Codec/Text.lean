@@ -1,4 +1,6 @@
-import LeanIntent.Codec
+module
+
+public import LeanIntent.Codec
 
 /-!
 # The codecs of numbers, names and text
@@ -14,6 +16,8 @@ once:
 * `Codec.text`: any string, as its lines, each printed as `| ` and the line.
 -/
 
+public section
+
 namespace LeanIntent.Codec
 
 variable {α : Type}
@@ -21,10 +25,10 @@ variable {α : Type}
 /-! ## Numbers -/
 
 /-- The decimal digit of `k`, for `k < 10`. -/
-def digitChar (k : Nat) : Char := Char.ofNat (48 + k)
+@[expose] def digitChar (k : Nat) : Char := Char.ofNat (48 + k)
 
 /-- The value of a decimal digit. -/
-def digitValue (c : Char) : Nat := c.toNat - 48
+@[expose] def digitValue (c : Char) : Nat := c.toNat - 48
 
 theorem digitChar_spec : ∀ k, k < 10 →
     (digitChar k).isDigit = true ∧ digitValue (digitChar k) = k ∧
@@ -33,15 +37,15 @@ theorem digitChar_spec : ∀ k, k < 10 →
 
 /-- The decimal digits of `n`, least significant first, given at most `k` steps after the first;
 `k ≥ n` steps always suffice. The recursion is on `k`, so Lean's kernel evaluates it. -/
-def digitsRevUpTo : Nat → Nat → List Char
+@[expose] def digitsRevUpTo : Nat → Nat → List Char
   | 0, n => [digitChar n]
   | k + 1, n => if n < 10 then [digitChar n] else digitChar (n % 10) :: digitsRevUpTo k (n / 10)
 
 /-- The decimal digits of `n`, least significant first. -/
-def digitsRev (n : Nat) : List Char := digitsRevUpTo n n
+@[expose] def digitsRev (n : Nat) : List Char := digitsRevUpTo n n
 
 /-- The value of decimal digits listed least significant first. -/
-def valueRev : List Char → Nat
+@[expose] def valueRev : List Char → Nat
   | [] => 0
   | d :: ds => valueRev ds * 10 + digitValue d
 
@@ -71,7 +75,7 @@ theorem digitsRev_spec (n : Nat) :
   digitsRevUpTo_spec n n (Nat.le_refl n)
 
 /-- The decimal digits of `n`, most significant first, after enough zeros to make at least `w`. -/
-def decimal (w n : Nat) : List Char :=
+@[expose] def decimal (w n : Nat) : List Char :=
   List.replicate (w - (digitsRev n).length) '0' ++ (digitsRev n).reverse
 
 theorem valueRev_append_zeros (l : List Char) (k : Nat) :
@@ -96,7 +100,7 @@ theorem decimal_spec (w n : Nat) :
     · exact (digitsRev_spec n).2 c (List.mem_reverse.mp hc)
 
 /-- The longest prefix of the input whose characters `p` admits, and the rest. -/
-def span (p : Char → Bool) : List Char → List Char × List Char
+@[expose] def span (p : Char → Bool) : List Char → List Char × List Char
   | [] => ([], [])
   | c :: s => if p c then ((c :: (span p s).1), (span p s).2) else ([], c :: s)
 
@@ -108,7 +112,7 @@ theorem span_append (p : Char → Bool) {l : List Char} (hl : ∀ c ∈ l, p c =
     simp [span, hl c List.mem_cons_self, ih fun d hd => hl d (List.mem_cons_of_mem _ hd)]
 
 /-- A natural number in decimal, with zeros before it to make at least `w` digits, then `term`. -/
-def nat (w : Nat) (term : Char) (ht : term.isDigit = false) (hp : Plain [term] := by decide) :
+@[expose] def nat (w : Nat) (term : Char) (ht : term.isDigit = false) (hp : Plain [term] := by decide) :
     Codec Nat where
   print n := decimal w n ++ [term]
   parse s := match span Char.isDigit s with
@@ -122,7 +126,7 @@ def nat (w : Nat) (term : Char) (ht : term.isDigit = false) (hp : Plain [term] :
 /-! ## Lists -/
 
 /-- `n` values of `c`, one after another. -/
-def many (c : Codec α) : Nat → List Char → Option (List α × List Char)
+@[expose] def many (c : Codec α) : Nat → List Char → Option (List α × List Char)
   | 0, s => some ([], s)
   | n + 1, s => (c.parse s).bind fun (a, r) => (many c n r).map fun (as, r') => (a :: as, r')
 
@@ -133,7 +137,7 @@ theorem many_print (c : Codec α) (l : List α) (rest : List Char) :
   | cons a l ih => simp [many, List.append_assoc, c.parse_print, ih]
 
 /-- A list: its length in decimal on a line of its own, then each value. -/
-def list (c : Codec α) : Codec (List α) where
+@[expose] def list (c : Codec α) : Codec (List α) where
   print l := (nat 0 '\n' (by decide)).print l.length ++ (l.map c.print).flatten
   parse s := ((nat 0 '\n' (by decide)).parse s).bind fun (n, r) => many c n r
   parse_print l rest := by
@@ -144,7 +148,7 @@ def list (c : Codec α) : Codec (List α) where
 /-! ## Tokens -/
 
 /-- A run of characters that `p` admits, then `term`, which `p` does not admit. -/
-def token (p : Char → Bool) (term : Char) (ht : p term = false)
+@[expose] def token (p : Char → Bool) (term : Char) (ht : p term = false)
     (hp : ∀ c, p c = true → concealing c = false) (hterm : Plain [term] := by decide) :
     Codec {l : List Char // l.all p = true} where
   print l := l.1 ++ [term]
@@ -160,10 +164,10 @@ def token (p : Char → Bool) (term : Char) (ht : p term = false)
 /-! ## Lines -/
 
 /-- The lowercase hexadecimal digit of `k`, for `k < 16`. -/
-def hexChar (k : Nat) : Char := if k < 10 then digitChar k else Char.ofNat (87 + k)
+@[expose] def hexChar (k : Nat) : Char := if k < 10 then digitChar k else Char.ofNat (87 + k)
 
 /-- The value of a lowercase hexadecimal digit. -/
-def hexValue? (c : Char) : Option Nat :=
+@[expose] def hexValue? (c : Char) : Option Nat :=
   if c.isDigit then some (digitValue c) else if 'a' ≤ c ∧ c ≤ 'f' then some (c.toNat - 87) else none
 
 theorem hexChar_spec :
@@ -171,11 +175,11 @@ theorem hexChar_spec :
   decide
 
 /-- The four lowercase hexadecimal digits of `n`, for `n < 0x10000`. -/
-def hex4 (n : Nat) : List Char :=
+@[expose] def hex4 (n : Nat) : List Char :=
   [hexChar (n / 4096 % 16), hexChar (n / 256 % 16), hexChar (n / 16 % 16), hexChar (n % 16)]
 
 /-- The value of four hexadecimal digits. -/
-def hexValue4? (a b d e : Char) : Option Nat := do
+@[expose] def hexValue4? (a b d e : Char) : Option Nat := do
   pure ((← hexValue? a) * 4096 + (← hexValue? b) * 256 + (← hexValue? d) * 16 + (← hexValue? e))
 
 theorem hexValue4?_hex4 {n : Nat} (h : n < 0x10000) :
@@ -189,14 +193,14 @@ theorem lt_of_concealing {c : Char} (h : concealing c = true) : c.toNat < 0x1000
 
 /-- How `c` is written in a line: `\\` for `\`, `\u` and four hexadecimal digits for a concealing
 character, and `c` itself otherwise. -/
-def escapeChar (c : Char) : List Char :=
+@[expose] def escapeChar (c : Char) : List Char :=
   if c = '\\' then ['\\', '\\'] else if concealing c then '\\' :: 'u' :: hex4 c.toNat else [c]
 
 /-- `c` in front of the characters read so far. -/
-def prepend (c : Char) : List Char × List Char → List Char × List Char := fun (l, r) => (c :: l, r)
+@[expose] def prepend (c : Char) : List Char × List Char → List Char × List Char := fun (l, r) => (c :: l, r)
 
 /-- The characters of an escaped line up to its line feed, and the rest after it. -/
-def unescape : List Char → Option (List Char × List Char)
+@[expose] def unescape : List Char → Option (List Char × List Char)
   | [] => none
   | c :: s =>
     if c = '\n' then some ([], s)
@@ -256,7 +260,7 @@ theorem plain_escape (l : List Char) : Plain (l.flatMap escapeChar) := by
   | cons c l ih => rw [List.flatMap_cons]; exact plain_append (plain_escapeChar c) ih
 
 /-- Any string on one line: each character as `escapeChar` writes it, then a line feed. -/
-def line : Codec String where
+@[expose] def line : Codec String where
   print s := s.toList.flatMap escapeChar ++ ['\n']
   parse s := (unescape s).map fun (l, r) => (String.ofList l, r)
   parse_print s rest := by simp [List.append_assoc, unescape_escape, String.ofList_toList]
@@ -265,7 +269,7 @@ def line : Codec String where
 /-! ## Text -/
 
 /-- The lines of `s`: the runs of characters between its line feeds. -/
-def splitLines : List Char → List (List Char)
+@[expose] def splitLines : List Char → List (List Char)
   | [] => [[]]
   | c :: s =>
     if c = '\n' then [] :: splitLines s
@@ -274,7 +278,7 @@ def splitLines : List Char → List (List Char)
       | [] => [[c]]
 
 /-- Lines joined by line feeds. -/
-def joinLines : List (List Char) → List Char
+@[expose] def joinLines : List (List Char) → List Char
   | [] => []
   | [l] => l
   | l :: l' :: ls => l ++ '\n' :: joinLines (l' :: ls)
@@ -300,7 +304,7 @@ theorem joinLines_splitLines (s : List Char) :
 
 /-- Any string, as the number of its lines on a line of its own, then each line as `| ` and the
 line. A string with no line feed has one line, the empty string included. -/
-def text : Codec String :=
+@[expose] def text : Codec String :=
   map (list (keyed chars!"| " (by decide) line))
     (fun s => (splitLines s.toList).map String.ofList)
     (fun ls => some (String.ofList (joinLines (ls.map String.toList))))

@@ -1,4 +1,6 @@
-import LeanIntent.Declared
+module
+
+public import LeanIntent.Declared
 
 /-!
 # Records about functions as arguments and inside data
@@ -20,6 +22,8 @@ which, where the function type has finitely many values, is each of them (`not_i
 does (`list_subjects`).
 -/
 
+public section
+
 namespace LeanIntentExamples.HigherOrder
 
 open LeanIntent
@@ -31,7 +35,7 @@ theorem apply_subjects :
         .subject fun _ n => n] := rfl
 
 /-- The subject applies its function to its argument. -/
-def applies : IntentRecord ((Nat → Nat) → Nat → Nat) where
+@[expose] def applies : IntentRecord ((Nat → Nat) → Nat → Nat) where
   shape := .function _ _
   dom := []
   props := [⟨"applies", fun g => ∀ f n, g f n = f n⟩]

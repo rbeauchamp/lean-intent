@@ -1,4 +1,6 @@
-import LeanIntent.Explain
+module
+
+public import LeanIntent.Explain
 
 /-!
 # A record whose meaning reaches definitions by recursion and a `let`
@@ -20,32 +22,34 @@ With `LeanIntent.Render` imported,
 shows the rendering.
 -/
 
+public section
+
 namespace LeanIntentExamples.Recursion
 
 open LeanIntent
 
 /-- The sum of the decimal digits of a number, by well-founded recursion on the number. -/
-def digitSum (n : Nat) : Nat :=
+@[expose] def digitSum (n : Nat) : Nat :=
   if n < 10 then n else n % 10 + digitSum (n / 10)
 termination_by n
 decreasing_by omega
 
 /-- The sum of a list of numbers, by structural recursion on the list. -/
-def total : List Nat → Nat
+@[expose] def total : List Nat → Nat
   | [] => 0
   | a :: as => a + total as
 
 /-- The check digit of a list of numbers: the last decimal digit of the sum of their digit sums. -/
-def checkDigit (l : List Nat) : Nat :=
+@[expose] def checkDigit (l : List Nat) : Nat :=
   let s := total (l.map digitSum)
   s % 10
 
 /-- The subject returns the check digit of every list. -/
-def checkClause : Clause (List Nat → Nat) :=
+@[expose] def checkClause : Clause (List Nat → Nat) :=
   ⟨"computes the check digit", fun f => ∀ l, f l = checkDigit l⟩
 
 /-- The record. -/
-def checkDigits : IntentRecord (List Nat → Nat) where
+@[expose] def checkDigits : IntentRecord (List Nat → Nat) where
   shape := .function _ _
   dom := []
   props := [checkClause]
@@ -67,7 +71,7 @@ theorem checkDigits_lt_ten (f : List Nat → Nat) (hf : checkDigits.Meets f) (l 
 
 /-- The explanation of `checkDigits`: its shape and its property in plain words, and the
 consequence that every function meeting it returns a single digit. -/
-def checkDigitsExplained : Explanation checkDigits where
+@[expose] def checkDigitsExplained : Explanation checkDigits where
   shape :=
     { requires := "The subject is a function from lists of natural numbers to natural numbers."
       rulesOut := "Any subject of another kind, such as a step of a system with state."

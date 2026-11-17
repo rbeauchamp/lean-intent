@@ -1,4 +1,6 @@
-import LeanIntent.Print.Term
+module
+
+public import LeanIntent.Print.Term
 
 /-!
 # Binder names the printer can write
@@ -18,12 +20,14 @@ ignored. `eraseNames_canon` proves that `canon` changes nothing else: with every
 erased, a term and its renaming are equal.
 -/
 
+public section
+
 namespace LeanIntent.Print
 
 open Lean (Name Expr BinderInfo)
 
 /-- Whether the loose bound variable `i` occurs in `e`. -/
-def usesBVar : Expr → Nat → Bool
+@[expose] def usesBVar : Expr → Nat → Bool
   | .bvar j, i => j == i
   | .app f a, i => usesBVar f i || usesBVar a i
   | .lam _ t b _, i | .forallE _ t b _, i => usesBVar t i || usesBVar b (i + 1)
@@ -32,7 +36,7 @@ def usesBVar : Expr → Nat → Bool
   | _, _ => false
 
 /-- The first components of the names of the constants in `e`. -/
-def constRoots : Expr → List Name
+@[expose] def constRoots : Expr → List Name
   | .const c _ => [c.getRoot]
   | .app f a => constRoots f ++ constRoots a
   | .lam _ t b _ | .forallE _ t b _ => constRoots t ++ constRoots b
@@ -42,10 +46,10 @@ def constRoots : Expr → List Name
 
 /-- Whether a binder can keep the name `n`: one component that can be written, which `avoid` does
 not hold. -/
-def keeps (avoid : List Name) (n : Name) : Bool := atomOk n && !avoid.contains n
+@[expose] def keeps (avoid : List Name) (n : Name) : Bool := atomOk n && !avoid.contains n
 
 /-- A name for a binder named `n` that `avoid` does not hold. -/
-def pick (avoid : List Name) (n : Name) : Name :=
+@[expose] def pick (avoid : List Name) (n : Name) : Name :=
   let base := n.eraseMacroScopes
   if keeps avoid base then base
   else
@@ -54,13 +58,13 @@ def pick (avoid : List Name) (n : Name) : Name :=
     (cands.find? fun c => !avoid.contains c).getD (Name.mkSimple "x")
 
 /-- Whether a binder annotation is the default one. -/
-def isDefault : BinderInfo → Bool
+@[expose] def isDefault : BinderInfo → Bool
   | .default => true
   | _ => false
 
 /-- `e` with its binders renamed, under the binders `sc`, innermost first, avoiding the names in
 `avoid` as well. -/
-def canon (avoid : List Name) : List Name → Expr → Expr
+@[expose] def canon (avoid : List Name) : List Name → Expr → Expr
   | sc, .app f a => .app (canon avoid sc f) (canon avoid sc a)
   | sc, .lam n t b bi =>
     let n' := if keeps (avoid ++ sc) n then n else pick (avoid ++ sc) n
@@ -81,7 +85,7 @@ def canon (avoid : List Name) : List Name → Expr → Expr
 /-- `e` with every metadata node replaced by the term it annotates. Lean documents an annotated
 term, `Expr.mdata data e`, as definitionally equal to `e` itself, so this changes nothing a term
 means; `LeanIntent.Render` applies it before printing, since the printer writes no metadata. -/
-def eraseMData : Expr → Expr
+@[expose] def eraseMData : Expr → Expr
   | .app f a => .app (eraseMData f) (eraseMData a)
   | .lam n t b bi => .lam n (eraseMData t) (eraseMData b) bi
   | .forallE n t b bi => .forallE n (eraseMData t) (eraseMData b) bi
@@ -91,7 +95,7 @@ def eraseMData : Expr → Expr
   | e => e
 
 /-- `e` with every binder name erased. -/
-def eraseNames : Expr → Expr
+@[expose] def eraseNames : Expr → Expr
   | .app f a => .app (eraseNames f) (eraseNames a)
   | .lam _ t b bi => .lam .anonymous (eraseNames t) (eraseNames b) bi
   | .forallE _ t b bi => .forallE .anonymous (eraseNames t) (eraseNames b) bi
