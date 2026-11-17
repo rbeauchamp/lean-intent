@@ -19,6 +19,35 @@
 # elaborates tools/check.lean against Lean and Lake and runs once per side, 4.76 GiB. Measure again
 # when the library grows or the toolchain changes, and raise a bound before a peak comes within 15%
 # of it.
+#
+# Time. Each check also runs under a wall-clock limit, so that a check that stalls fails and gives
+# back its share of the memory budget instead of holding the share and the run until someone stops
+# it, as the code audit did for more than an hour on a larger module on 2026-11-05 (issue 59). GNU
+# coreutils' timeout runs the check, under Homebrew's name gtimeout (macOS's own /usr/bin/timeout,
+# from Apple's shell_cmds, is another program, which this paragraph does not describe), inside
+# `no-mistakes admit`, so its clock starts only once the budget admits the check. At the limit it
+# sends TERM to the Lean process it started, and KILL 30 seconds later if that process still runs;
+# the command then prints the limit and exits with timeout's status, 124, or 137 after a KILL. The
+# checks themselves exit only with 0 or 1 or by a signal, so 124 comes from the limit alone.
+# `--foreground` keeps timeout in the process group no-mistakes runs the command in, so cancelling
+# a run still reaches the check; timeout then signals only the check's own process, and
+# no-mistakes ends what is left of the group, the processes the check started, once the command
+# exits. The share is released when the last process holding it ends.
+#
+# Each limit is three times the longest duration measured for its check, rounded up to a whole
+# minute, so a run up to three times as slow as the slowest measured is never cut off; the margin
+# covers runs slowed by heavier load than the measurements saw and the library's growth until the
+# next measurement. Measured on 2026-11-05 under Lean v4.35.0 on an Apple M5 Max (18 cores, 128
+# GiB), through `no-mistakes admit`, beside other admitted work, each in a fresh clone with an
+# empty artifact cache, as the seed build below always runs and the Test command runs when no
+# stored outputs fit, on the library as of commit f27effd: the check, 271 and 303 seconds as the
+# seed build runs it, 310 and 325 as the Test command does, and 257 when run again in the built
+# clone, so most of it is the audits rather than the build, and a limit of 1020 seconds; the
+# listing, 93 and 101 seconds after the check and 90 and 123 in a clone with nothing built, so 420
+# seconds. The second figure of each pair comes from this change's own validation run, at a load
+# average of 4 to 14, the others from runs at 3 to 9. Measure again when the library grows, the
+# toolchain changes or the machine changes, and raise a limit before three times a measured
+# duration passes it.
 test:
   instructions: |
     On lean-intent this step is verification. A change's claims are established by machine-checked proof, by derivation and by reading; lean-intent has no running product to drive.
@@ -33,8 +62,9 @@ test:
   # since lean-intent's tests can only be commands in Lean files or a Lake test driver, which needs
   # a Lean module: there the listing prints nothing and exits 0. That is the case of a base that
   # predates tools/check.lean, such as main's first commits, and without it no change could be
-  # compared with such a base. Everywhere else the listing runs exactly the command it ran before,
-  # tools/check.lean with --tests, and fails as before when that file is missing or cannot run.
+  # compared with such a base. Everywhere else the listing runs tools/check.lean with --tests, under
+  # the limit the paragraph on time above derives, and fails when that file is missing or cannot
+  # run, or when the listing reaches its limit.
   # That program prints one line for each command whose verdict comes from running code on chosen
   # inputs, read through Lean's frontend, and fails rather than printing nothing when it cannot
   # read a file; its module comment says what it lists and what it does not. The guard asks Git the
@@ -48,7 +78,13 @@ test:
       set -e
       lean_files=$(git ls-files -- '*.lean')
       if [ -n "$lean_files" ]; then
-        no-mistakes admit --memory 6GiB --limit "none; measured peak 4.76 GiB" -- lean --run tools/check.lean --tests
+        status=0
+        no-mistakes admit --memory 6GiB --limit "none; measured peak 4.76 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests || status=$?
+        case $status in
+          124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 420 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
+          137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 420 seconds and did not stop within 30 seconds of TERM" >&2 ;;
+        esac
+        exit "$status"
       fi
 
 # The merge gate. lean-intent has no CI: on 2026-10-28 the owner made the validation no-mistakes
@@ -62,12 +98,13 @@ no_ci: true
 # The Test step runs this command first, in the run's own checkout of the change it validates, and
 # parks when it exits with any status but 0. It runs every check the repository has, never a part
 # chosen by what a change seems to touch: tools/check.lean, and then its listing of tests, which
-# must print nothing. `set -e` ends the command with a status other than 0 as soon as either fails,
-# cannot start (`admit` exits 126 or 127) or is killed. Each also fails rather than passing when
-# it finds nothing to check: the checks refuse a library with no Lean file or no declaration, and
-# the listing a project with no Lean file. The two run one after the other, so the command's peak
-# is the larger of the two peaks the paragraph on memory above gives, 4.76 GiB, below the listing's
-# 6 GiB bound by more than the 15% that paragraph asks for.
+# must print nothing. The command ends with the status of the first of the two that fails, cannot
+# start (`admit` exits 126 or 127), is killed or reaches its wall-clock limit (124, from the
+# paragraph on time above), a status other than 0 in every case. Each also fails rather than
+# passing when it finds nothing to check: the checks refuse a library with no Lean file or no
+# declaration, and the listing a project with no Lean file. The two run one after the other, so
+# the command's peak is the larger of the two peaks the paragraph on memory above gives, 4.76 GiB,
+# below the listing's 6 GiB bound by more than the 15% that paragraph asks for.
 #
 # What a change re-checks is Lake's decision: Lake reuses an earlier output only where its own
 # record of the module's inputs matches, the trace in .lake/build or the input hash that finds an
@@ -84,9 +121,20 @@ commands:
     set -eu
     export LAKE_CACHE_DIR="$PWD/.lake/cache"
     unset LAKE_ARTIFACT_CACHE
-    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.69 GiB" -- lean --run tools/check.lean
+    status=0
+    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.69 GiB" -- gtimeout --foreground --verbose --kill-after=30 1020 lean --run tools/check.lean || status=$?
+    case $status in
+      124) echo "lean --run tools/check.lean reached its wall-clock limit of 1020 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
+      137) echo "lean --run tools/check.lean was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 1020 seconds and did not stop within 30 seconds of TERM" >&2 ;;
+    esac
+    [ "$status" -eq 0 ] || exit "$status"
     mkdir -p .lake
-    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.76 GiB" -- lean --run tools/check.lean --tests > .lake/tests-listing
+    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.76 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests > .lake/tests-listing || status=$?
+    case $status in
+      124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 420 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
+      137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 420 seconds and did not stop within 30 seconds of TERM" >&2 ;;
+    esac
+    [ "$status" -eq 0 ] || exit "$status"
     if [ -s .lake/tests-listing ]; then
       echo "The listing of tests is not empty; lean-intent establishes its claims by proof:"
       cat .lake/tests-listing
@@ -100,12 +148,19 @@ commands:
 # gets a private copy, used only while lean-toolchain is unchanged, and Lake takes an output from
 # it only for a module whose input hash (its source, its imports' outputs, its options and the
 # toolchain) is the one that output was built from. no-mistakes does not admit this build against
-# the machine's heavy-work budget, so the command admits itself. LAKE_RESTORE_ARTIFACTS has Lake
-# put any output it takes from the cache in .lake/build too, where the axiom audit reads it; the
-# Test command needs no such setting, because Lake restores every output it takes from a cache it
-# only reads.
+# the machine's heavy-work budget, so the command admits itself, and it runs the checks under the
+# limit the paragraph on time above derives. LAKE_RESTORE_ARTIFACTS has Lake put any output it
+# takes from the cache in .lake/build too, where the axiom audit reads it; the Test command needs
+# no such setting, because Lake restores every output it takes from a cache it only reads.
 build_outputs:
-  command: no-mistakes admit --memory 6GiB --limit "none; measured peak 4.69 GiB" -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true lean --run tools/check.lean
+  command: |
+    status=0
+    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.69 GiB" -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true gtimeout --foreground --verbose --kill-after=30 1020 lean --run tools/check.lean || status=$?
+    case $status in
+      124) echo "lean --run tools/check.lean reached its wall-clock limit of 1020 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
+      137) echo "lean --run tools/check.lean was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 1020 seconds and did not stop within 30 seconds of TERM" >&2 ;;
+    esac
+    exit "$status"
   directories:
     - .lake/cache
   toolchain_files:
