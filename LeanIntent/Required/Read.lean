@@ -87,59 +87,120 @@ namespace LeanIntent.Required.Read
 
 open Lean Meta LeanIntent.Render LeanIntent.Confirmation.Read LeanIntent.Implementation.Read
 
-/-- The constant `c`, by the module the environment records as declaring it and its name. -/
-def located (c : Name) : MetaM Implementation.Constant :=
-  return ⟨← moduleOf c, c⟩
+/-- Whether `held`, the declaration the environment holds of a name, is `own`, a declaration of
+that name read from one module's own data, as far as this reader reads a declaration: the same kind
+of constant, with the same universe parameters and type, and for a definition the same value.
+Stated for the kinds `declaredAnywhere` finds, a definition, an opaque constant and an axiom; of
+every other kind it is false. -/
+def sameDeclaration (own held : ConstantInfo) : Bool :=
+  own.levelParams == held.levelParams && own.type == held.type &&
+    match own, held with
+    | .defnInfo a, .defnInfo b => a.value == b.value
+    | .opaqueInfo _, .opaqueInfo _ | .axiomInfo _, .axiomInfo _ => true
+    | _, _ => false
+
+/-- **The module that declares the constant `c`, with that module's own declaration of it.** The
+module is the one the environment records for the name (`Environment.getModuleIdxFor?`), and the
+declaration is read from the data Lean loaded for that module (`EnvironmentHeader.moduleData`), not
+from the environment's map of constants, in which a declaration of another module may stand under
+the name. A name the environment records under no module is declared in the file being elaborated,
+and is read from the constants that file added (`constants.map₂`). An error naming the constant and
+the module where the module recorded does not itself declare the name, as when the name is only an
+auxiliary name of that module's compiled code. -/
+def ownDeclaration (c : Name) : MetaM (Name × ConstantInfo) := do
+  let env ← getEnv
+  match env.getModuleIdxFor? c with
+  | some idx =>
+    let some m := env.header.moduleNames[idx.toNat]?
+      | throwError "the environment records no module of index {idx.toNat}, which declares {c}"
+    match env.header.moduleData[idx.toNat]?.bind (·.constants.find? (·.name == c)) with
+    | some own => return (m, own)
+    | none =>
+      throwError "the environment records {c} under the module {m}, which does not itself declare \
+        it, so the module that declares it cannot be read"
+  | none =>
+    match env.constants.map₂.find? c with
+    | some own => return (env.mainModule, own)
+    | none =>
+      throwError "the environment records {c} under no module, and the file being elaborated \
+        does not declare it, so the module that declares it cannot be read"
 
 /-- What the build shows of one element `e` of a `Required` value's list, a term of type
-`LeanIntent.Proof`: the theorem its proof is, the other constant it is, or a term. -/
+`LeanIntent.Proof`: the theorem its proof is, the other constant it is, or a term. A constant is
+read by `ownDeclaration`: it is a theorem exactly when the module the environment records for it
+itself declares it as a theorem, with the type and universe parameters of the declaration the
+environment holds, which is the one the value's entry was checked against; where that module
+declares it as anything else, such as an axiom that a module imported later proves, it is another
+constant. An error where that module's theorem differs in type or universe parameters. -/
 def citedOf (e : Expr) : MetaM Cited := do
   let args ← ctorArgs e ``Proof.mk 2
   match constOf? args[1]! with
   | none => return .term
   | some c =>
-    let at' ← located c
-    match ← getConstInfo c with
-    | .thmInfo _ => return .thm at'
-    | _ => return .other at'
+    let (m, own) ← ownDeclaration c
+    match own with
+    | .thmInfo _ =>
+      let held ← getConstInfo c
+      unless own.levelParams == held.levelParams && own.type == held.type do
+        throwError "the module {m} declares the theorem {c} with another statement than the \
+          environment holds for that name, so it is not read"
+      return .thm ⟨m, c⟩
+    | _ => return .other ⟨m, c⟩
 
-/-- What the build shows of the value `decl`, a constant whose type reduces to `Required d`: the
-module that declares it, the deliverable its type names, where that is a constant, and what it
-lists. An error when its value does not reduce to `Required.mk`'s application, or its list to a
-list. -/
-def entryOf (decl : Name) : MetaM Entry := do
-  let t ← readWhnf (← getConstInfo decl).type
+/-- What the build shows of the value `decl`, a constant whose type reduces to `Required d`, as
+`declaredAnywhere` found it, with the module whose own data declares it: that module, the
+deliverable its type names, where that is a constant, and what it lists. An error when its value
+does not reduce to `Required.mk`'s application, or its list to a list. -/
+def entryOf (decl : Implementation.Constant) : MetaM Entry := do
+  let t ← readWhnf (← getConstInfo decl.name).type
   unless t.isAppOfArity ``Required 2 do
-    throwError "the type of {decl} is not `LeanIntent.Required` applied to a deliverable"
-  let args ← ctorArgs (← Confirmation.Read.constOf decl) ``Required.mk 4
+    throwError "the type of {decl.name} is not `LeanIntent.Required` applied to a deliverable"
+  let args ← ctorArgs (← Confirmation.Read.constOf decl.name) ``Required.mk 4
   let theorems ← (← listElems args[2]!).mapM citedOf
-  return ⟨decl, ← moduleOf decl, constOf? t.appArg!, theorems.toList⟩
+  return ⟨decl.name, decl.module, constOf? t.appArg!, theorems.toList⟩
 
 /-- The definitions, opaque constants and axioms of every module the environment holds, the one
 being elaborated included, whose type, reduced through the kernel by unfolding every definition, is
-an application of one of the constants `heads`, each with that constant, sorted by name. No module
-is left out, so a constant of such a type is found wherever the environment holds it. An opaque
-constant or an axiom is found so that reading it is an error, never a value passed over, and a
-constant found that is unsafe or partial is an error (`Confirmation.Read.proofSafe_iff`), as
+an application of one of the constants `heads`, each by the module that declares it and its name,
+with that constant, sorted by name. Each module's declarations are read from that module's own
+data, as Lean loaded it (`EnvironmentHeader.moduleData`, at the index of the module's name), and
+those of the file being elaborated from the constants it added (`constants.map₂`), so the module
+given for a constant is one whose own data declares it, and no module is left out. A constant found
+is one the environment holds as that module declares it (`sameDeclaration`), or an error naming
+both, since its type and value are then read through the environment. An opaque constant or an
+axiom is found so that reading it is an error, never a value passed over, and a constant found that
+is unsafe or partial is an error (`Confirmation.Read.proofSafe_iff`), as
 `Confirmation.Read.declaredWhere` makes it for the modules it is given. -/
-def declaredAnywhere (heads : Array Name) : MetaM (Array (Name × Name)) := do
-  let candidates := (← getEnv).constants.fold (init := #[]) fun acc c ci =>
-    if ci matches .defnInfo _ | .opaqueInfo _ | .axiomInfo _ then acc.push (c, ci) else acc
-  let mut found := #[]
-  for (c, ci) in candidates do
+def declaredAnywhere (heads : Array Name) : MetaM (Array (Implementation.Constant × Name)) := do
+  let env ← getEnv
+  let read (ci : ConstantInfo) := ci matches .defnInfo _ | .opaqueInfo _ | .axiomInfo _
+  let mut candidates : Array (Name × ConstantInfo) := #[]
+  for h : i in [0:env.header.moduleData.size] do
+    let some m := env.header.moduleNames[i]?
+      | throwError "the environment names no module of index {i}, whose declarations it holds"
+    for ci in env.header.moduleData[i].constants do
+      if read ci then candidates := candidates.push (m, ci)
+  candidates := env.constants.map₂.foldl (init := candidates) fun acc _ ci =>
+    if read ci then acc.push (env.mainModule, ci) else acc
+  let mut found : Array (Implementation.Constant × Name) := #[]
+  for (m, ci) in candidates do
     if let .const head _ := (← readWhnf ci.type).getAppFn then
       if heads.contains head then
         unless proofSafe ci do
-          throwError "{c} is unsafe or partial, so its proofs could prove anything, and it is not read"
-        found := found.push (c, head)
-  return found.qsort fun a b => Name.lt a.1 b.1
+          throwError "{ci.name} is unsafe or partial, so its proofs could prove anything, and it is \
+            not read"
+        unless (env.find? ci.name).any (sameDeclaration ci) do
+          throwError "the module {m} declares {ci.name}, and the environment holds another \
+            declaration of that name, so it is not read"
+        found := found.push (⟨m, ci.name⟩, head)
+  return found.qsort fun a b => Name.lt a.1.name b.1.name
 
 /-- **What a gate reads**, from the finished build: the report on where the required theorems lie,
 given `built`, the module names the project's build lists. It reads every module the environment
 holds, so it takes no list of modules to read, and it is `Required.report` of `built`, of every
-deliverable and every value recording an implementation there, each by the module that declares
-it, and of the entries of every value of `Required` there, whichever package declares each: the
-environment does not record a module's package. So its findings are empty exactly when
+deliverable and every value recording an implementation there, each by the module whose own data
+declares it, and of the entries of every value of `Required` there, whichever package declares
+each: the environment does not record a module's package. So its findings are empty exactly when
 the environment holds no value of `Required`, or each deliverable, each value recording an
 implementation and each value of `Required` it holds is declared in a module `built` names, each
 deliverable is named by a value of `Required`, each such value names a deliverable, and each thing
@@ -160,10 +221,8 @@ def check (built : Array Name) : MetaM Report := do
         cannot be read"
   let found ← declaredAnywhere #[``Deliverable, ``Implementation, ``Required]
   let of (head : Name) := found.filterMap fun (c, h) => if h == head then some c else none
-  let ds ← (of ``Deliverable).mapM located
-  let vs ← (of ``Implementation).mapM located
   let rs ← (of ``Required).mapM entryOf
-  return report built.toList ds.toList vs.toList rs.toList
+  return report built.toList (of ``Deliverable).toList (of ``Implementation).toList rs.toList
 
 /-- **The module names a build lists**, read from `out`, what `lake query --json` prints for one or
 more targets `@/<library>:modules`: one line for each target, each a JSON array of the names of the
