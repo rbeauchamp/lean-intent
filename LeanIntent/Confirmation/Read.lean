@@ -38,6 +38,13 @@ with an error naming it, never a pass, as does one that is not a constructor's a
 reduced, such as an opaque constant or an axiom, and every unsafe or partial constant of the types
 read here, whose proofs could prove anything (`declaredWhere`).
 
+Every program of this module runs in Lean's `MetaM`, on the environment its caller supplies, and
+begins with the library's guard (`LeanIntent.asking`, in `LeanIntent/Loaded.lean`). In an
+environment whose extensions' state is not loaded, as one a compiled checker imported with Lean's
+`importModules` by default is, it throws before it asks anything, so no text and no verdict is
+computed from tables left as they start: the texts are printed with the notation that state holds.
+`docs/confirmation.md` says how a compiled checker imports.
+
 Types and values are reduced by `Render.readWhnf`, through the kernel's own reduction, so the
 constructor arguments come from the admitted declaration, never an elaborator unfolding helper.
 `Render.kernelReduction_result` preserves the kernel request's result; the kernel's reduction
@@ -89,7 +96,7 @@ is unsafe or partial is an error too (`proofSafe_iff`): such a definition may re
 the proofs it holds, a deliverable's `keeps` or an implementation's `fulfils`, can prove anything,
 and a safe declaration cannot refer to one, as Lean's kernel refuses
 (`type_checker::infer_constant`). -/
-def declaredWhere (mods : Array Name) (test : Expr → MetaM Bool) : MetaM (Array Name) := do
+def declaredWhere (mods : Array Name) (test : Expr → MetaM Bool) : MetaM (Array Name) := asking do
   let env ← getEnv
   for m in mods do
     unless m == env.mainModule || env.header.moduleNames.contains m do
@@ -109,21 +116,21 @@ def declaredWhere (mods : Array Name) (test : Expr → MetaM Bool) : MetaM (Arra
   return found.qsort Name.lt
 
 /-- The constants of the modules `mods` whose type reduces to an application of `head`. -/
-def declaredIn (mods : Array Name) (head : Name) : MetaM (Array Name) :=
+def declaredIn (mods : Array Name) (head : Name) : MetaM (Array Name) := asking <|
   declaredWhere mods fun t => pure (t.getAppFn.isConstOf head)
 
 /-- The constant `decl`, with its own universe parameters. -/
-def constOf (decl : Name) : MetaM Expr := do
+def constOf (decl : Name) : MetaM Expr := asking do
   return mkConst decl ((← getConstInfo decl).levelParams.map .param)
 
 /-- The name of the constant `e` is, or an error naming `what` must be one. -/
-def constName (e : Expr) (what : String) : MetaM Name := do
+def constName (e : Expr) (what : String) : MetaM Name := asking do
   match e.consumeMData with
   | .const c _ => return c
   | e => throwError "{what} must be a constant, found{indentExpr e}"
 
 /-- The question of the consequence `c`, a term of type `LeanIntent.Consequence W`. -/
-def questionOf (c : Expr) : MetaM Question := do
+def questionOf (c : Expr) : MetaM Question := asking do
   let args ← ctorArgs c ``Consequence.mk 4
   let (kind, _) ← kindWords args[2]!
   return ⟨← strLit args[1]!,
@@ -131,21 +138,21 @@ def questionOf (c : Expr) : MetaM Question := do
     ← consequenceText args[3]!⟩
 
 /-- The kept answer of `a`, a term of type `LeanIntent.Attributed W`. -/
-def keptOf (a : Expr) : MetaM (Question × Verdict × Answerer) := do
+def keptOf (a : Expr) : MetaM (Question × Verdict × Answerer) := asking do
   let attributed ← ctorArgs a ``Attributed.mk 3
   let args ← ctorArgs attributed[1]! ``Answer.mk 3
   return (← questionOf args[1]!, ← readVerdict args[2]!, ← readAnswerer attributed[2]!)
 
 /-- The explanation of the deliverable `decl`, a definition of type `LeanIntent.Deliverable W`, by
 its name, with the deliverable's constructor arguments. -/
-def deliverableParts (decl : Name) : MetaM (Name × Name × Array Expr) := do
+def deliverableParts (decl : Name) : MetaM (Name × Name × Array Expr) := asking do
   let d ← ctorArgs (← constOf decl) ``Deliverable.mk 5
   return (← constName d[1]! s!"the record of {decl}", ← constName d[2]! s!"the explanation of {decl}",
     d)
 
 /-- The current revision of the deliverable `decl`, a definition of type `LeanIntent.Deliverable W`,
 as the build shows it. An error, naming what cannot be read or printed, when any of it cannot. -/
-def revisionOf (decl : Name) : MetaM Revision := do
+def revisionOf (decl : Name) : MetaM Revision := asking do
   let (record, explanation, d) ← deliverableParts decl
   let ex ← ctorArgs (← constOf explanation) ``Explanation.mk 11
   let standing ← readRestatement ex[6]!
@@ -156,12 +163,12 @@ def revisionOf (decl : Name) : MetaM Revision := do
   return ⟨record.toString, ← revisionText explanation, standing, shown.toList, kept.toList⟩
 
 /-- The texts of the owners' log `decl`, a definition of type `LeanIntent.OwnersLog`. -/
-def logTexts (decl : Name) : MetaM (List String) := do
+def logTexts (decl : Name) : MetaM (List String) := asking do
   let args ← ctorArgs (← constOf decl) ``OwnersLog.mk 1
   return (← (← listElems args[0]!).mapM strLit).toList
 
 /-- The statements of the project's one owners' log among `mods`, or what is wrong. -/
-def projectLog (mods : Array Name) : MetaM (Except (List Finding) (List String)) := do
+def projectLog (mods : Array Name) : MetaM (Except (List Finding) (List String)) := asking do
   match (← declaredIn mods ``OwnersLog).toList with
   | [] => return .error [.noLog]
   | [log] => return .ok (← logTexts log)
@@ -169,7 +176,7 @@ def projectLog (mods : Array Name) : MetaM (Except (List Finding) (List String))
 
 /-- Whether the explanation `ex` says someone settled something: it records an owner's confirmation
 of the restatement, or an answer, or a derived consequence. -/
-def explanationClaims (ex : Name) : MetaM Bool := do
+def explanationClaims (ex : Name) : MetaM Bool := asking do
   let args ← ctorArgs (← constOf ex) ``Explanation.mk 11
   let standing ← readRestatement args[6]!
   let claims ← (← listElems args[7]!).mapM fun e => do
@@ -177,7 +184,7 @@ def explanationClaims (ex : Name) : MetaM Bool := do
   return standing != .unconfirmed || claims.any id
 
 /-- The answers the constant `decl` holds, of type `LeanIntent.Attributed W` or a list of them. -/
-def attributedOf (decl : Name) : MetaM (Array (Question × Verdict × Answerer)) := do
+def attributedOf (decl : Name) : MetaM (Array (Question × Verdict × Answerer)) := asking do
   let t ← readWhnf (← getConstInfo decl).type
   let e ← constOf decl
   (if t.getAppFn.isConstOf ``Attributed then pure #[e] else listElems e) >>= (·.mapM keptOf)
@@ -187,7 +194,7 @@ def attributedOf (decl : Name) : MetaM (Array (Question × Verdict × Answerer))
 check never asks about: an explanation that claims so and is no deliverable's, and an attributed
 answer, or a list of them, holding one no deliverable keeps. These are all `LeanIntent.Render` prints
 such words from, but for a term given to `answerText` directly. -/
-def undeclaredIn (mods decls : Array Name) (revs : Array Revision) : MetaM (List String) := do
+def undeclaredIn (mods decls : Array Name) (revs : Array Revision) : MetaM (List String) := asking do
   let held ← decls.mapM fun d => return (← deliverableParts d).2.1
   let kept := revs.toList.flatMap (·.kept)
   let explanations ← (← declaredIn mods ``Explanation).filterM fun e =>
@@ -206,7 +213,7 @@ revision of each of its deliverables, with a finding for each value `undeclaredI
 findings are empty exactly when there are none and the deliverables are confirmed
 (`Report.withUndeclared_findings`, `Confirmation.report_findings`). A project with no log, or several,
 has a report that says so. -/
-def check (mods : Array Name) : MetaM Report := do
+def check (mods : Array Name) : MetaM Report := asking do
   match ← projectLog mods with
   | .error fs => return ⟨fs, [], [], [], []⟩
   | .ok texts =>
@@ -218,7 +225,7 @@ def check (mods : Array Name) : MetaM Report := do
 settled each thing what the project's owners' log holds for this revision (`logStanding`,
 `checked`), whatever the explanation still records: so a record revised after its owner confirmed it
 does not print as confirmed. A log that cannot be read, or that `inForce` refuses, is an error. -/
-def renderChecked (mods : Array Name) (decl : Name) : MetaM String := do
+def renderChecked (mods : Array Name) (decl : Name) : MetaM String := asking do
   let texts ← match ← projectLog mods with
     | .ok texts => pure texts
     | .error fs => throwError "the project's owners' log cannot be read: {fs.length} findings"
@@ -234,7 +241,7 @@ def renderChecked (mods : Array Name) (decl : Name) : MetaM String := do
 question named `consequence` of the deliverable `decl`, at its current revision, with the two texts
 that answer must hold. An error when the deliverable asks no such question. -/
 def answerStatement (decl : Name) (consequence : String) (project id : Ident) (date : Date)
-    (source : Source) (author : Authority) (verdict : Verdict) : MetaM String := do
+    (source : Source) (author : Authority) (verdict : Verdict) : MetaM String := asking do
   let rev ← revisionOf decl
   let some q := (restatement :: rev.shown.map (·.1)).find? (·.consequence == consequence)
     | throwError "{decl} asks no question named {consequence}"

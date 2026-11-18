@@ -23,10 +23,11 @@ It imports them with every environment extension's state loaded (`LeanIntent.Imp
 because the audit asks Lean what only that state answers: whether a declaration is an instance of a
 class, what a definition reduces to, how a type prints and which axioms Lean recorded for a
 declaration. `LeanIntent.CodeAudit`'s module comment names the state each question reads. Lean's
-plain import leaves that state as it starts, and the audit then names no instance in any refusal,
-with no error. Loading runs the `initialize` declarations of the modules given, in this process:
-`LeanIntent.Imported`'s module comment says what that admits, and `main` is `unsafe` because that
-import is.
+plain import leaves that state as it starts: the audit once named no instance in any refusal for
+that reason, with no error, and now does not run on such an environment
+(`LeanIntent/Loaded.lean`). Loading runs the `initialize` declarations of the modules given, in
+this process: `LeanIntent.Imported`'s module comment says what that admits, and `main` is `unsafe`
+because that import is.
 
 It exits with status `0` when the audit accepts, having printed nothing; `1` when it refuses, or
 when the modules declare no constant, since an audit of nothing would accept anything, having

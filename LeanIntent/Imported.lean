@@ -1,6 +1,7 @@
 module
 
 public import Lean
+public import LeanIntent.Loaded
 
 /-!
 # Importing a finished build's modules into a program
@@ -37,6 +38,10 @@ ends, `Lean/ImportingFlag.lean` 54-60), so `loaded` calls it each time.
 The level is `importModules`'s default, `private`: all data is loaded as if no imported module were
 a `module` file (`Environment.lean` 2434-2437), so the declarations and the bodies that a `module`
 file keeps private are read as well.
+
+`loaded` is handed no environment: it makes one, which is why `tools/check.lean`'s rule `READERS`
+excepts it by name. The library's programs refuse an environment that was not made this way or by
+Lean's elaboration (`LeanIntent/Loaded.lean`).
 
 A reader of a `loaded` environment may ask Lean what a metaprogram asks while Lean elaborates a file
 that imports the same modules in full, and gets the answer it would get there. Two kinds of

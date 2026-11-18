@@ -40,17 +40,18 @@ trusted. The reader runs no part of the compiler: it reads the code the build st
 ## The two environments, and what each question reads
 
 This reader asks Lean questions of two environments. Of the one it imports itself, no question is
-answered from an environment extension's state; of the one it runs in, the state its questions
-read is its caller's to have loaded.
+answered from an environment extension's state; of the one it runs in, it asks nothing unless
+that state is loaded.
 
 * **The environment it runs in**, from which it reads the deliverables, the implementations and
   the claims, as the first three rows above say. `check` runs in `MetaM`, so whoever runs it
-  supplies this environment, and this reader imports none of it. What it asks of it goes through
-  the constants and the kernel's reduction (`Render.readWhnf`), which read no extension's state,
-  and, where it prints a term in an error, through Lean's pretty printer, which reads the state of
-  whichever extensions hold notation. That state is loaded where Lean's elaboration of a file
-  supplies the environment (`Lean/Elab/Import.lean` 159), and where a compiled gate imports as
-  `docs/confirmation.md` says, which `LeanIntent.Imported.loaded` does.
+  supplies this environment, and this reader imports none of it. Every program of this module that
+  runs in `MetaM` begins with the library's guard (`LeanIntent.asking`, in
+  `LeanIntent/Loaded.lean`), and so do the programs of the other readers it calls: in an
+  environment whose extensions' state is not loaded it throws before it asks anything. That state
+  is loaded where Lean's elaboration of a file supplies the environment (`Lean/Elab/Import.lean`
+  159), and where a compiled gate imports as `docs/confirmation.md` says, which
+  `LeanIntent.Imported.loaded` does.
 * **What the build stored of each executable**, which the reader imports itself, with no
   extension's state loaded and no code of the executable's modules run: an executable's
   `initialize` declarations are its own start-up, not this check's to run. The reader holds it only
@@ -143,7 +144,7 @@ open Lean Meta LeanIntent.Render LeanIntent.Confirmation.Read LeanIntent.Importe
 
 /-- The name `e` reduces to, through the kernel: `Name.anonymous`, or `Name.str` or `Name.num`
 applied to a name and a literal. An error when it reduces to anything else. -/
-partial def nameLit (e : Expr) : MetaM Name := do
+partial def nameLit (e : Expr) : MetaM Name := asking do
   let e ← readWhnf e
   if e.isConstOf ``Name.anonymous then
     return .anonymous
@@ -158,7 +159,7 @@ partial def nameLit (e : Expr) : MetaM Name := do
 /-- What the build shows of the value `decl`, a constant whose type reduces to `Runs d`: the
 deliverable its type names, where that is a constant, and the executable it names. An error when
 its value does not reduce to `Runs.mk`'s application, or the executable to a name. -/
-def claimOf (decl : Name) : MetaM Claim := do
+def claimOf (decl : Name) : MetaM Claim := asking do
   let t ← readWhnf (← getConstInfo decl).type
   unless t.isAppOfArity ``Runs 2 do
     throwError "the type of {decl} is not `LeanIntent.Runs` applied to a deliverable"
@@ -168,7 +169,7 @@ def claimOf (decl : Name) : MetaM Claim := do
   return ⟨decl, Implementation.Read.constOf? t.appArg!, executable⟩
 
 /-- The values of `Runs d` the modules `mods` declare, as the build shows them. -/
-def claims (mods : Array Name) : MetaM (Array Claim) := do
+def claims (mods : Array Name) : MetaM (Array Claim) := asking do
   (← declaredIn mods ``Runs).mapM claimOf
 
 /-- The declarations the IR expression `e` calls (`IR.Expr.fap`) or makes a closure of
@@ -262,7 +263,7 @@ implementations `Implementation.Read.check` reads of them, and, for each executa
 build stored of its root module and what that imports (`Imported.stored`), in which it reads `main`
 and what `main` reaches. Its findings are empty exactly when every claim holds
 (`Execution.findings_eq_nil_iff`). -/
-def check (mods : Array Name) (exes : Array (Name × Name)) : MetaM Report := do
+def check (mods : Array Name) (exes : Array (Name × Name)) : MetaM Report := asking do
   let ds ← declaredIn mods ``Deliverable
   let implemented ← Implementation.Read.check mods
   let is := implemented.implementations.map fun (d, _, c) => (d, c)

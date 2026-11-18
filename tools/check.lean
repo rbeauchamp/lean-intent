@@ -102,6 +102,22 @@ The rules:
   named in a declaration's term: it does not see an import made through another function of
   Lean's or Lake's that itself imports with the state unloaded, or by a name given to Lean's
   evaluator.
+* `READERS`: every declaration of a library module that is handed an environment refuses one in
+  which the state of Lean's environment extensions is not loaded, or is excepted by name as asking
+  nothing of that state. A declaration is handed an environment when its type holds one
+  (`holdsEnv`): it names Lean's `Environment`, a structure with one inside, or a monad that carries
+  one, as `CoreM`, `MetaM` and those built on them do. A project's own gate that imports with
+  Lean's default would otherwise hand a reader of the library an environment whose tables are as
+  they start, and the reader would compute a text or a verdict from them with no error. Such a
+  declaration, where a file writes it, must begin with the library's guard, `LeanIntent.asking` or
+  `LeanIntent.askingIn`, which throws before anything is asked; or take a proof of
+  `LeanIntent.Loaded`; or be one of `stateless`, whose module's comment shows from Lean's source
+  that what it asks is answered by the constants and the modules' headers alone (`readerFault`
+  says how each form is read, a recursive definition's included). The rule fails rather than
+  passing when it finds no such declaration, and when the library does not declare one it excepts.
+  It reads how a declaration begins, not everything it does: a program that began with the guard
+  and then ran a question in another environment of its own making would pass, and `LOADED` is the
+  rule for that.
 
 The rules read what the build produced, so they hold only if no code the build runs was written to
 defeat them: elaborating a Lean file runs the metaprograms it invokes. The same holds of the
@@ -121,9 +137,10 @@ gives the order and what running them admits).
 
 | Question | The extension state that answers it | What loads it |
 |---|---|---|
-| the constants of the library's modules, their modules, types and values (`AXIOMS`, `PROCESS`, `LOADED`) | none: the constant map and the modules' headers | every import builds them (`Environment.lean` 2333-2348 and 2363-2373) |
+| the constants of the library's modules, their modules, types and values (`AXIOMS`, `PROCESS`, `LOADED`, `READERS`) | none: the constant map and the modules' headers | every import builds them (`Environment.lean` 2333-2348 and 2363-2373) |
 | the axioms a constant rests on (`AXIOMS`: `collectAxioms`) | the state of the extension in which Lean records each declaration's axioms when it exports a module (`Lean/Util/CollectAxioms.lean` 120-124, read at 149-154); for a constant with no record there, the constants' bodies | this program's import of the library's modules, `importModules` given `loadExts := true` after `enableInitializersExecution` (`check`). With that state unloaded `collectAxioms` found no record and followed every body instead, which is how this rule read before |
 | a declaration's compiled code and what it uses (`PROCESS`: `IR.findEnvDecl`, `IR.collectUsedDecls`) | the entries each module stored for the extension of compiled code (`Lean/Compiler/LCNF/Basic.lean` 1252-1261) and for the `init` attributes (`Lean/Compiler/InitAttr.lean` 112-125, through `Lean/Attributes.lean` 306-318); then the states of those extensions, which hold only what the current module adds, loaded or not (`Lean/Compiler/IR/CompilerM.lean` 83-85, `Attributes.lean` 269-270), and an import has no current module | `setImportedEntries` (`Environment.lean` 2377 and 2382), in every import |
+| whether a file writes a declaration (`READERS`: `written`) | the entries each module stored for the extension of declaration ranges (`Lean/DeclarationRange.lean` 20-23, read through `MapDeclarationExtension.find?`, `Lean/EnvExtension.lean` 163-170) | `setImportedEntries`, in every import, at the private level, where a module stores them |
 | a file's commands, their elaborators and its declarations (`--tests-module`, `--loads`) | whichever states Lean's frontend consults as it elaborates the file | Lean's frontend (`elaborate`: `Elab.processHeader`, `Lean/Elab/Import.lean` 159) |
 
 ## The listing of tests
@@ -750,6 +767,102 @@ def loadsOf (choices : List (Name × Option Nat)) (ci : ConstantInfo) : Bool × 
   let faults := exprs.foldl (fun acc e => importFaults choices e acc) #[]
   (!exprs.isEmpty, faults.foldl (fun acc f => if acc.contains f then acc else acc.push f) #[])
 
+/-- The library's guards (`LeanIntent/Loaded.lean`): a program that begins with one of them throws,
+before it asks anything, in an environment whose extensions' state is not loaded. -/
+def guards : List Name := [`LeanIntent.asking, `LeanIntent.askingIn]
+
+/-- The proposition, of the same module, that the state of an environment's extensions is loaded: a
+function that takes a proof of it is not given an environment in which it is not. -/
+def loadedProof : Name := `LeanIntent.Loaded
+
+/-- The declarations of the library that `READERS` excepts by name. The first four are the test
+and the guards themselves, and `LeanIntent.Imported.loaded` makes a loaded environment and is
+handed none. Each of the others is handed an environment and asks it only for its constants, the
+module of each and the modules' headers and stored entries, which every import builds: the comment
+of the module that declares it has a row for each of its questions, with the lines of Lean's source
+the row rests on. The rule takes the exception from the name and reads no row. -/
+def stateless : List Name :=
+  [`LeanIntent.Loaded, `LeanIntent.isLoaded, `LeanIntent.asking, `LeanIntent.askingIn,
+   `LeanIntent.Imported.loaded,
+   `LeanIntent.Cone.lookupIn, `LeanIntent.Cone.checkRecord, `LeanIntent.Cone.firstUnknown,
+   `LeanIntent.CodeAudit.relevantIn, `LeanIntent.CodeAudit.importers,
+   `LeanIntent.CodeAudit.generatedBy, `LeanIntent.CodeAudit.instMonadEnvEnvM,
+   `LeanIntent.Render.bareConsts, `LeanIntent.Render.recursionKind, `LeanIntent.Render.stopAt]
+
+/-- Whether the type-level constant `c` of `env` holds an environment: it is Lean's `Environment`
+or its kernel's, an inductive type one of whose constructors' types names a constant that holds
+one, or a definition of a type, such as a monad, whose value names one. The state remembers each
+constant's answer, and answers no for a constant being decided, so that a type that mentions
+itself ends. -/
+partial def holdsEnv (env : Environment) (c : Name) : StateM (Std.HashMap Name Bool) Bool := do
+  if c == ``Environment || c == ``Kernel.Environment then return true
+  if let some known := (← get)[c]? then return known
+  modify (·.insert c false)
+  let named : Array Name := match env.find? c with
+    | some (.inductInfo v) => v.ctors.foldl (init := #[]) fun acc k =>
+        match env.find? k with
+        | some ki => acc ++ ki.type.getUsedConstants
+        | none => acc
+    | some (.defnInfo v) =>
+        if v.type.getForallBody.isSort then v.value.getUsedConstants else #[]
+    | _ => #[]
+  let mut holds := false
+  for n in named do
+    if ← holdsEnv env n then
+      holds := true
+      break
+  modify (·.insert c holds)
+  return holds
+
+/-- Whether `e`, under its leading `fun`s, is an application of one of `guards`. -/
+def guardedValue : Expr → Bool
+  | .lam _ _ b _ | .mdata _ b => guardedValue b
+  | e => match e.getAppFn with
+    | .const c _ => guards.contains c
+    | _ => false
+
+/-- Whether a function of type `t` takes a proof of `loadedProof` among its parameters. -/
+def takesLoaded : Expr → Bool
+  | .forallE _ t b _ => t.getAppFn.isConstOf loadedProof || takesLoaded b
+  | .mdata _ b => takesLoaded b
+  | _ => false
+
+/-- Whether Lean records a place in a source file for the declaration `c` of `env`
+(`declRangeExt`, which a module stores at the private level this program imports at): it does for
+a declaration a file writes, and not for one Lean makes for it, such as the unsafe copy of a
+recursive definition, a `match` or the function of a structural recursion. -/
+def written (env : Environment) (c : Name) : Bool :=
+  (declRangeExt.find? (level := .exported) env c).isSome
+
+/-- `READERS` for the definition or opaque constant `c` of a library module, whose type holds an
+environment (`holdsEnv`): why the rule refuses it, if it does.
+
+A declaration a file writes (`written`) passes when it is one of `stateless`; when it takes a proof
+that the environment's extensions are loaded (`takesLoaded`); when its value begins with a guard
+(`guardedValue`); or, for a recursive definition, whose value Lean replaces by a recursor or by a
+default while its compiled code is its unsafe copy (`Compiler.mkUnsafeRecName`), when that copy's
+value does. A guard tests the environment of the monad it runs in, so it does not pass a
+declaration whose type also names an environment outright, as a parameter or a result: that
+environment is another, and such a declaration passes only with the proof or by name. A
+declaration Lean made is passed over when a declaration a file writes is named above it, which is
+how Lean names what it makes for one, and refused otherwise. -/
+def readerFault (env : Environment) (c : Name) (ci : ConstantInfo) : Option String :=
+  if written env c then
+    let copy := (env.find? (Compiler.mkUnsafeRecName c)).bind (·.value? (allowOpaque := true))
+    let outright := ci.type.getUsedConstants.any fun k => k == ``Environment || k == ``Kernel.Environment
+    let guarded := (ci.value? (allowOpaque := true)).any guardedValue || copy.any guardedValue
+    if stateless.contains c || takesLoaded ci.type || (guarded && !outright) then none
+    else if guarded then
+      some "begins with the library's guard but is also handed an environment outright, which the guard does not test: it must take a proof of `LeanIntent.Loaded` for that environment"
+    else some "is handed an environment and neither begins with `LeanIntent.asking` or `LeanIntent.askingIn` nor takes a proof of `LeanIntent.Loaded`, so it would answer from the state of Lean's environment extensions where that state is not loaded"
+  else
+    let rec above : Name → Bool
+      | .anonymous => false
+      | p@(.str q _) | p@(.num q _) =>
+        written env p || written env (privateToUserName p) || above q
+    if above c.getPrefix then none
+    else some "is handed an environment, and no declaration a file writes accounts for it"
+
 /-- Writes to the file `out` what `LOADED` finds in `file`, one of the tracked Lean files of the
 project in the current directory, whose library is built into the directory `libDir`: a line for
 each declaration of the file that names a function of `importChoices`, `+` and the declaration
@@ -841,6 +954,8 @@ unsafe def check : IO (Array Rejection) := do
   let mut audited := 0
   let mut compiled : Array Name := #[]
   let mut storedImports := false
+  let mut holders : Std.HashMap Name Bool := {}
+  let mut readers : Array Name := #[]
   for (c, ci) in env.constants.map₁.toList do
     if let some idx := env.getModuleIdxFor? c then
       if idxs.contains idx then
@@ -853,8 +968,28 @@ unsafe def check : IO (Array Rejection) := do
         else
           for fault in faults do
             errs := errs.push { rule := "LOADED", message := s!"{mod}: {c} {fault}" }
+        if ci matches .defnInfo _ | .opaqueInfo _ then
+          let mut handed := false
+          for k in ci.type.getUsedConstants do
+            let (holds, known) := (holdsEnv env k).run holders
+            holders := known
+            if holds then
+              handed := true
+              break
+          if handed then
+            if written env c then
+              readers := readers.push c
+            if let some fault := readerFault env c ci then
+              errs := errs.push { rule := "READERS", message := s!"{mod}: {c} {fault}" }
         if (IR.findEnvDecl env c).isSome then
           compiled := compiled.push c
+  if readers.isEmpty then
+    errs := errs.push { rule := "READERS", message :=
+      "no declaration a library file writes is seen to be handed an environment, though its readers are: the rule read nothing" }
+  for c in stateless do
+    unless readers.contains c do
+      errs := errs.push { rule := "READERS", message :=
+        s!"the rule excepts {c}, which no library file declares as a declaration handed an environment: read the rule's exceptions again" }
   if audited == 0 then
     errs := errs.push { rule := "AXIOMS", message := "the library's modules declare no constant" }
   unless storedImports do

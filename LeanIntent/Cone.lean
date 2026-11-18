@@ -2,6 +2,7 @@ module
 
 public import Lean.CoreM
 public import Std.Data.HashSet.Lemmas
+public import LeanIntent.Loaded
 
 /-!
 # Cone exclusion: refusing an intent record that depends on its implementation
@@ -46,6 +47,15 @@ the declarations its meaning depends on, transitively.
 Every name is reached through declarations of any kind, so a dependency reached only through an
 auxiliary declaration Lean generates, such as a `match` compiler or a recursion helper, or through
 an instance, is found like any other.
+
+What the check asks of the environment: `checkRecord`, `firstUnknown` and `lookupIn` take the
+environment as an argument and ask it one thing, the declaration it holds under a name. That is
+`Environment.find?` (`Lean/Environment.lean` 840-843, read at Lean v4.35.0) of the environment with
+its own module's bodies visible (`setExporting`, 651-655), which reads the constant map that every
+import builds (2333-2345). No environment extension's state answers it, so these three need no
+proof that such state is loaded, and `tools/check.lean`'s rule `READERS` excepts them by name.
+`requireIndependent`, a program of `CoreM`, begins with the library's guard like every program of
+the library that is handed an environment (`LeanIntent.asking`, in `LeanIntent/Loaded.lean`).
 
 What the theorems do not reach, and what is trusted:
 
@@ -604,7 +614,7 @@ theorem checkRecord_ne_ok_of_reaches {env : Environment} {record c : Name} {impl
 the implementation whose declarations `impl` names, in the current environment: it refuses a
 record whose cone reaches a declaration of the implementation, a name with no declaration, or an
 axiom other than Lean's three. -/
-def requireIndependent (record : Name) (impl : List Name) : CoreM Unit := do
+def requireIndependent (record : Name) (impl : List Name) : CoreM Unit := asking do
   match checkRecord (← getEnv) record impl with
   | .ok () => pure ()
   | .error e => throwError "intent record refused: {describe record e}"

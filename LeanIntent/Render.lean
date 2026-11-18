@@ -12,6 +12,10 @@ representative values `a₁ … aₙ`, and `#answer_texts e l` the text of each 
 list `l` to the explanation `e`, as information. Each runs a program of `LeanIntent.Render.Text`,
 whose module comment says what a rendering holds and what is trusted of it.
 
+Each command's elaborator begins with the library's guard, as every program of the library that is
+handed an environment does (`LeanIntent.asking`, in `LeanIntent/Loaded.lean`); Lean's elaboration
+of a file always hands it one whose extensions' state is loaded.
+
 The commands are a module of their own because the programs run in two phases. Lean runs them while
 it elaborates one of these commands, so this module imports them with `meta` and marks each
 command's elaborator `meta`. The checks a project runs after its build (`LeanIntent.Confirmation.Read`,
@@ -30,7 +34,7 @@ open Lean Meta Elab
 syntax (name := renderIntent) "#render_intent " ident : command
 
 @[command_elab renderIntent]
-meta def elabRenderIntent : Command.CommandElab := fun stx => do
+meta def elabRenderIntent : Command.CommandElab := fun stx => asking do
   let decl ← Command.liftCoreM <| realizeGlobalConstNoOverloadWithInfo stx[1]
   logInfo (← Command.liftTermElabM <| renderExplanation decl)
 
@@ -39,7 +43,7 @@ implicit argument, by the audited printer. -/
 syntax (name := renderIntentExact) "#render_intent_exact " ident : command
 
 @[command_elab renderIntentExact]
-meta def elabRenderIntentExact : Command.CommandElab := fun stx => do
+meta def elabRenderIntentExact : Command.CommandElab := fun stx => asking do
   let decl ← Command.liftCoreM <| realizeGlobalConstNoOverloadWithInfo stx[1]
   logInfo (← Command.liftTermElabM <| renderExplanation decl .exact)
 
@@ -49,7 +53,7 @@ not establish of the generic record. -/
 syntax (name := renderIntentAt) "#render_intent_at " ident (ppSpace colGt term:max)+ : command
 
 @[command_elab renderIntentAt]
-meta def elabRenderIntentAt : Command.CommandElab := fun stx => do
+meta def elabRenderIntentAt : Command.CommandElab := fun stx => asking do
   let f := stx[1]
   let args : Array Syntax := stx[2].getArgs
   let decl ← Command.liftCoreM <| realizeGlobalConstNoOverloadWithInfo f
@@ -70,7 +74,7 @@ explanation `ex`. -/
 syntax (name := answerTextsCmd) "#answer_texts " ident ident : command
 
 @[command_elab answerTextsCmd]
-meta def elabAnswerTexts : Command.CommandElab := fun stx => do
+meta def elabAnswerTexts : Command.CommandElab := fun stx => asking do
   let ex ← Command.liftCoreM <| realizeGlobalConstNoOverloadWithInfo stx[1]
   let decl ← Command.liftCoreM <| realizeGlobalConstNoOverloadWithInfo stx[2]
   let texts ← Command.liftTermElabM do

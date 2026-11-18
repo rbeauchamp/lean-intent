@@ -132,6 +132,21 @@ has free or meta variables, when the printer refuses it (`LeanIntent.Print.Print
 terms it prints), when a part of its gloss is empty, or when Lean does not elaborate its printed
 form back to it.
 
+The environment a rendering reads is its caller's: every program here runs in Lean's `MetaM`. A
+text depends on the state of Lean's environment extensions, which hold the notation a term prints
+with and Lean's records of matchers, so every program of this module begins with the library's
+guard (`LeanIntent.asking`, `LeanIntent.askingIn`, in `LeanIntent/Loaded.lean`) and throws, before
+it asks anything, in an environment in which that state is not loaded, as one imported with Lean's
+`importModules` by default is. `holdsMatch` and `kernelReduction`, which take the environment as an
+argument, take the proof that it is loaded. Three functions take an environment and no proof,
+since no extension's state answers what they ask (the lines are of Lean v4.35.0's source):
+
+| Function | What it asks | What answers it |
+|---|---|---|
+| `bareConsts` | the type of a constant | `Environment.find?` (`Lean/Environment.lean` 840-843): the constant map, which every import builds (2333-2345) |
+| `stopAt` | the module of a constant | `Environment.getModuleIdxFor?` (1196-1198): the module recorded for each constant, which every import builds (2345-2348) |
+| `recursionKind` | whether Lean records a definition as compiled by structural or by well-founded recursion | `MapDeclarationExtension.find?` (`Lean/EnvExtension.lean` 163-170) of Lean's two records (`Lean/Elab/PreDefinition/Structural/Eqns.lean` 150, `Lean/Elab/PreDefinition/WF/Eqns.lean` 26): for a declaration of an imported module, the entries that module stored, which every import sets before it reads whether to load the extensions' state (`Environment.lean` 2377 and 2404); the extension's state only for a declaration of the module being elaborated, which an imported environment has none of |
+
 What is not proved: that the sections `declSection` writes print every part of a declaration, that
 the equation a definition by recursion is shown by determines it, and that the document as a
 whole, headings and prose included, determines what it prints, are argued from this module's code
@@ -159,8 +174,11 @@ annotation, which Lean applies to the arguments written after them and nothing e
   | some ci => explicitOnly ci.type
   | none => false
 
-/-- Whether `e` holds a `match`, by a constant Lean records as a matcher. -/
-@[expose] def holdsMatch (env : Environment) (e : Expr) : Bool :=
+/-- Whether `e` holds a `match`, by a constant Lean records as a matcher. Lean's record of matchers
+is the state of an environment extension (`Lean/Meta/Match/MatcherInfo.lean` 124-147 at Lean
+v4.35.0), so the question is asked only of an environment given with the proof that its extensions'
+state is loaded. -/
+@[expose] def holdsMatch (env : Environment) (_h : Loaded env) (e : Expr) : Bool :=
   (e.find? fun x => x.isConst && isMatcherCore env x.constName!).isSome
 
 /-- Whether Lean's parser and elaborator read `text` as a term, in the namespace `ns` with nothing
@@ -168,7 +186,7 @@ opened, in the current local context and with the universe parameters of `e`, an
 `e`, binder names and metadata aside. A term that holds a `match` may instead elaborate to one that
 Lean's kernel finds definitionally equal to `e`: Lean compiles a `match` anew each time it reads one,
 into a new auxiliary constant, so no reading of it is the same term. -/
-def elaboratesTo (text : String) (e : Expr) (ns : Name := .anonymous) : MetaM Bool := do
+def elaboratesTo (text : String) (e : Expr) (ns : Name := .anonymous) : MetaM Bool := asking do
   match Parser.runParserCategory (← getEnv) `term text with
   | .error _ => return false
   | .ok stx =>
@@ -183,14 +201,14 @@ def elaboratesTo (text : String) (e : Expr) (ns : Name := .anonymous) : MetaM Bo
             instantiateMVars e'
         if e'.hasMVar then return false
         if (eraseNames (eraseMData e')).equal (eraseNames e) then return true
-        let env ← getEnv
-        unless holdsMatch env e do return false
-        return Kernel.isDefEqGuarded env (← getLCtx) e' e
+        askingIn fun env h => do
+          unless holdsMatch env h e do return false
+          return Kernel.isDefEqGuarded env (← getLCtx) e' e
       catch _ => return false
 
 /-- `e` printed exactly, as text that Lean elaborates back to `e`, binder names and metadata aside;
 an error when it cannot be. -/
-def printExact (e : Expr) : MetaM String := do
+def printExact (e : Expr) : MetaM String := asking do
   let e ← instantiateMVars e
   if e.hasFVar || e.hasMVar || e.hasLooseBVars then
     throwError "cannot print{indentExpr e}\nas it has free or meta variables"
@@ -256,12 +274,12 @@ structure Reader where
   notations : IO.Ref NameSet
 
 /-- `e` printed exactly, with the reader's parameters as `fun`s around it, which it may mention. -/
-def Reader.printClosed (R : Reader) (e : Expr) : MetaM String := do
+def Reader.printClosed (R : Reader) (e : Expr) : MetaM String := asking do
   printExact (← mkLambdaFVars R.params e)
 
 /-- The names of syntax in `stx` declared outside Lean's own libraries. Each is the name Lean gave
 the notation's parser, a declaration of the module that declares the notation. -/
-def Reader.foreignKinds (R : Reader) (stx : Syntax) : MetaM NameSet := do
+def Reader.foreignKinds (R : Reader) (stx : Syntax) : MetaM NameSet := asking do
   let env ← getEnv
   let mut found : NameSet := {}
   for s in stx.topDown do
@@ -275,7 +293,7 @@ def Reader.foreignKinds (R : Reader) (stx : Syntax) : MetaM NameSet := do
 /-- `e` printed by Lean's delaborator and formatter with the options `extra`, and the notation of
 the print declared outside Lean's own libraries; the print is read in the reader's namespace. -/
 def Reader.delabWith (R : Reader) (extra : List (Name × Bool)) (e : Expr) :
-    MetaM (String × NameSet) := do
+    MetaM (String × NameSet) := asking do
   withOptions (fun o => extra.foldl (fun o (n, v) => o.setBool n v) (baseOptions o)) do
     withTheReader Core.Context (fun ctx => { ctx with currNamespace := R.ns, openDecls := [] }) do
       let lctx := (← getLCtx).sanitizeNames.run' { options := (← getOptions) }
@@ -288,7 +306,7 @@ def Reader.delabWith (R : Reader) (extra : List (Name × Bool)) (e : Expr) :
 shows the first print of `readableOptions` that Lean reads back as `e`, binder names and metadata
 aside, in the reader's namespace, and records its foreign notation; when none is read back, it
 prints `e` as the exact form does. An error when `e` has what no term of the text can have. -/
-def Reader.print (R : Reader) (e : Expr) : MetaM String := do
+def Reader.print (R : Reader) (e : Expr) : MetaM String := asking do
   let e ← instantiateMVars e
   if e.hasMVar || e.hasLooseBVars || (e.hasFVar && R.params.isEmpty) then
     throwError "cannot print{indentExpr e}\nas it has free or meta variables"
@@ -309,8 +327,11 @@ def Reader.print (R : Reader) (e : Expr) : MetaM String := do
 
 /-- A reduction result tied to the kernel request for this environment, local context and term.
 The kernel's reduction semantics are trusted, not proved by this result's provenance. Unlike
-`Meta.whnf`, this request cannot consult smart-unfolding helpers or elaborator extension state. -/
-@[expose] def kernelReduction (env : Environment) (lctx : LocalContext) (e : Expr) :
+`Meta.whnf`, this request cannot consult smart-unfolding helpers or elaborator extension state.
+That the kernel reads no extension's state is trusted with the kernel, whose source the toolchain
+does not ship, so the request is made only of an environment given with the proof that its
+extensions' state is loaded. -/
+@[expose] def kernelReduction (env : Environment) (_h : Loaded env) (lctx : LocalContext) (e : Expr) :
     Except Kernel.Exception { result : Expr // Kernel.whnf env lctx e = .ok result } :=
   match Kernel.whnf env lctx e with
   | .ok result => .ok ⟨result, rfl⟩
@@ -318,8 +339,8 @@ The kernel's reduction semantics are trusted, not proved by this result's proven
 
 /-- Erasing the provenance proof preserves every success and every error of the kernel request.
 This is a transport theorem, not a proof of the external kernel's reduction algorithm. -/
-theorem kernelReduction_result (env : Environment) (lctx : LocalContext) (e : Expr) :
-    (kernelReduction env lctx e).map Subtype.val = Kernel.whnf env lctx e := by
+theorem kernelReduction_result (env : Environment) (h : Loaded env) (lctx : LocalContext)
+    (e : Expr) : (kernelReduction env h lctx e).map Subtype.val = Kernel.whnf env lctx e := by
   unfold kernelReduction
   generalize Kernel.whnf env lctx e = result
   cases result <;> rfl
@@ -327,20 +348,20 @@ theorem kernelReduction_result (env : Environment) (lctx : LocalContext) (e : Ex
 /-- Read weak head normal form through the kernel, with no elaborator reduction fallback.
 The expression must be kernel-ready: declared values have no metavariables, and generic renderings
 supply their free variables through the current local context. -/
-def readWhnf (e : Expr) : MetaM Expr := do
-  match kernelReduction (← getEnv) (← getLCtx) e with
+def readWhnf (e : Expr) : MetaM Expr := askingIn fun env h => do
+  match kernelReduction env h (← getLCtx) e with
   | .ok result => return result.val
   | .error _ => throwError "Lean's kernel could not reduce{indentExpr e}"
 
 /-- The arguments of `e`, which must reduce to the constructor `ctor` applied to `n` arguments. -/
-def ctorArgs (e : Expr) (ctor : Name) (n : Nat) : MetaM (Array Expr) := do
+def ctorArgs (e : Expr) (ctor : Name) (n : Nat) : MetaM (Array Expr) := asking do
   let e ← readWhnf e
   unless e.isAppOfArity ctor n do
     throwError "expected {.ofConstName ctor} applied to {n} arguments, found{indentExpr e}"
   return e.getAppArgs
 
 /-- The elements of a list. -/
-partial def listElems (e : Expr) : MetaM (Array Expr) := do
+partial def listElems (e : Expr) : MetaM (Array Expr) := asking do
   let e ← readWhnf e
   if e.isAppOfArity ``List.cons 3 then
     return #[e.getArg! 1] ++ (← listElems (e.getArg! 2))
@@ -349,34 +370,34 @@ partial def listElems (e : Expr) : MetaM (Array Expr) := do
   else throwError "expected a list, found{indentExpr e}"
 
 /-- The string a string literal is. -/
-def strLit (e : Expr) : MetaM String := do
+def strLit (e : Expr) : MetaM String := asking do
   match ← readWhnf e with
   | .lit (.strVal s) => return s
   | e => throwError "expected a string literal, found{indentExpr e}"
 
 /-- A gloss's four parts, in order: what it requires, rules out, still allows, and the freedom it
 leaves. -/
-def readGloss (e : Expr) : MetaM (Array String) := do
+def readGloss (e : Expr) : MetaM (Array String) := asking do
   let parts ← (← ctorArgs e ``Gloss.mk 4).mapM strLit
   for (label, s) in #["requires", "rules out", "still allows", "freedom"].zip parts do
     if s.trimAscii.isEmpty then throwError "the gloss's part on what it {label} is empty"
   return parts
 
 /-- The name `e` reduces to, whose characters are checked again as an identifier's. -/
-def readIdent (e : Expr) : MetaM Ident := do
+def readIdent (e : Expr) : MetaM Ident := asking do
   let s ← strLit (← ctorArgs e ``Word.mk 3)[1]!
   if h : s.toList ≠ [] ∧ s.toList.all identChar = true then return ⟨s, h⟩
   throwError "expected a name of the owners' log, found {repr s}"
 
 /-- The verdict `e` reduces to. -/
-def readVerdict (e : Expr) : MetaM Verdict := do
+def readVerdict (e : Expr) : MetaM Verdict := asking do
   let e ← readWhnf e
   if e.isConstOf ``Verdict.confirmed then return .confirmed
   if e.isConstOf ``Verdict.declined then return .declined
   throwError "expected a verdict, found{indentExpr e}"
 
 /-- The answerer `e` reduces to; refused when a decision on the owner's behalf gives no reason. -/
-def readAnswerer (e : Expr) : MetaM Answerer := do
+def readAnswerer (e : Expr) : MetaM Answerer := asking do
   let e ← readWhnf e
   if e.isAppOfArity ``Answerer.owner 1 then
     return .owner (← readIdent e.appArg!)
@@ -389,20 +410,21 @@ def readAnswerer (e : Expr) : MetaM Answerer := do
   throwError "expected who gave an answer, found{indentExpr e}"
 
 /-- The standing of the record's restatement that `e` reduces to. -/
-def readRestatement (e : Expr) : MetaM Restatement := do
+def readRestatement (e : Expr) : MetaM Restatement := asking do
   let e ← readWhnf e
   if e.isConstOf ``Restatement.unconfirmed then return .unconfirmed
   if e.isAppOfArity ``Restatement.confirmed 1 then return .confirmed (← readIdent e.appArg!)
   throwError "expected whether a restatement is confirmed, found{indentExpr e}"
 
 /-- A consequence recorded as derived, of a record whose restatement stands as `s`. -/
-def readDerived : (s : Restatement) → MetaM (Settled s)
-  | .confirmed _ => return .derived
+def readDerived (s : Restatement) : MetaM (Settled s) := asking <|
+  match s with
+  | .confirmed _ => pure .derived
   | .unconfirmed => throwError "a consequence of a record whose restatement no owner confirmed is \
       recorded as derived from it"
 
 /-- The status `e` reduces to, of a consequence of a record whose restatement stands as `s`. -/
-def readSettled (s : Restatement) (e : Expr) : MetaM (Settled s) := do
+def readSettled (s : Restatement) (e : Expr) : MetaM (Settled s) := asking do
   let e ← readWhnf e
   if e.isAppOfArity ``Settled.answered 3 then
     let a := e.getAppArgs
@@ -485,7 +507,7 @@ def leanLibDir : IO System.FilePath := do
 in the directory `leanLibDir` finds), asking the file system only of a module whose name could be.
 A module of a project that merely shares one of those names is not. An error when the process
 cannot establish where those libraries are. -/
-def leanOwnModules : MetaM (Array Bool) := do
+def leanOwnModules : MetaM (Array Bool) := asking do
   let lib := (← leanLibDir).components
   (← getEnv).header.moduleNames.mapM fun m => do
     return isLeanOwn lib m (← if leanRoots.contains m.getRoot then realOLean? m else pure none)
@@ -506,7 +528,7 @@ own libraries (`own`, by module). -/
 
 /-- The part `part` of the declaration `c`, `e`, printed by the reader; an error naming both when
 it cannot be. -/
-def printPart (R : Reader) (c : Name) (part : String) (e : Expr) : MetaM String := do
+def printPart (R : Reader) (c : Name) (part : String) (e : Expr) : MetaM String := asking do
   try R.print e
   catch err => throwError "cannot print the {part} of {c}: {err.toMessageData}"
 
@@ -625,7 +647,7 @@ of `c`. An error, naming `c`, when Lean gives none, when its statement or univer
 not those, or when it rests on an axiom other than Lean's own (`LeanIntent.Cone.leanAxioms`): since
 its statement names `c`, the axioms of `c`, its termination proof among them, are among its own
 (`Lean.collectAxioms` follows each constant's type and value). -/
-def unfoldEqn (c : Name) (levels : List Name) : MetaM (Name × Expr) := do
+def unfoldEqn (c : Name) (levels : List Name) : MetaM (Name × Expr) := asking do
   let eq? ← try getUnfoldEqnFor? c (nonRec := false)
     catch err => throwError "cannot print {c}: Lean cannot state its equation: {err.toMessageData}"
   let some eq := eq?
@@ -661,7 +683,7 @@ well-founded because the termination proof rests on no axiom but Lean's own, whi
 checks. -/
 def declSection (R : Reader) (lookup : Name → Option ConstantInfo)
     (out : List (Name × ConstantInfo)) (eqns : NameMap (Name × Expr)) (c : Name)
-    (ci : ConstantInfo) : MetaM (Option String) := do
+    (ci : ConstantInfo) : MetaM (Option String) := asking do
   let has (n : Name) : Bool := out.any (·.1 == n)
   match ci with
   | .ctorInfo v =>
@@ -751,7 +773,7 @@ nothing from a definition by recursion whose equation is not yet found, and then
 pass that finds none to add is the one printed, so every definition by recursion it reaches is
 followed through its equation. Each pass but the last adds the equation of a declaration of the
 environment, so there are finitely many. -/
-def definitions (R : Reader) (roots : List Name) (shown : NameSet) : MetaM String := do
+def definitions (R : Reader) (roots : List Name) (shown : NameSet) : MetaM String := asking do
   let own := R.own
   let mut eqns : NameMap (Name × Expr) := {}
   repeat
@@ -798,7 +820,7 @@ def definitions (R : Reader) (roots : List Name) (shown : NameSet) : MetaM Strin
   throwError "unreachable: the loop returns when no equation is left to find"
 
 /-- The kind of a consequence, `e` reduced to its constructor, and what it is shown as. -/
-def kindWords (e : Expr) : MetaM (Expr × String) := do
+def kindWords (e : Expr) : MetaM (Expr × String) := asking do
   let kind ← readWhnf e
   if kind.isConstOf ``Consequence.Kind.entailment then
     return (kind, "an entailment: every subject that meets the record satisfies it")
@@ -831,7 +853,7 @@ what they do not establish of the family they come from, `f`. -/
     one parameter and fails at another.\n\n"
 
 /-- One binder of a generic explanation, `x`, written as a binder is, by the reader. -/
-def binderText (R : Reader) (x : Expr) : MetaM String := do
+def binderText (R : Reader) (x : Expr) : MetaM String := asking do
   let d ← x.fvarId!.getDecl
   let type ← R.print d.type
   let (l, r) := match d.binderInfo with
@@ -844,7 +866,7 @@ def binderText (R : Reader) (x : Expr) : MetaM String := do
   return s!"{l}{name.eraseMacroScopes} : {type}{r}"
 
 /-- The section of a generic explanation that lists its parameters; nothing when it has none. -/
-def paramsPart (R : Reader) : MetaM String := do
+def paramsPart (R : Reader) : MetaM String := asking do
   if R.params.isEmpty then return ""
   let lines ← R.params.mapM (binderText R)
   return s!"## Parameters\n\nThis record is generic. Every statement below is about every value \
@@ -867,7 +889,7 @@ each, each printed by the reader with its gloss; with the constants the record's
 and the record's own constant, at which it stops, since each of its statements is shown. `note` says
 what the record's values are, when they need saying. -/
 def recordPart (R : Reader) (exTerm : Expr) (note : String := "") (statuses : Statuses := .recorded) :
-    MetaM (String × List Name × NameSet) := do
+    MetaM (String × List Name × NameSet) := asking do
   let ex ← ctorArgs exTerm ``Explanation.mk 11
   let r ← ctorArgs ex[1]! ``IntentRecord.mk 5
   let restatement ← readRestatement ex[6]!
@@ -943,7 +965,7 @@ def recordPart (R : Reader) (exTerm : Expr) (note : String := "") (statuses : St
 
 /-- The section that lists the notation a text uses declared outside Lean's own libraries, which
 none of its definitions says the meaning of to a reader; nothing when it uses none. -/
-def notationPart (R : Reader) : MetaM String := do
+def notationPart (R : Reader) : MetaM String := asking do
   let kinds := (← R.notations.get).toList
   if kinds.isEmpty then return ""
   let env ← getEnv
@@ -960,7 +982,7 @@ def notationPart (R : Reader) : MetaM String := do
 /-- The sections of a text after its record part: every declaration its meaning reaches, under a
 heading that says what they are, the notation it uses declared outside Lean's own libraries, and the
 toolchain. -/
-def definitionsPart (R : Reader) (roots : List Name) (shown : NameSet) : MetaM String := do
+def definitionsPart (R : Reader) (roots : List Name) (shown : NameSet) : MetaM String := asking do
   return s!"## Definitions the record's meaning reaches\n\nThese are not statements of the \
     record: each is a declaration that a statement above depends on, or that says what it is for \
     a subject to meet the record and for a consequence to hold of it as shown, with everything \
@@ -972,7 +994,7 @@ def definitionsPart (R : Reader) (roots : List Name) (shown : NameSet) : MetaM S
     {← definitions { R with params := #[] } roots shown}{← notationPart R}{toolchain}"
 
 /-- A new reader of the form `form` for the terms of the explanation `decl`, in its namespace. -/
-def newReader (decl : Name) (form : Form) (params : Array Expr := #[]) : MetaM Reader := do
+def newReader (decl : Name) (form : Form) (params : Array Expr := #[]) : MetaM Reader := asking do
   return { form, ns := if form == .exact then .anonymous else decl.getPrefix, params,
            own := ← leanOwnModules, notations := ← IO.mkRef {} }
 
@@ -983,7 +1005,7 @@ and the toolchain. `decl` is a constant of type
 binders are the parameters of the text: each statement is printed with them free, and its meaning
 starts also from what their types mention. -/
 def renderExplanation (decl : Name) (form : Form := .readable) (statuses : Statuses := .recorded) :
-    MetaM String := do
+    MetaM String := asking do
   let ci ← getConstInfo decl
   let us := ci.levelParams.map Level.param
   let reader ← newReader decl form
@@ -998,7 +1020,7 @@ what they do not establish of the generic record (`instanceNote`). A value that 
 by the proposition it proves, since no term depends on more than its statement. The meaning starts
 also from each term the list prints, so the definitions a value or a proposition reaches are
 printed. -/
-def renderAt (decl : Name) (us : List Level) (args : Array Expr) : MetaM String := do
+def renderAt (decl : Name) (us : List Level) (args : Array Expr) : MetaM String := asking do
   let ci ← getConstInfo decl
   let reader ← newReader decl .readable
   let binders ← forallBoundedTelescope (ci.type.instantiateLevelParams ci.levelParams us) args.size
@@ -1025,7 +1047,7 @@ def renderAt (decl : Name) (us : List Level) (args : Array Expr) : MetaM String 
 /-- The text of the revision the explanation `decl` shows: its rendering in the exact form, whose text
 determines the term, saying nothing of who settled what, since recording an answer changes that and
 must not change what the answer names. -/
-def revisionText (decl : Name) : MetaM String :=
+def revisionText (decl : Name) : MetaM String := asking <|
   renderExplanation decl .exact .omitted
 
 /-- The canonical text of what the consequence with the predicate `pred` means: the predicate printed
@@ -1033,7 +1055,7 @@ exactly; every declaration it reaches, and `LeanIntent.Answer.KeptBy`, which say
 it asks of every later revision, each printed in full by `definitions`; and the toolchain. It does
 not stop at the record, so a predicate stated through a record prints the record's value and
 changes with it. An error, naming what cannot be printed, when any of it cannot be. -/
-def consequenceText (pred : Expr) : MetaM String := do
+def consequenceText (pred : Expr) : MetaM String := asking do
   return s!"# A consequence's predicate\n\nPrinted exactly: as Lean syntax that Lean elaborates back \
     to the term its kernel checks, binder names and metadata aside, from the root namespace with \
     nothing opened.\n\n{code (← printExact pred)}\n## Definitions the predicate reaches\n\nEach \
@@ -1053,7 +1075,7 @@ exact form prints them; then every declaration the record part and the
 answer reach, `LeanIntent.Answer.KeptBy`'s among them, which says what the answer asks of every
 later revision, each printed in full by one call of `definitions`; and the toolchain. An error,
 naming what cannot be printed, when any of it cannot be. -/
-def answerText (ex : Name) (a : Expr) : MetaM String := do
+def answerText (ex : Name) (a : Expr) : MetaM String := asking do
   let attributed ← ctorArgs a ``Attributed.mk 3
   let answerer ← readAnswerer attributed[2]!
   let ans ← ctorArgs attributed[1]! ``Answer.mk 3
@@ -1091,7 +1113,7 @@ def answerText (ex : Name) (a : Expr) : MetaM String := do
 
 /-- The canonical text of each attributed answer of the list `e` to the explanation `ex`
 (`answerText`). -/
-def answerTexts (ex : Name) (e : Expr) : MetaM (Array String) := do
+def answerTexts (ex : Name) (e : Expr) : MetaM (Array String) := asking do
   (← listElems e).mapM (answerText ex)
 
 end LeanIntent.Render

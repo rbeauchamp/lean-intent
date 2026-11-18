@@ -125,6 +125,13 @@ to at every constructor of the group (`checkRecMaps`). The handler runs
 the two agree on every type the handler covers. The first stays trusted: the audit derives the code
 through the same functions, not by a second reading of the declaration.
 
+Every program of this module is handed its environment by its caller: Lean's elaboration where the
+handler runs, and whoever runs the audit where `checkAttestation` runs. Lean's unifier, its
+instance resolution and its elaborator, which these programs ask, answer from the state of Lean's
+environment extensions, so each program begins with the library's guard (`LeanIntent.asking`, in
+`LeanIntent/Loaded.lean`) and throws, before it asks anything, in an environment in which that
+state is not loaded.
+
 In a `module` file the handler writes the code, the isomorphism and, for a recursive type, the maps
 the isomorphism is built from as exposed definitions, so that a module that imports the type's can
 reduce them, as the proofs of the checks' verdicts do. It reads the attestation it wrote in the
@@ -150,12 +157,13 @@ one, or the sum of the first and the representation of the rest. -/
   | c :: cs => mkApp2 (mkConst ``Ty.sum) c (sumCode cs)
 
 /-- The value of the chain whose fields are `vs`, as syntax. -/
-def chainStx : List Term → TermElabM Term
+def chainStx (vs : List Term) : TermElabM Term := asking do
+  match vs with
   | [] => `(())
-  | v :: vs => do `(Prod.mk $v $(← chainStx vs))
+  | v :: vs => `(Prod.mk $v $(← chainStx vs))
 
 /-- The value `v` in the alternative `i` of `k`, as syntax. -/
-def injStx (k i : Nat) (v : Term) : TermElabM Term := do
+def injStx (k i : Nat) (v : Term) : TermElabM Term := asking do
   if k == 1 then return v
   let mut t ← if i + 1 == k then pure v else `(Sum.inl $v)
   for _ in [0:i] do
@@ -175,16 +183,18 @@ structure Ctor where
   fields : Array (Name × Expr)
 
 /-- Whether `e`, a sort, is `Type`. -/
-def isType0 (e : Expr) : MetaM Bool := do
+def isType0 (e : Expr) : MetaM Bool := asking do
   match ← whnf e with
   | .sort l => return l.normalize == Level.one
   | _ => return false
 
 /-- Runs `k` on the binders `acc` followed by each type of `xs` with a local instance of `HasCode`
 after it. -/
-def withInsts {α : Type} : List Expr → Array Expr → (Array Expr → TermElabM α) → TermElabM α
-  | [], acc, k => k acc
-  | x :: xs, acc, k => do
+def withInsts {α : Type} (xs : List Expr) (acc : Array Expr) (k : Array Expr → TermElabM α) :
+    TermElabM α := asking do
+  match xs with
+  | [] => k acc
+  | x :: xs =>
     withLocalDecl (← mkFreshUserName `inst) .instImplicit (mkApp (mkConst ``HasCode) x)
       fun inst => withInsts xs (acc.push x |>.push inst) k
 
@@ -193,7 +203,7 @@ of `HasCode`, in the order of the generated binders (each parameter, then its in
 type applied to them; refuses a parameter that is not a type of `Type` or a type that does not live
 in `Type`. -/
 def withParams {α : Type} (indVal : InductiveVal)
-    (k : Array Expr → Array Expr → Expr → TermElabM α) : TermElabM α := do
+    (k : Array Expr → Array Expr → Expr → TermElabM α) : TermElabM α := asking do
   let us := indVal.levelParams.map fun _ => Level.zero
   let type := indVal.type.instantiateLevelParams indVal.levelParams us
   forallBoundedTelescope type indVal.numParams fun xs body => do
@@ -206,7 +216,7 @@ def withParams {α : Type} (indVal : InductiveVal)
 
 /-- The constructors of `indVal` applied to the parameters `xs`, with their fields' names and types;
 refuses a field that depends on an earlier one or whose type is not a type of `Type`. -/
-def ctors (indVal : InductiveVal) (xs : Array Expr) : TermElabM (List Ctor) := do
+def ctors (indVal : InductiveVal) (xs : Array Expr) : TermElabM (List Ctor) := asking do
   let us := indVal.levelParams.map fun _ => Level.zero
   indVal.ctors.mapM fun c => do
     let info ← getConstInfoCtor c
@@ -240,7 +250,7 @@ audit of an attestation (`checkAttestation`) from the attestation it reads. -/
 /-- The code of the declaration `indVal` with parameters `xs`, each with its instance of `HasCode` in
 the local context: `codeWith`, each instance found by Lean's instance resolution. Refuses a field
 whose type has no code. -/
-def code (indVal : InductiveVal) (xs : Array Expr) (cs : List Ctor) : TermElabM Expr :=
+def code (indVal : InductiveVal) (xs : Array Expr) (cs : List Ctor) : TermElabM Expr := asking <|
   codeWith indVal xs cs fun t => do
     let some inst ← synthInstance? (mkApp (mkConst ``HasCode) t)
       | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: the type `{t}` of one of its fields has no code; derive `LeanIntent.HasCode` for it first if the project declares it"
@@ -251,7 +261,7 @@ A definition follows the scope as Lean has one written there follow it (`compile
 `Lean/Elab/PreDefinition/Basic.lean`): in a `meta` scope it is marked `meta`, and in a `noncomputable section`
 that is not `meta`, what Lean's compiler refuses of it is left without compiled code, with no
 error. -/
-def addFun (name : Name) (binders : Array Expr) (type value : Expr) (thm : Bool) : TermElabM Unit := do
+def addFun (name : Name) (binders : Array Expr) (type value : Expr) (thm : Bool) : TermElabM Unit := asking do
   let type ← mkForallFVars binders type
   let value ← mkLambdaFVars binders value
   if thm then
@@ -264,7 +274,7 @@ def addFun (name : Name) (binders : Array Expr) (type value : Expr) (thm : Bool)
     setReducibleAttribute name
 
 /-- The constructor of `Ty.Stands` that admits a declared type. -/
-def standsDecl : MetaM Name := do
+def standsDecl : MetaM Name := asking do
   let info ← getConstInfoInduct ``Ty.Stands
   let some c := info.ctors.find? fun c => (privateToUserName? c).getD c == `LeanIntent.Ty.Stands.decl
     | throwError "LeanIntent.HasCode: `Ty.Stands` has no constructor `decl`"
@@ -301,7 +311,7 @@ each constructor with the field each induction hypothesis is about marked recurs
 of the group with indices, a field that depends on an earlier field or whose type is not a type of
 `Type`, and a recursive field that is a function whose arguments depend on a field or on one
 another, or are not types of `Type`. -/
-def readGroup (indVal : InductiveVal) (xs : Array Expr) : TermElabM (Array (Expr × Array GCtor)) := do
+def readGroup (indVal : InductiveVal) (xs : Array Expr) : TermElabM (Array (Expr × Array GCtor)) := asking do
   let notCovered {α : Type} (why : MessageData) : TermElabM α :=
     throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: {why}"
   let recVal ← getConstInfoRec (mkRecName indVal.name)
@@ -418,7 +428,7 @@ group with a constructor of the first kind, or that its root's base values do no
 `Ty.growsAt`). -/
 @[expose] def recCodeWith {m : Type → Type} [Monad m] [MonadError m] [MonadEnv m] [MonadLCtx m]
     (indVal : InductiveVal) (group : Array (Expr × Array GCtor)) (i : Nat)
-    (codeOf : Expr → m Expr) : m (Expr × Expr × Expr × Nat) := do
+    (codeOf : Expr → m Expr) : m (Expr × Expr × Expr × Nat) := asking do
   let dataCodes (c : GCtor) : m (List Expr) :=
     c.fields.toList.filterMapM fun | .data t => some <$> codeOf t | .ref _ _ => pure none
   let domCodes (c : GCtor) : m (List Expr) :=
@@ -467,7 +477,7 @@ root, and otherwise `Ty.muAt b g r j i`. -/
 /-- `recCodeWith` with the code of each field's type found by Lean's instance resolution, as the
 handler writes it. Refuses a field or argument whose type has no code. -/
 def recCode (indVal : InductiveVal) (group : Array (Expr × Array GCtor)) (i : Nat) :
-    TermElabM (Expr × Expr × Expr × Nat) :=
+    TermElabM (Expr × Expr × Expr × Nat) := asking <|
   recCodeWith indVal group i fun t => do
     let some inst ← synthInstance? (mkApp (mkConst ``HasCode) t)
       | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: the type `{t}` of one of its fields has no code; derive `LeanIntent.HasCode` for it first if the project declares it"
@@ -507,7 +517,7 @@ applied to fresh metavariables and put in weak head normal form, where that head
 type. The others are `decl` and `atom`, which denote what their arguments do and are stuck at a
 metavariable, and `arrow`, which denotes a function type. The constructors are read from the
 environment, so a constructor `Ty` gains is counted. -/
-def builtinHeads : MetaM (Array Name) := do
+def builtinHeads : MetaM (Array Name) := asking do
   let mut heads := #[]
   for (ind, den) in [(``Ty, ``Ty.denote), (``Atom, ``Atom.denote)] do
     for c in (← getConstInfoInduct ind).ctors do
@@ -540,7 +550,7 @@ map is the handler's, its map back being that map's inverse. Each type of the gr
 once. -/
 def checkRecMaps (group : Array (Expr × Array GCtor)) (root i : Nat) (f : Expr)
     (instOf : Expr → MetaM (Option Expr)) (candidate : Nat → MetaM (Option Expr)) :
-    MetaM (Option String) := do
+    MetaM (Option String) := asking do
   let kernelEq (a b : Expr) : MetaM Bool := do
     return Kernel.isDefEq (← getEnv) (← getLCtx) a b matches .ok true
   let codeOf (t inst : Expr) : Expr := mkApp2 (mkConst ``HasCode.code) t inst
@@ -686,7 +696,7 @@ code and the image of every constructor, by its definitional equality. An isomor
 its forward map, since its map back is that map's inverse, so the map back is not compared. Returns
 the type attested, printed, with `none` when the attestation is the handler's, or the reason it is
 not. The type is `none` when the attestation is refused before its type is read. -/
-def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String × Option String) := do
+def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String × Option String) := asking do
   let .thmInfo v := ci | return (none, some "it is not a theorem")
   if (Cone.exprRefs v.type []).contains ctor then
     return (none, some "its statement names the constructor")
@@ -813,7 +823,7 @@ also the name under which the handler adds one directly, so that the two agree. 
 type that is not `public` has a private name, Lean then runs the handler in the private scope
 (`Lean.Elab.applyDerivingHandlers`), and a command there that states no visibility declares a
 private name (`Lean.Elab.applyVisibility`); everywhere else it declares `n`. -/
-def writtenName : CommandElabM (Name → Name) := do
+def writtenName : CommandElabM (Name → Name) := asking do
   let env ← getEnv
   return if env.header.isModule && !(← getScope).isPublic then mkPrivateName env else id
 
@@ -824,7 +834,7 @@ names Lean knows the three by (`writtenName`); `instName` is the name the instan
 under. -/
 def mkStandsAndInstance (declName : Name) (indVal : InductiveVal) (instName codeName isoName standsName : Name)
     (binders : Array (TSyntax ``Lean.Parser.Term.bracketedBinder)) (args : Array Term) (tStx : Term) :
-    CommandElabM Unit := do
+    CommandElabM Unit := asking do
   let ctor ← liftTermElabM standsDecl
   liftTermElabM <| withParams indVal fun _ binders tApp => do
     let codeE := (← getConstInfoDefn codeName).value.beta binders
@@ -863,15 +873,17 @@ structure CtorPlan where
   alt : Nat
 
 /-- The syntax of the `q`-th item of the chain `d`. -/
-def chainGet (d : Term) : Nat → TermElabM Term
+def chainGet (d : Term) (q : Nat) : TermElabM Term := asking do
+  match q with
   | 0 => `(Prod.fst $d)
-  | q + 1 => do chainGet (← `(Prod.snd $d)) q
+  | q + 1 => chainGet (← `(Prod.snd $d)) q
 
 /-- The proof that the chain of the values `ps` proves equal, item by item, is equal to the chain
 they are about: `Prod.ext` of each, ending with `rfl`. -/
-def chainEq : List Term → TermElabM Term
+def chainEq (ps : List Term) : TermElabM Term := asking do
+  match ps with
   | [] => `(rfl)
-  | p :: ps => do `(Prod.ext $p $(← chainEq ps))
+  | p :: ps => `(Prod.ext $p $(← chainEq ps))
 
 /-- Writes the code, the isomorphism, the proof that the code stands for the type, and the instance
 of `HasCode` for `declName`, the `i`-th type of a recursive group: the code `Ty.decl` of its name,
@@ -881,7 +893,7 @@ the group to its trees, with the root's base values, by structural recursion ove
 `to1`, …); the map back, the fold (`Ty.muFold`) of the map from base values (`baseInv`) and of the
 map from nodes (`alg`); and the proofs, by the same recursion, that each map undoes the other, which
 Lean's kernel checks. -/
-def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandElabM Unit := do
+def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandElabM Unit := asking do
   let instName := (← getCurrNamespace) ++ (← liftTermElabM <| Deriving.mkInstName ``HasCode declName)
   let codeName := instName ++ `code
   let baseName := instName ++ `base
@@ -1118,7 +1130,7 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
 
 /-- Writes the code, the isomorphism, the proof that the code stands for the type, and the instance
 of `HasCode`, for the declaration named `declName`. -/
-def mkHasCode (declName : Name) : CommandElabM Unit := do
+def mkHasCode (declName : Name) : CommandElabM Unit := asking do
   let indVal ← getConstInfoInduct declName
   if let some why := refusal? indVal then
     throwError "LeanIntent.HasCode: `{.ofConstName declName}` is not covered: {why}"
@@ -1191,7 +1203,7 @@ compiler refuses of a private code's programs is left without compiled code wher
 error. It refuses a command that derives a public type together with one that is not, in a `module`
 file: Lean runs the handler for all of a command's types in the private scope when one of them is
 private (`Lean.Elab.applyDerivingHandlers`), which would make the public type's code private. -/
-def handler (declNames : Array Name) : CommandElabM Bool := do
+def handler (declNames : Array Name) : CommandElabM Bool := asking do
   unless ← declNames.allM isInductive do
     return false
   if (← getEnv).header.isModule && declNames.any isPrivateName then
