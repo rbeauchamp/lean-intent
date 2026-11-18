@@ -64,32 +64,30 @@ The decisions this module makes, each on the owner's behalf:
   an axiom, is refused naming it. An application of a theorem to arguments is a term too, but where
   Lean's elaborator abstracts it into an auxiliary theorem of the value's own module, the value
   holds that theorem's constant, and it is read as that theorem.
-* **Where a theorem lies is the module Lean's environment records as declaring it**, compared with
-  the module names the build lists, never the theorem's name. Lean refuses to import two modules
-  that declare one name, except where the two declarations have the same name, type and universe
-  parameters and are two theorems of the same mutual group, a theorem outside any mutual group and
-  a safe axiom, or two axioms of a type its test takes for a proposition; it then holds one of the
-  two, the theorem where the other is an axiom, and records the name under the first of those
-  modules in import order, as it records under a module the auxiliary names of that module's
-  compiled code (`throwAlreadyImported`, `subsumesInfo` and `finalizeImport` in Lean v4.35.0's
-  `src/Lean/Environment.lean`, lines 2069 to 2072, 2269 to 2284 and 2336 to 2348). So a theorem
-  whose recorded module the build does not list is refused: a theorem only such modules declare,
-  apart from the case the next paragraph names, and, until the duplicate is removed, one that such
-  a module and a listed module imported after it both declare. A theorem recorded under a listed
-  module that declares it is declared there with that name and statement.
-  `docs/required-theorems.md` sets the cases out.
+* **Where a theorem lies is the module recorded as declaring it, and only where that module itself
+  declares it as a theorem**, compared with the module names the build lists, never the theorem's
+  name. Lean imports two modules that declare one name only where the two declarations have the
+  same name, type and universe parameters and are two theorems of the same mutual group, a theorem
+  outside any mutual group and a safe axiom, or two axioms of a type its test takes for a
+  proposition; it then holds one of the two, the theorem where the other is an axiom, and records
+  the name under the first of those modules in import order, as it records under a module the
+  auxiliary names of that module's compiled code (`throwAlreadyImported`, `subsumesInfo` and
+  `finalizeImport` in Lean v4.35.0's `src/Lean/Environment.lean`, lines 2069 to 2072, 2269 to 2284
+  and 2333 to 2348). So the declaration the environment holds under a name need not be the one the
+  recorded module made, and the reader takes each declaration from the recorded module's own data
+  (`LeanIntent.Required.Read.ownDeclaration`): a name that module declares as an axiom is refused
+  as not a theorem, whatever a module imported later proves under it, and a name that module does
+  not declare at all is an error. A theorem read as lying in a listed module is therefore declared
+  by that module, with that name and statement. `docs/required-theorems.md` sets the cases out.
 
 What this module does not establish: that a listed theorem states what the procedure asks of it,
 which review reads; that its proof rests only on axioms the project accepts, which a project's own
-gate audits, as it audits its other proofs; that a module the build lists, recorded for a listed
-theorem's name, itself declares that theorem, where it declares the name only as an axiom or holds
-it only as an auxiliary name of its compiled code and a module imported after it declares the
-theorem, which Lean's environment then holds as a theorem of the listed module; that Lean's kernel
-checked a listed theorem's proof, which the option `debug.skipKernelTC` skips; that every theorem
-the procedure requires is listed, since a theorem no value lists is not read, and a value in a
-source file that no module the environment holds imports is not read either; and that the module
-names given as the build's are those the project's proof check builds, which the gate reads from
-Lake (`LeanIntent.Required.Read.queryModules`).
+gate audits, as it audits its other proofs; that Lean's kernel checked a listed theorem's proof,
+which the option `debug.skipKernelTC` skips; that every theorem the procedure requires is listed,
+since a theorem no value lists is not read, and a value in a source file that no module the
+environment holds imports is not read either; and that the module names given as the build's are
+those the project's proof check builds, which the gate reads from Lake
+(`LeanIntent.Required.Read.queryModules`).
 -/
 
 public section
@@ -126,10 +124,11 @@ open Implementation (Constant)
 
 /-- What a value of `Required d` lists, one entry of its list, as the build shows it. -/
 inductive Cited where
-  /-- A constant Lean's environment records as a theorem, by the module that declares it and its
-  name. -/
+  /-- A constant that the module recorded as declaring it itself declares as a theorem, by that
+  module and its name. -/
   | thm (c : Constant)
-  /-- A constant that is not a theorem, by its module and its name. -/
+  /-- A constant that the module recorded as declaring it declares, but not as a theorem, by that
+  module and its name. -/
   | other (c : Constant)
   /-- A term that is not a constant. -/
   | term
@@ -163,8 +162,9 @@ inductive Finding where
   | untied (value : Lean.Name)
   /-- This value of `Required` lists a term that is not a constant. -/
   | notConstant (value : Lean.Name)
-  /-- This value of `Required` lists this constant, which is not a theorem. -/
-  | notTheorem (value constant : Lean.Name)
+  /-- This value of `Required` lists this constant, which this module, the one recorded as
+  declaring it, does not declare as a theorem. -/
+  | notTheorem (value constant module : Lean.Name)
   /-- This value of `Required` lists this theorem, declared in this module, which the build does
   not list. -/
   | unbuilt (value cited module : Lean.Name)
@@ -183,7 +183,7 @@ inductive Finding where
 /-- What is wrong with one entry the value `r` lists, given the modules `built`. -/
 @[expose] def citedFindings (built : List Lean.Name) (r : Lean.Name) : Cited → List Finding
   | .thm c => if built.contains c.module then [] else [.unbuilt r c.name c.module]
-  | .other c => [.notTheorem r c.name]
+  | .other c => [.notTheorem r c.name c.module]
   | .term => [.notConstant r]
 
 /-- What is wrong with the entry `r`, given the modules `built` and the deliverables `ds`. -/
@@ -364,7 +364,7 @@ the entries `rs`. -/
   | .requiredUnbuilt n m => ∃ r ∈ rs, r.name = n ∧ r.module = m ∧ m ∉ built
   | .untied n => ∃ r ∈ rs, r.name = n ∧ ∀ d ∈ ds, r.deliverable ≠ some d.name
   | .notConstant n => ∃ r ∈ rs, r.name = n ∧ .term ∈ r.theorems
-  | .notTheorem n c => ∃ r ∈ rs, r.name = n ∧ ∃ m, .other ⟨m, c⟩ ∈ r.theorems
+  | .notTheorem n c m => ∃ r ∈ rs, r.name = n ∧ .other ⟨m, c⟩ ∈ r.theorems
   | .unbuilt n c m => ∃ r ∈ rs, r.name = n ∧ .thm ⟨m, c⟩ ∈ r.theorems ∧ m ∉ built
 
 /-- **Each finding holds**, and names the deliverable, value, theorem or module it is about. -/
@@ -410,7 +410,7 @@ theorem findings_sound {f : Finding} (hf : f ∈ findings built ds vs rs) :
           exact ⟨r, hr, rfl, ht, by simpa using h⟩
       | other c =>
         rw [List.mem_singleton.mp hf]
-        exact ⟨r, hr, rfl, c.module, ht⟩
+        exact ⟨r, hr, rfl, ht⟩
       | term =>
         rw [List.mem_singleton.mp hf]
         exact ⟨r, hr, rfl, ht⟩
@@ -463,8 +463,10 @@ it. -/
   | .notConstant n =>
     s!"{n} lists a proof that is not a theorem's name: list each theorem as `⟨name⟩`, or \
       `⟨@name⟩` where its first arguments are implicit"
-  | .notTheorem n c =>
-    s!"{n} lists {c}, which is not a theorem: declare what it proves with `theorem`, and list that"
+  | .notTheorem n c m =>
+    s!"{n} lists {c}, which the module {m}, recorded as declaring it, does not declare as a \
+      theorem: declare what it proves with `theorem`, and list that; a theorem of that name in \
+      another module does not stand for it, so prove it in {m} or remove the declaration there"
   | .unbuilt n c m =>
     s!"{n} lists the theorem {c}, declared in the module {m}, which the project's build does not \
       list, so the proof check does not check it: move {c} into a module of a library the proof \

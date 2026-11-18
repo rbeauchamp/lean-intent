@@ -18,14 +18,14 @@ read so:
 
 | Input | How it is read |
 |---|---|
-| the modules whose declarations are read | every module the environment holds, the one being elaborated included: `check` takes no list of modules to read, so none can be left out of what it reads |
+| the modules whose declarations are read | every module the environment holds, the one being elaborated included: `check` takes no list of modules to read, so none can be left out of what it reads; each module's declarations are read from that module's own data, as Lean loaded it (`EnvironmentHeader.moduleData`), and the file's own from the constants it added, never from the environment's one map of constants |
 | the project's deliverables | every definition, opaque constant or axiom of those modules whose type reduces through Lean's kernel (`Render.readWhnf`), unfolding every definition, to `LeanIntent.Deliverable _` |
 | the values that record implementations | every such constant whose type so reduces to `LeanIntent.Implementation _` |
 | the values that name required theorems | every such constant whose type so reduces to `LeanIntent.Required _` |
 | the deliverable such a value names | the second argument of that type, `d` of `@Required W d`, where it is a constant once its metadata is removed (`Expr.consumeMData`), and otherwise none |
 | what such a value lists | its value, reduced by `Render.readWhnf` through the kernel to `Required.mk`'s application, that application's third argument reduced to a list (`Render.listElems`), and each element reduced to `Proof.mk`'s application, whose second argument, the proof, is read as the value holds it: a constant once its metadata is removed, and otherwise a term; where Lean's elaborator abstracted a proof term into an auxiliary theorem of the value's own module, the value holds that theorem's constant, which is read as that theorem |
-| whether a listed constant is a theorem | its declaration in the environment (`getConstInfo`), a theorem exactly when it is `ConstantInfo.thmInfo`; where one imported module declares the name as an axiom and another as a theorem of the same type, the environment holds the theorem (`subsumesInfo` and `finalizeImport` in Lean v4.35.0's `src/Lean/Environment.lean`, lines 2269 to 2284 and 2336 to 2343) |
-| the module that declares a constant | the module the environment records as declaring it (`Environment.getModuleIdxFor?`), or the module being elaborated when it is declared there (`Implementation.Read.moduleOf`); the module recorded for an imported name is the first, in import order, that declares it, which Lean admits of several modules only for theorems and axioms of one type, or whose compiled code holds an auxiliary declaration of it (`const2ModIdx.insertIfNew`, lines 2345 and 2348 of the same file) |
+| whether a listed constant is a theorem | the declaration of its name in the data of the module the environment records for it (`ownDeclaration`), a theorem exactly when that declaration is `ConstantInfo.thmInfo` with the type and universe parameters of the declaration the environment holds, which the value's entry was checked against; the environment's map of constants does not decide it, since Lean puts a later module's theorem there over an earlier module's axiom of the same type (`subsumesInfo` and `finalizeImport` in Lean v4.35.0's `src/Lean/Environment.lean`, lines 2269 to 2284 and 2333 to 2345) |
+| the module that declares a constant | for a deliverable, a value recording an implementation or a value of `Required`, the module in whose own data it was found, with an error where the environment holds another declaration under its name (`sameDeclaration`); for a listed constant, the module the environment records for the name (`Environment.getModuleIdxFor?`), the first in import order to declare it, provided that module's own data declares the name, and otherwise an error naming both, as where the module holds the name only as an auxiliary name of its compiled code (`const2ModIdx.insertIfNew`, lines 2345 and 2348 of the same file); a constant with no module index is declared in the file being elaborated |
 | the module names the build lists | given by the caller; `queryModules` reads them from what `lake query --json` prints for `@/<library>:modules`, each line a JSON array of names, read by Lean's JSON parser, and each name decoded by `Required.moduleName?`, which gives a name only for a string of its closed form and for which distinct strings give distinct names (`Required.moduleName?_inj`); every other string is an error naming it |
 
 **Every module is read in full, or the check refuses to run.** `check` is an error in a `module`
@@ -92,7 +92,7 @@ that name read from one module's own data, as far as this reader reads a declara
 of constant, with the same universe parameters and type, and for a definition the same value.
 Stated for the kinds `declaredAnywhere` finds, a definition, an opaque constant and an axiom; of
 every other kind it is false. -/
-def sameDeclaration (own held : ConstantInfo) : Bool :=
+@[expose] def sameDeclaration (own held : ConstantInfo) : Bool :=
   own.levelParams == held.levelParams && own.type == held.type &&
     match own, held with
     | .defnInfo a, .defnInfo b => a.value == b.value

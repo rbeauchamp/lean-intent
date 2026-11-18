@@ -150,9 +150,9 @@ theorem scratchValue_refused :
   decide +kernel
 
 /-- The entry as the build would show it where Lean's environment records the theorem of
-`sorting_narrower`'s name under the scratch module, which it does where that module declares the
-theorem and no module imported before it declares the name or holds it as an auxiliary name of its
-compiled code (`docs/required-theorems.md`, the decision on where a theorem lies). -/
+`sorting_narrower`'s name under the scratch module and that module declares it, as where the scratch
+module is the first in import order to declare the name (`docs/required-theorems.md`, the decision
+on where a theorem lies). -/
 @[expose] def sameNameEntry : Entry :=
   { entry with theorems := [.thm ⟨`LeanIntentExamples.Scratch, ``sorting_narrower⟩] }
 
@@ -193,7 +193,7 @@ theorem notConstant_refused :
 theorem notTheorem_refused :
     findings built [deliverable] [implementation]
       [{ entry with theorems := [.other ⟨`LeanIntentExamples.Sorting, ``sort⟩] }] =
-      [.notTheorem ``sortingRequired ``sort] := by
+      [.notTheorem ``sortingRequired ``sort `LeanIntentExamples.Sorting] := by
   decide +kernel
 
 end LeanIntentExamples.Required
