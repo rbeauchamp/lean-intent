@@ -127,8 +127,9 @@ or elaborator, or a configuration given as a term, would run inside it is not se
 that Lean evaluates to another end than a verdict, such as `include_str`'s path or a
 configuration's value; nor is code that a deriving handler the project declares runs, since a
 deriving handler is no elaborator and the commands it elaborates are elaborated by Lean's own, so a
-command whose `deriving` clause names one is not listed (the library's handler,
-`LeanIntent.Declared`, writes a code and an isomorphism whose proofs Lean's kernel checks).
+command whose `deriving` clause names one is not listed (the library's handlers,
+`LeanIntent.Declared` and `LeanIntent.MachineDeclared`, write a code and isomorphisms whose proofs
+Lean's kernel checks).
 -/
 
 open Lean
