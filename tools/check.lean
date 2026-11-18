@@ -36,10 +36,10 @@ never by reading source text by hand:
   imports from the built modules;
 * the compiled code of each declaration and what it uses, from Lean (`Lean.IR.findEnvDecl`,
   `Lean.IR.collectUsedDecls`) over that environment;
-* the attestations of declared types' codes that the library's declarations depend on, from the
-  library's own audit (`LeanIntent.CodeAudit.audit`) over the environment Lean imports from the
-  built modules, run by `tools/codes.lean` in a process of its own, since this program is not
-  built against the library.
+* the attestations of declared types' codes, and of declared structures' coverage as machines, that
+  the library's declarations depend on, from the library's own audit (`LeanIntent.CodeAudit.audit`)
+  over the environment Lean imports from the built modules, run by `tools/codes.lean` in a process
+  of its own, since this program is not built against the library.
 
 The rules:
 
@@ -76,7 +76,9 @@ The rules:
 * `CODES`: the audit of declared types' codes (`LeanIntent.CodeAudit`) accepts every constant the
   library's modules declare, its worked examples included: no declaration they depend on attests a
   declared type's code with a code or isomorphism other than the one the deriving handler writes
-  from the type's declaration, and none rests on an axiom other than Lean's three. `tools/codes.lean`
+  from the type's declaration, or a declared structure's coverage as a machine with an isomorphism
+  other than the one its deriving handler writes, and none rests on an axiom other than Lean's
+  three. `tools/codes.lean`
   says what it prints and when it fails; the rule fails rather than passing when the library's
   modules declare no constant.
 
@@ -125,8 +127,9 @@ or elaborator, or a configuration given as a term, would run inside it is not se
 that Lean evaluates to another end than a verdict, such as `include_str`'s path or a
 configuration's value; nor is code that a deriving handler the project declares runs, since a
 deriving handler is no elaborator and the commands it elaborates are elaborated by Lean's own, so a
-command whose `deriving` clause names one is not listed (the library's handler,
-`LeanIntent.Declared`, writes a code and an isomorphism whose proofs Lean's kernel checks).
+command whose `deriving` clause names one is not listed (the library's handlers,
+`LeanIntent.Declared` and `LeanIntent.MachineDeclared`, write a code and isomorphisms whose proofs
+Lean's kernel checks).
 -/
 
 open Lean

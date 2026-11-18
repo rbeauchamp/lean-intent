@@ -1,6 +1,6 @@
 # Interim stand-in for a lean-intent check not yet built
 
-lean-intent's degenerate-subject check (`docs/degenerate-subjects.md`) states its verdicts only of a subject whose type it covers; for any other type Lean reports that it cannot synthesize `Covered`, so no verdict about it can be stated.
+lean-intent's degenerate-subject check (`docs/degenerate-subjects.md`) states its verdicts only of a subject whose type it covers, or covers as a machine (`docs/machines.md`); for any other type Lean reports that it cannot synthesize `Covered` or `CoveredMachine`, so no verdict about it can be stated.
 The section below stands in for that check on every such type; lean-intent's document for the check says which declared types its deriving handler refuses, and why.
 A stand-in here is a class you prove theorems over, not a decision procedure with a theorem stating what it decides: the section says what it decides and what it leaves undecided, so that your report claims no more.
 

@@ -15,8 +15,11 @@ modules it is given. It is a `module` file: `main` is public, and `LeanIntent.Co
 a second time with `meta`, since Lean loads the compiled code of an imported module, which
 `lean --run` runs, only where the import says `meta`. It imports those modules and runs
 `LeanIntent.CodeAudit.audit` from every constant they declare, printing one line for each reason the
-audit refuses (`LeanIntent.CodeAudit.report`). It exits with status `0` when the audit accepts,
-having printed nothing; `1` when it refuses, or when the modules declare no constant, since an audit
+audit refuses (`LeanIntent.CodeAudit.report`). The audit reads each kind of attestation whose
+inductive proposition the environment of those modules declares (`LeanIntent.CodeAudit.kinds`), so
+the modules need not import `LeanIntent.Machines`; it throws an error where none of them is or
+imports `LeanIntent.Degenerate`, which declares `Ty.Stands`. It exits with status `0` when the
+audit accepts, having printed nothing; `1` when it refuses, or when the modules declare no constant, since an audit
 of nothing would accept anything, having printed to standard output a line for each reason; and `2`
 when it cannot run: any error raised in `main` (its arguments, a module Lean cannot import, an error
 the audit throws, a failure to print) is caught and printed to standard error. Lean ends a program
