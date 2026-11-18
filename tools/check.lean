@@ -33,9 +33,14 @@ never by reading source text by hand:
 * each file's module name, from Lean (`moduleNameOfFileName`), whether it is a `module` file, from
   Lean's parser of its header (`Parser.parseHeader`), and its build, from Lake;
 * the axioms each declaration rests on, from Lean (`collectAxioms`) over the environment Lean
-  imports from the built modules;
+  imports from the built modules, with the state of its environment extensions loaded;
 * the compiled code of each declaration and what it uses, from Lean (`Lean.IR.findEnvDecl`,
   `Lean.IR.collectUsedDecls`) over that environment;
+* what each declaration names and how it applies it, from Lean: for a library module, the type and
+  the value of each constant it declares in that environment, a theorem's proof and an opaque
+  constant's value included; for a file under `tools/`, the same of the environment Lean's
+  frontend makes of the file, which elaborates it in a process of its own (`--loads`) against the
+  built library;
 * the attestations of declared types' codes that the library's declarations depend on, from the
   library's own audit (`LeanIntent.CodeAudit.audit`) over the environment Lean imports from the
   built modules, run by `tools/codes.lean` in a process of its own, since this program is not
@@ -79,9 +84,47 @@ The rules:
   from the type's declaration, and none rests on an axiom other than Lean's three. `tools/codes.lean`
   says what it prints and when it fails; the rule fails rather than passing when the library's
   modules declare no constant.
+* `LOADED`: no declaration of a library module, or of a Lean file under `tools/`, imports modules
+  in a way that leaves the state of Lean's environment extensions unloaded. A declaration that
+  names `importModules` or `finalizeImport` (`importFunctions`), in its type or its value, must
+  apply it to `true`, written as that constant, for its parameter `loadExts`; and none may name
+  `withImportModules`, which always leaves the state unloaded. Lean's plain import gives every
+  extension its initial value as its state and reports nothing (`Lean/Environment.lean` 2428-2432
+  at Lean v4.35.0), so a reader's question to Lean, such as whether a declaration is a class
+  instance, is then answered from an empty table: the audit of declared types' codes named no
+  instance in any refusal that way. Lean itself refuses `loadExts := true` where
+  `enableInitializersExecution` was not called first (`Lean/Compiler/InitAttr.lean` 199-201). The
+  one exception is `storedImport`, the library's `LeanIntent.Imported.stored`, which hands back no
+  environment. The rule fails rather than passing when the pinned Lean's functions are not as it
+  expects them or another declaration Lean's modules bring takes a parameter named `loadExts`
+  (`importChoices`), when it sees no declaration under `tools/` that imports modules, though this
+  program does, and when the library holds no `storedImport` that imports. It sees a function
+  named in a declaration's term: it does not see an import made through another function of
+  Lean's or Lake's that itself imports with the state unloaded, or by a name given to Lean's
+  evaluator.
 
 The rules read what the build produced, so they hold only if no code the build runs was written to
-defeat them: elaborating a Lean file runs the metaprograms it invokes.
+defeat them: elaborating a Lean file runs the metaprograms it invokes. The same holds of the
+`initialize` declarations of the library's modules: this program and `tools/codes.lean` import
+those modules with their extensions' state loaded, which runs those declarations in the importing
+process (`LeanIntent/Imported.lean` says what that admits), where one could end the process with
+the status of a pass.
+
+## The environments this program reads, and what each question reads
+
+Every environment this program holds was imported with the state of Lean's environment extensions
+loaded, which `LOADED` checks of its own declarations too. Lean runs `finalizePersistentExtensions`
+then (`Lean/Environment.lean` 2404-2405 and 1976-2007), which sets the state of every persistent
+extension registered in the process to what the extension builds from the entries the modules
+stored, and runs the modules' `initialize` declarations on the way (`LeanIntent/Imported.lean`
+gives the order and what running them admits).
+
+| Question | The extension state that answers it | What loads it |
+|---|---|---|
+| the constants of the library's modules, their modules, types and values (`AXIOMS`, `PROCESS`, `LOADED`) | none: the constant map and the modules' headers | every import builds them (`Environment.lean` 2333-2348 and 2363-2373) |
+| the axioms a constant rests on (`AXIOMS`: `collectAxioms`) | the state of the extension in which Lean records each declaration's axioms when it exports a module (`Lean/Util/CollectAxioms.lean` 120-124, read at 149-154); for a constant with no record there, the constants' bodies | this program's import of the library's modules, `importModules` given `loadExts := true` after `enableInitializersExecution` (`check`). With that state unloaded `collectAxioms` found no record and followed every body instead, which is how this rule read before |
+| a declaration's compiled code and what it uses (`PROCESS`: `IR.findEnvDecl`, `IR.collectUsedDecls`) | the entries each module stored for the extension of compiled code (`Lean/Compiler/LCNF/Basic.lean` 1252-1261) and for the `init` attributes (`Lean/Compiler/InitAttr.lean` 112-125, through `Lean/Attributes.lean` 306-318); then the states of those extensions, which hold only what the current module adds, loaded or not (`Lean/Compiler/IR/CompilerM.lean` 83-85, `Attributes.lean` 269-270), and an import has no current module | `setImportedEntries` (`Environment.lean` 2377 and 2382), in every import |
+| a file's commands, their elaborators and its declarations (`--tests-module`, `--loads`) | whichever states Lean's frontend consults as it elaborates the file | Lean's frontend (`elaborate`: `Elab.processHeader`, `Lean/Elab/Import.lean` 159) |
 
 ## The listing of tests
 
@@ -391,6 +434,33 @@ partial def syntaxKey : Syntax → String
   | .ident _ _ n _ => "`" ++ nameKey n
   | .node _ k args => "(" ++ nameKey k ++ args.foldl (fun acc a => acc ++ " " ++ syntaxKey a) "" ++ ")"
 
+/-- `file`, the module `mod`, as Lean's frontend elaborates it under `opts`, with the info tree of
+each command kept: its state once every command is elaborated, whose environment holds what the
+file declares. The frontend imports the modules the file's header names with every environment
+extension's state loaded (`Elab.processHeader`, which gives `importModules` `loadExts := true`,
+`Lean/Elab/Import.lean` 159 at Lean v4.35.0), which Lean allows only after
+`enableInitializersExecution`, so what this program asks of that environment afterwards is answered
+as it is while Lean elaborates the file. An error naming `path` and saying `so`, with Lean's
+messages, when Lean cannot elaborate the file or its imports. -/
+unsafe def elaborate (path file : String) (mod : Name) (opts : Options) (so : String) :
+    IO Elab.IncrementalState := do
+  let input ← IO.FS.readFile file
+  let inputCtx := Parser.mkInputContext input file
+  let fail (messages : MessageLog) : IO Elab.IncrementalState := do
+    let shown ← messages.toList.mapM (·.toString)
+    throw <| IO.userError s!"{path}: Lean could not elaborate it, {so}:\n{String.join shown}"
+  let (header, parserState, messages) ← Parser.parseHeader inputCtx
+  enableInitializersExecution
+  let (env, messages) ← Elab.processHeader header opts messages inputCtx (mainModule := mod)
+  if messages.hasErrors then
+    return ← fail messages
+  let state := Elab.Command.mkState env messages opts
+  let state := { state with infoState := { state.infoState with enabled := true } }
+  let s ← Elab.IO.processCommandsIncrementally inputCtx parserState state none
+  if s.commandState.messages.hasErrors then
+    return ← fail s.commandState.messages
+  return s
+
 /-- The tests of `file`, the module `mod` of a project whose modules are `mods`, read by Lean's
 frontend as it elaborates the file with `debug.byAsSorry`, which elaborates every `by` block whose
 type is a proposition as `sorry`. A command is a test when Lean, while it elaborates the command,
@@ -407,22 +477,8 @@ and so is a command whose syntax holds a token that starts with `#` and a letter
 `testTokens` nor `otherTokens`. -/
 unsafe def testsOfModule (path file : String) (mod : Name) (mods : Array Name)
     (out : System.FilePath) : IO (Array String) := do
-  let input ← IO.FS.readFile file
-  let inputCtx := Parser.mkInputContext input file
   let opts := (({} : Options).setBool `Elab.async false).setBool `debug.byAsSorry true
-  let fail (messages : MessageLog) : IO (Array String) := do
-    let shown ← messages.toList.mapM (·.toString)
-    throw <| IO.userError s!"{path}: Lean could not elaborate it, so its tests cannot be read:\n{String.join shown}"
-  let (header, parserState, messages) ← Parser.parseHeader inputCtx
-  enableInitializersExecution
-  let (env, messages) ← Elab.processHeader header opts messages inputCtx (mainModule := mod)
-  if messages.hasErrors then
-    return ← fail messages
-  let state := Elab.Command.mkState env messages opts
-  let state := { state with infoState := { state.infoState with enabled := true } }
-  let s ← Elab.IO.processCommandsIncrementally inputCtx parserState state none
-  if s.commandState.messages.hasErrors then
-    return ← fail s.commandState.messages
+  let s ← elaborate path file mod opts "so its tests cannot be read"
   let env := s.commandState.env
   let declared (c : Name) : Bool :=
     match env.getModuleIdxFor? c with
@@ -613,8 +669,150 @@ def checkProcess (env : Environment) (roots : Array Name) : Array Rejection := I
         queue := queue.push used
   return errs
 
-/-- Every rule for the project in the current directory. -/
-def check : IO (Array Rejection) := do
+/-- The functions of the pinned Lean through which a program chooses whether the environment it
+imports has its environment extensions' state loaded: `importModules` and `finalizeImport` take the
+choice as a parameter named `loadExts`, and `withImportModules` calls `importModules` with
+`loadExts := false` whatever it is given (`Lean/Environment.lean` 2308-2309, 2439-2440 and
+2458-2460 at Lean v4.35.0, the only declarations of that file that name `loadExts`). `LOADED`
+reads the parameter's position from each function's type and never from this comment. -/
+def importFunctions : List Name := [``importModules, ``finalizeImport]
+
+/-- The function of the pinned Lean that imports modules and always leaves the extensions' state
+unloaded (`importFunctions`). -/
+def unloadedImport : Name := ``withImportModules
+
+/-- The one declaration that `LOADED` lets import without loading the extensions' state: the
+library's `LeanIntent.Imported.stored`, which hands back no environment, only the four questions of
+a `LeanIntent.Imported.Stored`, none of which an extension's state answers. The rule takes this from
+the declaration's name: that it keeps the environment to itself is its own module's statement. -/
+def storedImport : Name := `LeanIntent.Imported.stored
+
+/-- The position, among the parameters of a function of type `t`, of the one named `loadExts`. -/
+def loadExtsPosition (t : Expr) : Option Nat :=
+  go 0 t
+where
+  go (i : Nat) : Expr → Option Nat
+    | .forallE n _ b _ => if n.eraseMacroScopes == `loadExts then some i else go (i + 1) b
+    | .mdata _ b => go i b
+    | _ => none
+
+/-- What `LOADED` refuses to see named, read from `env`: each function of `importFunctions` with
+the position of its parameter `loadExts`, and `unloadedImport` with none. An error, so that the rule
+fails rather than passing on a Lean it does not describe, when one of them is not declared, when a
+function of `importFunctions` has no parameter of that name, or when another declaration `env`
+imports has one, which would be a function carrying the same choice that the rule does not know. -/
+def importChoices (env : Environment) : Except String (List (Name × Option Nat)) := do
+  let again := "read the rule LOADED again from this Lean's source"
+  let mut choices := []
+  for f in importFunctions do
+    let some ci := env.find? f
+      | throw s!"{f} is not declared under this Lean: {again}"
+    let some i := loadExtsPosition ci.type
+      | throw s!"{f} takes no parameter named loadExts under this Lean: {again}"
+    choices := (f, some i) :: choices
+  unless env.contains unloadedImport do
+    throw s!"{unloadedImport} is not declared under this Lean: {again}"
+  let others := env.constants.map₁.fold (init := #[]) fun acc c ci =>
+    if !importFunctions.contains c && (loadExtsPosition ci.type).isSome then acc.push c else acc
+  unless others.isEmpty do
+    throw s!"{others.qsort Name.lt} take a parameter named loadExts under this Lean, and the rule LOADED does not know them: {again}"
+  return (unloadedImport, none) :: choices
+
+/-- Why the expression `e` imports modules in a way `LOADED` refuses, appended to `acc`: a reason
+for each occurrence of a function of `choices` that is not applied to enough arguments to reach its
+parameter `loadExts` with the constant `true` there, and for each occurrence of the function that
+has no such parameter. An argument that is not that constant, such as a variable or a term that
+reduces to `true`, is refused: the rule accepts the literal and nothing else. -/
+partial def importFaults (choices : List (Name × Option Nat)) (e : Expr) (acc : Array String) :
+    Array String :=
+  let acc := match e.getAppFn with
+    | .const c _ =>
+      match choices.lookup c with
+      | none => acc
+      | some none =>
+        acc.push s!"names {c}, which leaves every environment extension's state unloaded"
+      | some (some i) =>
+        if (e.getAppArgs[i]?.map (·.consumeMData.isConstOf ``Bool.true)) == some true then acc
+        else acc.push s!"names {c} without `loadExts := true` written as its argument"
+    | .lam _ t b _ | .forallE _ t b _ => importFaults choices b (importFaults choices t acc)
+    | .letE _ t v b _ =>
+      importFaults choices b (importFaults choices v (importFaults choices t acc))
+    | .mdata _ b | .proj _ _ b => importFaults choices b acc
+    | .app .. | .bvar _ | .fvar _ | .mvar _ | .sort _ | .lit _ => acc
+  e.getAppArgs.foldl (fun acc a => importFaults choices a acc) acc
+
+/-- `LOADED` for the declaration `ci`: whether its type or its value, a theorem's proof and an
+opaque constant's value included, names a function of `choices`, and why the rule refuses it
+(`importFaults`), each reason once, nothing when it does not. -/
+def loadsOf (choices : List (Name × Option Nat)) (ci : ConstantInfo) : Bool × Array String :=
+  let exprs := (ci.type :: (ci.value? (allowOpaque := true)).toList).filter fun e =>
+    e.getUsedConstants.any fun c => (choices.lookup c).isSome
+  let faults := exprs.foldl (fun acc e => importFaults choices e acc) #[]
+  (!exprs.isEmpty, faults.foldl (fun acc f => if acc.contains f then acc else acc.push f) #[])
+
+/-- Writes to the file `out` what `LOADED` finds in `file`, one of the tracked Lean files of the
+project in the current directory, whose library is built into the directory `libDir`: a line for
+each declaration of the file that names a function of `importChoices`, `+` and the declaration
+where the rule accepts every such use, and otherwise, for each reason it refuses one, `-`, the
+declaration and the reason. The declarations are those of the environment Lean's frontend makes of
+the file (`elaborate`), its constants that no imported module declares. It is read by this program
+in a process of its own, as a file's tests are (`moduleTests`), and from the file it writes rather
+than from what its process prints. An error when the file declares no constant, since the rule
+would then have read nothing of it. -/
+unsafe def fileLoads (file libDir out : String) : IO Unit := do
+  let files ← trackedLeanFiles
+  let mods ← moduleNames files
+  let some mod := (files.zip mods).find? (·.1 == file) |>.map (·.2)
+    | throw <| IO.userError s!"{file} is not a Lean file Git's index lists here"
+  initSearchPath (← findSysroot) [libDir]
+  let opts := ({} : Options).setBool `Elab.async false
+  let env := (← elaborate file file mod opts "so what it imports cannot be read").commandState.env
+  let choices ← IO.ofExcept (importChoices env)
+  let declared := env.constants.map₂.toList
+  if declared.isEmpty then
+    throw <| IO.userError s!"{file}: Lean's frontend shows no declaration of it, so what it imports cannot be read"
+  let mut lines : Array String := #[]
+  for (c, ci) in declared do
+    let (names, faults) := loadsOf choices ci
+    if names && faults.isEmpty then
+      lines := lines.push s!"+ {c}"
+    for fault in faults do
+      lines := lines.push s!"- {c} {fault}"
+  let sorted := (lines.map (·.replace "\n" " ")).qsort (· < ·)
+  IO.FS.writeFile out (String.join (sorted.toList.map (· ++ "\n")))
+
+/-- `LOADED` for the Lean files Git's index lists under `tools/`, each read by `fileLoads` in a
+process of its own against the library built into `libDir`, into a directory removed afterwards.
+The rule fails rather than passing when it finds no such file, or no declaration of them that
+imports modules: this program is one of those files and imports the library's modules, so finding
+none means the rule read nothing. -/
+def checkToolLoads (libDir : System.FilePath) : IO (Array Rejection) := do
+  let reject (message : String) : Rejection := { rule := "LOADED", message }
+  let files := (← trackedLeanFiles).filter (·.startsWith "tools/")
+  if files.isEmpty then
+    return #[reject "Git's index lists no Lean file under tools/, where this program lies"]
+  let out ← IO.FS.createTempDir
+  try
+    let mut errs : Array Rejection := #[]
+    let mut importing := 0
+    for h : i in [0:files.size] do
+      let report := out / s!"{i}.loads"
+      discard <| runSelf #["--loads", files[i], libDir.toString, report.toString]
+      for l in ← IO.FS.lines report do
+        importing := importing + 1
+        if l.startsWith "- " then
+          errs := errs.push (reject s!"{files[i]}: {(l.drop 2).toString}")
+    if importing == 0 then
+      errs := errs.push (reject "no declaration of a Lean file under tools/ is seen to import modules, though this program imports the library's: the rule read nothing")
+    return errs
+  finally
+    IO.FS.removeDirAll out
+
+/-- Every rule for the project in the current directory. `unsafe` because it imports the library's
+modules with their environment extensions' state loaded, which Lean allows only after
+`enableInitializersExecution`: that lets the import run the `initialize` declarations of the
+library's modules in this process, as elaborating a file that imports them does. -/
+unsafe def check : IO (Array Rejection) := do
   let config ← checkConfig
   unless config.isEmpty do
     return config
@@ -633,29 +831,45 @@ def check : IO (Array Rejection) := do
   unless built.isEmpty do
     return built
   let codes ← checkCodes pkg.leanLibDir mods
+  let toolLoads ← checkToolLoads pkg.leanLibDir
   initSearchPath (← findSysroot) [pkg.leanLibDir]
-  let env ← importModules (mods.map fun m => { module := m }) {}
+  enableInitializersExecution
+  let env ← importModules (mods.map fun m => { module := m }) {} (loadExts := true)
+  let choices ← IO.ofExcept (importChoices env)
   let idxs := mods.filterMap env.getModuleIdx?
   let mut errs : Array Rejection := #[]
   let mut audited := 0
   let mut compiled : Array Name := #[]
+  let mut storedImports := false
   for (c, ci) in env.constants.map₁.toList do
     if let some idx := env.getModuleIdxFor? c then
       if idxs.contains idx then
         audited := audited + 1
-        errs := errs ++ (← auditConstant env env.header.moduleNames[idx.toNat]! c ci)
+        let mod := env.header.moduleNames[idx.toNat]!
+        errs := errs ++ (← auditConstant env mod c ci)
+        let (names, faults) := loadsOf choices ci
+        if c == storedImport then
+          storedImports := names
+        else
+          for fault in faults do
+            errs := errs.push { rule := "LOADED", message := s!"{mod}: {c} {fault}" }
         if (IR.findEnvDecl env c).isSome then
           compiled := compiled.push c
   if audited == 0 then
     errs := errs.push { rule := "AXIOMS", message := "the library's modules declare no constant" }
-  return errs ++ checkProcess env compiled ++ codes
+  unless storedImports do
+    errs := errs.push { rule := "LOADED", message :=
+      s!"the library declares no {storedImport} that imports modules, the one declaration the rule lets import without loading the extensions' state: read the rule's exception again" }
+  return errs ++ checkProcess env compiled ++ codes ++ toolLoads
 
 end Check
 
-/-- `unsafe` because reading a file's tests (`--tests-module`) runs Lean's frontend, which imports
-the file's modules with their environment extensions only after `enableInitializersExecution`,
-which is `unsafe`: it lets importing run the `initialize` declarations of the imported modules, as
-elaborating them did. -/
+/-- `unsafe` because every import this program makes loads the environment extensions' state: the
+checks' import of the library's modules (`Check.check`), and Lean's frontend where it reads a file's
+tests (`--tests-module`) or what a file imports (`--loads`). Lean allows that only after
+`enableInitializersExecution`, which is `unsafe`: it lets an import run the `initialize`
+declarations of the imported modules in this process, as Lean does when it elaborates a file that
+imports them. -/
 public unsafe def main (args : List String) : IO UInt32 := do
   match args with
   | ["--tests"] =>
@@ -665,9 +879,12 @@ public unsafe def main (args : List String) : IO UInt32 := do
   | ["--tests-module", file, out] =>
     Check.moduleTests file out
     return 0
+  | ["--loads", file, libDir, out] =>
+    Check.fileLoads file libDir out
+    return 0
   | [] =>
     let errs ← Check.check
     for e in errs do
       IO.println s!"[{e.rule}] {e.message}"
     return if errs.isEmpty then 0 else 1
-  | _ => throw <| IO.userError "usage: lean --run tools/check.lean [--tests | --tests-module <file> <out>]"
+  | _ => throw <| IO.userError "usage: lean --run tools/check.lean [--tests | --tests-module <file> <out> | --loads <file> <libDir> <out>]"

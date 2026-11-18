@@ -26,7 +26,8 @@ environment, that a declaration depends on no such attestation.
   names is not followed. It can still rest on an axiom, and prove `False` from `sorry` for a
   declaration that does name the constructor's type to use, so the axioms it rests on are those
   Lean's `collectAxioms` reports for it (`axiomsIn`), which for an imported declaration Lean
-  computed when it exported the declaration's module.
+  computed when it exported the declaration's module, and reads from that record where the
+  environment's extensions are loaded.
 * **The procedure** (`decide`): cone exclusion's closure (`Cone.exclude`) from a first declaration
   and a list of the rest, so that its scope is never empty, refusing at the first reached name
   that, in a module that can hold an attestation, names the constructor in its statement or value
@@ -37,7 +38,7 @@ environment, that a declaration depends on no such attestation.
   `decide_eq_none_iff` states what it decides, `verified_of_decide_eq_none` that an acceptance
   leaves no reached attestation unread, and `mem_leanAxioms_of_decide_eq_none` and
   `axioms_mem_leanAxioms_of_decide_eq_none` that it leaves no axiom but Lean's three.
-* **In a Lean environment** (`audit`, `report`, `requireCodes`): `audit`, given a first
+* **In a Lean environment** (`audit`, `auditLoaded`, `report`, `requireCodes`): `audit`, given a first
   declaration and a list of the rest as `decide` is, collects the reached declarations that name the
   constructor, reads each with `Declared.checkAttestation`, names for each it refuses the type it
   attests and the instances of `HasCode` or `Covered` that depend on it, and then decides with
@@ -50,6 +51,44 @@ environment, that a declaration depends on no such attestation.
   depend on a bound variable; Lean's pretty printer renders those families with binder types.
   Carrier recognition uses Lean's `isClass?`, as instance registration does, so reducible aliases
   of either class, including aliases hiding quantifiers, are recognized (`isCarrier_eq`).
+* **Where the audit runs** (`runsIn`, `runsIn_eq_none_iff`, `audit_eq`): `audit` is a program of
+  Lean's `MetaM`, so whoever runs it supplies the environment. It asks nothing of one in which Lean
+  does not record the library's two classes as classes, where the state of Lean's environment
+  extensions is not loaded: it throws an error that says so. The next section says which state
+  each of its questions reads.
+
+## What the audit asks of the environment
+
+Most of the audit's questions are answered from the state of Lean's environment extensions, the
+tables Lean's elaborator keeps beside the constants. That state exists only where the environment
+was made with it: Lean's elaboration of a file loads it for the modules the file imports
+(`Lean/Elab/Import.lean` 159, read at Lean v4.35.0, as is every line cited here), and a program
+that imports modules itself gets it only from `importModules` given `loadExts := true`, as
+`LeanIntent.Imported.loaded` gives it. Lean's plain import leaves every extension's state as it
+starts and reports nothing (`Lean/Environment.lean` 2428-2432).
+
+| Question | The extension state that answers it | What loads it |
+|---|---|---|
+| a declaration, its module and the modules each module imports (`lookupIn`, `relevantIn`, `importers`, `generatedBy`) | none: the constant map and the modules' headers | every import builds them |
+| whether an attestation is the handler's (`Declared.checkAttestation`, with `Declared.standsDecl`): Lean's `whnf`, `isDefEq`, `inferType` and elaborator, as the handler runs them when it writes one, then Lean's kernel for each equality | whichever states those consult, as in the `lean` process that ran the handler: reducibility, classes and instances, matchers, projections and structures among them. The kernel's equalities read none | `finalizePersistentExtensions` (`Environment.lean` 1976-2007), for every persistent extension registered in the process, when the import is given `loadExts := true` |
+| how a refused attestation's type and a carrier's type print (`diagnosticType`, Lean's `ppExpr`) | the states that hold notation and the pretty printer's own | the same |
+| whether a declaration is a carrier (`isCarrier`, Lean's `isClass?`) | the class extension's: `isClass` reads the map its state holds (`Lean/Class.lean` 70-78), built from the entries of every imported module (line 73) | the same |
+| the axioms a declaration outside the modules that can name the constructor rests on (`axiomsIn`, Lean's `collectAxioms`) | the state of the extension in which Lean records each declaration's axioms when it exports a module (`Lean/Util/CollectAxioms.lean` 120-124 and 149-154); for a declaration with no record there, such as one a `module` file keeps private, the declarations' bodies | the same; with that state unloaded `collectAxioms` finds no record and walks every body instead |
+
+`audit` tests the one of these states it can test exactly. Before it asks anything else, it
+decides whether it runs in the current environment (`runsIn`, `audit_eq`): only in one that imports
+the module declaring `Ty.Stands` and in which Lean's class extension records `HasCode` and
+`Covered` as classes (`runsIn_eq_none_iff`, `CarriersKnown`). Otherwise it throws an error that
+says which of the two fails. Both classes are declared by the module that declares `Ty.Stands`, so
+the class extension records them wherever that module is imported with the extension's state
+loaded, and does not where the state was left as it starts, since it starts empty. In such an
+environment the question whether a declaration is a carrier would be answered no for every
+declaration, and each refusal would say that no instance depends on the refused attestation.
+
+The test reads one extension. That the others are loaded where it is rests on Lean loading all of
+them or none: one branch on `loadExts` runs `finalizePersistentExtensions` over every registered
+persistent extension (`Environment.lean` 2404-2405). That, and that nothing but an import gave the
+class extension those two entries, is trusted.
 
 A refused attestation is one of three kinds. A hand-written instance, or a proof Lean abstracts out
 of one (`inst._proof_1`), that applies the constructor with a code or isomorphism other than the
@@ -92,6 +131,14 @@ What the theorems do not reach, and what is trusted:
 * That Lean's compiler runs these definitions as defined: the theorems are about the definitions.
 * That Lean's `isClass?` recognizes class types: `isCarrier_eq` specifies the call and how its
   result selects carriers, not the correctness of Lean's reduction and class recognition.
+* That the state of every environment extension is loaded where Lean records the two carrier
+  classes as classes, which is what `audit` tests before it asks anything else; and that Lean's
+  monad runs that test first, as `audit_eq` writes it.
+* Where a program imports the modules it audits (`LeanIntent.Imported.loaded`, as
+  `tools/codes.lean` does), that no `initialize` declaration of those modules was written to defeat
+  the audit: loading the extensions' state runs them in the program's process, where one could end
+  it with the status of an acceptance. The audit already trusts, in the same way, the code a build
+  of those modules ran.
 -/
 
 public section
@@ -275,7 +322,9 @@ instance : MonadEnv EnvM where
   modifyEnv := modify
 
 /-- The axioms that Lean's `collectAxioms` reports the declaration `c` of `env` rests on: for an
-imported declaration, those Lean recorded when it exported the declaration's module. -/
+imported declaration, those Lean recorded when it exported the declaration's module, where the
+state of the extension that holds the record is loaded and holds one for `c`; otherwise those it
+finds by following the declarations' bodies, down to declarations it holds a record of. -/
 @[expose] def axiomsIn (env : Environment) (c : Name) : Array Name :=
   (collectAxioms c : EnvM (Array Name)).run' env
 
@@ -352,6 +401,49 @@ def diagnosticType (α : Expr) : MetaM String := withOptions
       `pp.letVarTypes true) do
   return toString (← ppExpr α)
 
+/-- `CarriersKnown env`: Lean's class extension records both carrier classes, `HasCode` and
+`Covered`, as classes in `env`. It does in every environment that imports the module declaring
+them with the state of its environment extensions loaded, and in none whose extensions were left in
+their initial state, in which the class extension holds no class. -/
+@[expose] def CarriersKnown (env : Environment) : Prop :=
+  isClass env ``HasCode = true ∧ isClass env ``Covered = true
+
+/-- Decides `CarriersKnown`. -/
+@[expose] def carriersKnown (env : Environment) : Bool :=
+  isClass env ``HasCode && isClass env ``Covered
+
+theorem carriersKnown_eq_true (env : Environment) :
+    carriersKnown env = true ↔ CarriersKnown env := by
+  simp [carriersKnown, CarriersKnown]
+
+/-- What `audit` reports where the state of the environment's extensions is not loaded. -/
+@[expose] def notLoaded : String :=
+  "the audit of declared types' codes does not run here: Lean does not record \
+    `LeanIntent.HasCode` and `LeanIntent.Covered` as classes in this environment, so the state of \
+    its environment extensions is not loaded, and what the audit asks Lean (whether a declaration \
+    is an instance, what a definition reduces to, how a type prints) would be answered from empty \
+    tables. A program that imports the modules it audits imports them with \
+    `LeanIntent.Imported.loaded`, or with `importModules` given `loadExts := true` after \
+    `enableInitializersExecution`"
+
+/-- Why the audit does not run in `env`, when it does not: `env` does not import the module that
+declares `Ty.Stands`, so the audit has no modules to follow from; or Lean does not record the
+carrier classes as classes in it (`CarriersKnown`), so the state of its extensions is not loaded.
+`none` where the audit runs. -/
+@[expose] def runsIn (env : Environment) : Option String :=
+  if (env.getModuleIdxFor? ``Ty.Stands).isNone then
+    some "the audit of declared types' codes runs in a module that imports `LeanIntent.Degenerate`"
+  else if carriersKnown env then none
+  else some notLoaded
+
+/-- **Where the audit runs**: exactly in an environment that imports the module declaring
+`Ty.Stands` and in which Lean records both carrier classes as classes. -/
+theorem runsIn_eq_none_iff (env : Environment) :
+    runsIn env = none ↔ (env.getModuleIdxFor? ``Ty.Stands).isSome = true ∧ CarriersKnown env := by
+  unfold runsIn
+  cases h : (env.getModuleIdxFor? ``Ty.Stands) <;> by_cases hk : carriersKnown env = true <;>
+    simp_all [← carriersKnown_eq_true]
+
 /-- An attestation the audit refuses: the declaration `decl` that holds it, the types it applies
 the constructor to with their enclosing binders (none only for an unapplied constructor), why it
 is not the handler's, and the reached instances of `HasCode` or `Covered` that depend on `decl`,
@@ -372,7 +464,8 @@ structure Outcome where
   refusal? : Option (Refusal × Option (Array Name))
 
 /-- The audit of the declarations `first :: rest` in the current environment, a scope that is never
-empty. It collects the reached declarations, through `Follows`, that name the private constructor
+empty, where `audit` runs it: in an environment whose extensions' state is loaded (`runsIn`). It
+collects the reached declarations, through `Follows`, that name the private constructor
 of `Ty.Stands` that admits a declared type and are not among those Lean generates for `Ty.Stands`;
 reads each with `Declared.checkAttestation`; and decides with `decide`, the verified attestations
 being exactly those it read as the handler's. Returns the scope with a finding for each attestation
@@ -384,7 +477,7 @@ of whether a declaration that depends on it is a carrier and to the printing of 
 type, each counted from where it starts (`withCurrHeartbeats`), and not to the audit as a whole. The collection before them is no
 elaboration: it takes steps in proportion to the declarations reached, with the library, and Lean
 would count them against the first reading. -/
-def audit (first : Name) (rest : List Name) : MetaM Outcome := do
+def auditLoaded (first : Name) (rest : List Name) : MetaM Outcome := do
   let env ← getEnv
   let ctor ← Declared.standsDecl
   let some m := env.getModuleIdxFor? ``Ty.Stands
@@ -461,6 +554,25 @@ def audit (first : Name) (rest : List Name) : MetaM Outcome := do
     if relevant c then none else some ((axiomsIn env c).filter fun a => !leanAxioms.contains a)
   let refusal? := refusal?.map fun r => (r, match r with | .impl c => outside c | _ => none)
   return { first, rest, findings, refusal? }
+
+/-- **The audit of the declarations `first :: rest` in the current environment**, a scope that is
+never empty: `auditLoaded`, where the audit runs (`runsIn`), and otherwise an error saying why it
+does not, thrown before anything else is asked of the environment. -/
+def audit (first : Name) (rest : List Name) : MetaM Outcome := do
+  if let some why := runsIn (← getEnv) then
+    throwError why
+  auditLoaded first rest
+
+/-- **The audit asks nothing of an environment it does not run in.** Its first act is `runsIn`'s
+decision on the current environment, and it reads the declarations only where that decision is to
+run (`runsIn_eq_none_iff`). This specifies the request; that Lean's monad runs it in this order is
+trusted with Lean. -/
+theorem audit_eq (first : Name) (rest : List Name) :
+    audit first rest = (do
+      if let some why := runsIn (← getEnv) then
+        throwError why
+      auditLoaded first rest) := by
+  rfl
 
 /-- What the audit reports: a line for each finding, and one for the refusal of `decide` unless it
 names a declaration a finding already names. Empty exactly when the audit accepts. -/

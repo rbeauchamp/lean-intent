@@ -1,7 +1,9 @@
 module
 
 import LeanIntent.CodeAudit
+import LeanIntent.Imported
 meta import LeanIntent.CodeAudit
+meta import LeanIntent.Imported
 
 /-!
 # `codes`: the audit of declared types' codes over the library
@@ -10,29 +12,39 @@ meta import LeanIntent.CodeAudit
 
     lean --run tools/codes.lean <module>...
 
-with `LEAN_PATH` naming the library's build, so that Lean finds `LeanIntent.CodeAudit` and the
-modules it is given. It is a `module` file: `main` is public, and `LeanIntent.CodeAudit` is imported
-a second time with `meta`, since Lean loads the compiled code of an imported module, which
-`lean --run` runs, only where the import says `meta`. It imports those modules and runs
-`LeanIntent.CodeAudit.audit` from every constant they declare, printing one line for each reason the
-audit refuses (`LeanIntent.CodeAudit.report`). It exits with status `0` when the audit accepts,
-having printed nothing; `1` when it refuses, or when the modules declare no constant, since an audit
-of nothing would accept anything, having printed to standard output a line for each reason; and `2`
-when it cannot run: any error raised in `main` (its arguments, a module Lean cannot import, an error
-the audit throws, a failure to print) is caught and printed to standard error. Lean ends a program
-whose `main` raises an error with status `1`, which would read as a refusal, so `main` never lets
-one escape.
+with `LEAN_PATH` naming the library's build, so that Lean finds `LeanIntent.CodeAudit`,
+`LeanIntent.Imported` and the modules it is given. It is a `module` file: `main` is public, and each
+of the two is imported a second time with `meta`, since Lean loads the compiled code of an imported
+module, which `lean --run` runs, only where the import says `meta`. It imports the modules it is
+given and runs `LeanIntent.CodeAudit.audit` from every constant they declare, printing one line for
+each reason the audit refuses (`LeanIntent.CodeAudit.report`).
+
+It imports them with every environment extension's state loaded (`LeanIntent.Imported.loaded`),
+because the audit asks Lean what only that state answers: whether a declaration is an instance of a
+class, what a definition reduces to, how a type prints and which axioms Lean recorded for a
+declaration. `LeanIntent.CodeAudit`'s module comment names the state each question reads. Lean's
+plain import leaves that state as it starts, and the audit then names no instance in any refusal,
+with no error. Loading runs the `initialize` declarations of the modules given, in this process:
+`LeanIntent.Imported`'s module comment says what that admits, and `main` is `unsafe` because that
+import is.
+
+It exits with status `0` when the audit accepts, having printed nothing; `1` when it refuses, or
+when the modules declare no constant, since an audit of nothing would accept anything, having
+printed to standard output a line for each reason; and `2` when it cannot run: any error raised in
+`main` (its arguments, a module Lean cannot import, an error the audit throws, a failure to print)
+is caught and printed to standard error. Lean ends a program whose `main` raises an error with
+status `1`, which would read as a refusal, so `main` never lets one escape.
 -/
 
 open Lean
 
-public def main (args : List String) : IO UInt32 := do
+public unsafe def main (args : List String) : IO UInt32 := do
   try
     let mods := args.toArray.map String.toName
     if mods.isEmpty || mods.any (·.isAnonymous) then
       throw <| IO.userError "usage: lean --run tools/codes.lean <module>..."
     initSearchPath (← findSysroot)
-    let env ← importModules (mods.map fun m => { module := m }) {}
+    let env ← LeanIntent.Imported.loaded mods
     let idxs := mods.filterMap env.getModuleIdx?
     let roots := env.constants.map₁.toList.filterMap fun (c, _) =>
       (env.getModuleIdxFor? c).bind fun i => if idxs.contains i then some c else none

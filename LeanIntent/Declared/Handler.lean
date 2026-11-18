@@ -616,8 +616,8 @@ def checkRecMaps (group : Array (Expr × Array GCtor)) (root i : Nat) (f : Expr)
         let mut r := 0
         for (fld, x) in c.fields.zip xs do
           let .ref l doms := fld | continue
-          -- `r < A`, proved by `decide` through `Nat.decLt`, built without instance resolution, which
-          -- an environment imported without its extensions' state does not offer.
+          -- `r < A`, proved by `decide` through `Nat.decLt`, built here without instance resolution,
+          -- so the term does not depend on the instances the environment offers.
           let lt := mkApp4 (mkConst ``LT.lt [Level.zero]) (mkConst ``Nat) (mkConst ``instLTNat)
             (mkNatLit r) aE
           let h := mkApp3 (mkConst ``of_decide_eq_true) lt (mkApp2 (mkConst ``Nat.decLt) (mkNatLit r) aE)
