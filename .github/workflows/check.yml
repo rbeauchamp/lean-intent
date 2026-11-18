@@ -1,7 +1,8 @@
 # Runs the repository's checks (tools/check.lean) on GitHub's machines when someone starts it by
 # hand. lean-intent has no CI: the local no-mistakes validation, whose Test step runs the same
 # checks (.no-mistakes.yaml, `commands.test`), is its merge gate, so no pull request or push starts
-# this workflow.
+# this workflow. A cloud session cannot run that validation; AGENTS.md says when one has started
+# this workflow by hand in its place.
 name: check
 
 on:
