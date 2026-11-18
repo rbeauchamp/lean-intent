@@ -1,4 +1,5 @@
-# Configuration of the no-mistakes pipeline that every change to lean-intent passes through.
+# Configuration of the no-mistakes pipeline that a change to lean-intent passes through on the
+# owner's machine. A cloud session cannot run it: AGENTS.md says what one has done in its place.
 #
 # `test` is no-mistakes' fixed name for one of its steps and for the key below; lean-intent itself
 # has no tests. Every claim the library makes about itself is a theorem Lean's kernel checks, and
