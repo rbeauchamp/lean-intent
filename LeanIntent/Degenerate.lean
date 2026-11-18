@@ -55,7 +55,7 @@ value, whose class would hold no projection. Each code carries the isomorphism t
 for its type and the proof that both are those the library fixes (`Ty.Stands`, `Sig.Stands`): the
 identity for a type built only from those `Ty` builds in, and for a type the project declares, the
 code and isomorphism its deriving handler writes from the declaration, which rests on what
-`LeanIntent.Declared` states. A subject is a value of `W`, carried back through that isomorphism from
+`LeanIntent.Declared.Handler` states. A subject is a value of `W`, carried back through that isomorphism from
 a value of the output type or from a projection (`Degenerate.constantSubject`,
 `Degenerate.projSubject`). A member stands for one such subject, or `.others` for many
 (`Degenerate.Is`), so no function takes a member and returns one subject: `Degenerate.reading` reads
@@ -515,7 +515,7 @@ constructor, which admits them, is private, and the deriving handler of `LeanInt
 reads them from the declaration, is the only code of the library that applies it. Lean's privacy
 binds names only, so that nothing else applies it is decided for a declaration by the audit of
 declared types' codes (`LeanIntent.CodeAudit`), and trusted where the audit is not run
-(`LeanIntent.Declared`). -/
+(`LeanIntent.Declared.Handler`). -/
 inductive Ty.Stands : (α : Type) → (t : Ty) → Iso α t.denote → Prop
   | builtin {α : Type} (t : Ty) (h : α = t.denote) : t.builtin = true → Ty.Stands α t (Iso.ofEq h)
   | list {α : Type} {t : Ty} {e : Iso α t.denote} :
@@ -679,7 +679,7 @@ standing for many subjects. -/
 /-- The constant subject is the constant function, carried to `W` through the isomorphism that
 `Sig.Stands` fixes: for a type built only from those `Ty` builds in, the identity, so that no code can
 mis-encode such a type; and for a type the project declares, the isomorphism its deriving handler
-writes from the declaration (`LeanIntent.Declared`, which states what that rests on). -/
+writes from the declaration (`LeanIntent.Declared.Handler`, which states what that rests on). -/
 theorem Degenerate.iso_constantSubject {W : Type} [c : Covered W] (v : c.sig.out.denote) :
     c.iso.to (Degenerate.constantSubject v : W) = Fn.const c.sig.out v c.sig.args :=
   c.iso.to_inv _

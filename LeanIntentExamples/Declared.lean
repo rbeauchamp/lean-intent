@@ -22,6 +22,11 @@ constant at each light, since `Light` has finitely many values, and the identity
 which the check reports (`afterGreen_verdicts`). The projections of a structure reach into the
 fields of its fields (`labelled_degenerate`).
 
+A type the module keeps to itself gets its code the same way, under private names (`reading_code`,
+`trail_empty`, `reading_degenerate`): `Reading` and `Trail` are marked `private`. A type of a
+`module` file that no `public section` holds, and that is not marked `public`, is private in the
+same way.
+
 The module imports `Init.Prelude` with `import all`, as a project's `module` file does where a proof
 reduces the code of a type it declares: deciding that two such codes are equal compares the types'
 names with `Lean.Name.beq`, whose body Lean's prelude does not expose.
@@ -164,6 +169,40 @@ then the projections onto the coordinates of the point, reached through the fiel
 theorem labelled_degenerate :
     (degenerate (Labelled → Nat)).map Degenerate.reading =
       [.subject fun _ => 0, .subject fun l => l.pos.x, .subject fun l => l.pos.y] :=
+  rfl
+
+/-! ## Types the module keeps to itself -/
+
+/-- A number read at a point, private to this module, as its code then is. -/
+private structure Reading where
+  /-- Where. -/
+  pos : Point
+  /-- The number read. -/
+  value : Nat
+  deriving LeanIntent.HasCode
+
+/-- The readings taken so far, latest first: a recursive type the module keeps to itself. -/
+private inductive Trail where
+  | start
+  | step (r : Reading) (rest : Trail)
+  deriving LeanIntent.HasCode
+
+/-- `Reading`'s code: its name, no parameter, and the chain of its two fields, the first coded by
+`Point`'s code. -/
+private theorem reading_code :
+    HasCode.code Reading = .decl ``Reading .unit (.prod (HasCode.code Point) (.prod .nat .unit)) :=
+  rfl
+
+/-- `Trail`'s empty value is `start`: its first base constructor, which has no field. -/
+private theorem trail_empty :
+    (HasCode.iso (α := Trail)).inv (HasCode.code Trail).empty = .start := rfl
+
+/-- The degenerate subjects of a function from readings to numbers: the constant at zero, then the
+projections onto the point's coordinates and onto the number read. -/
+private theorem reading_degenerate :
+    (degenerate (Reading → Nat)).map Degenerate.reading =
+      [.subject fun _ => 0, .subject fun r => r.pos.x, .subject fun r => r.pos.y,
+        .subject fun r => r.value] :=
   rfl
 
 end LeanIntentExamples.Declared

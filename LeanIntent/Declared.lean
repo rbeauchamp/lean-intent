@@ -2,7 +2,6 @@ module
 
 public import LeanIntent.Declared.Handler
 public meta import LeanIntent.Declared.Handler
-public meta import Lean.Elab.Deriving.Basic
 
 /-!
 # `deriving LeanIntent.HasCode`: the handler's registration

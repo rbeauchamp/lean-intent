@@ -2,7 +2,7 @@ module
 
 public import Lean
 public import LeanIntent.Confirmation
-public import LeanIntent.Render.Text
+public import LeanIntent.Render
 
 /-!
 # Reading a project's confirmations from the finished build

@@ -89,6 +89,26 @@ has a code. A type whose fields have no code yet gets one once its fields do; a 
 declaration that does not reach itself is coded as a structure is, once the types of its fields
 have codes.
 
+In a `module` file a type that is not public, because it is marked `private` or because no
+`public section` holds it and it is not marked `public`, has a private name, and so has everything
+the handler writes for it (`writtenName`). Lean's compiler reads the type of a `module` file's
+program twice, with the file's private scope and with the scope other modules see, and refuses the
+program when the two readings succeed and differ (`Lean.Compiler.LCNF.toLCNFType`). Where the scope
+other modules see holds the library's codes (`LeanIntent.Codes`), because the file reaches them
+through a `public import`, of the library or of a module that imports it publicly, the readings
+differ for the isomorphism, whose type reduces through the private code: that scope holds
+`Ty.denote` and not the code. Where it does not hold them, the second reading fails, which Lean
+passes over. So the handler writes for such a type as a `noncomputable section` does: Lean compiles
+what its compiler accepts, which is everything in the second case, and in the first leaves the
+isomorphism, the instance and whatever else it refuses without compiled code, with no error.
+Statements and proofs reduce them as they reduce a public type's, in both cases. A type marked
+`meta` is the exception: Lean compiles a declaration marked `meta` or reports why it cannot, in any
+section.
+
+In a `module` file, one command that derives a public type together with one that is not is
+refused: Lean runs the handler for both in the private scope, so the public type's code would be
+private too.
+
 What the handler's output rests on: that it reads the constructors and their fields in declaration
 order, and for a recursive type its group and recursive fields from Lean's recursor, which is its own
 code below and not checked by Lean's kernel; and that no other code applies the private constructor
@@ -226,14 +246,20 @@ def code (indVal : InductiveVal) (xs : Array Expr) (cs : List Ctor) : TermElabM 
       | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: the type `{t}` of one of its fields has no code; derive `LeanIntent.HasCode` for it first if the project declares it"
     return inst
 
-/-- Adds the definition `name := fun binders => value` of type `∀ binders, type`. -/
+/-- Adds the definition `name := fun binders => value` of type `∀ binders, type`, or the theorem.
+A definition follows the scope as Lean has one written there follow it (`compileDecl` of Lean's
+`Lean/Elab/PreDefinition/Basic.lean`): in a `meta` scope it is marked `meta`, and in a `noncomputable section`
+that is not `meta`, what Lean's compiler refuses of it is left without compiled code, with no
+error. -/
 def addFun (name : Name) (binders : Array Expr) (type value : Expr) (thm : Bool) : TermElabM Unit := do
   let type ← mkForallFVars binders type
   let value ← mkLambdaFVars binders value
   if thm then
     addDecl (.thmDecl { name, levelParams := [], type, value })
   else
-    withExporting <| addAndCompile <| .defnDecl
+    let isMeta := (← read).isMetaSection
+    withExporting <| addAndCompile (logCompileErrors := !(← read).isNoncomputableSection || isMeta)
+        (markMeta := isMeta) <| .defnDecl
       { name, levelParams := [], type, value, hints := .abbrev, safety := .safe }
     setReducibleAttribute name
 
@@ -782,9 +808,20 @@ def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String ×
         return ← fail s!"its isomorphism does not take `{c.name}` to alternative {j} holding its fields, each carried through its own type's isomorphism"
     return (some ty, none)
 
+/-- The name Lean gives a declaration the handler writes as a command under the name `n`, which is
+also the name under which the handler adds one directly, so that the two agree. In a `module` file a
+type that is not `public` has a private name, Lean then runs the handler in the private scope
+(`Lean.Elab.applyDerivingHandlers`), and a command there that states no visibility declares a
+private name (`Lean.Elab.applyVisibility`); everywhere else it declares `n`. -/
+def writtenName : CommandElabM (Name → Name) := do
+  let env ← getEnv
+  return if env.header.isModule && !(← getScope).isPublic then mkPrivateName env else id
+
 /-- Writes the proof that the code `codeName` stands for the declaration `declName` through the
 isomorphism `isoName`, through the private constructor of `Ty.Stands` that admits a declared type,
-and the instance of `HasCode` that carries the three. -/
+and the instance of `HasCode` that carries the three. `codeName`, `isoName` and `standsName` are the
+names Lean knows the three by (`writtenName`); `instName` is the name the instance is written
+under. -/
 def mkStandsAndInstance (declName : Name) (indVal : InductiveVal) (instName codeName isoName standsName : Name)
     (binders : Array (TSyntax ``Lean.Parser.Term.bracketedBinder)) (args : Array Term) (tStx : Term) :
     CommandElabM Unit := do
@@ -859,6 +896,7 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
   let algName := instName ++ `alg
   let toGName := instName ++ `toG
   let toInvName := instName ++ `toInv
+  let act ← writtenName
   -- The name relative to the current namespace, by which a function of a mutual block refers to
   -- another and a theorem to itself.
   let ns ← getCurrNamespace
@@ -873,19 +911,19 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
       let some inst ← synthInstance? (mkApp (mkConst ``HasCode) x)
         | throwError "LeanIntent.HasCode: a parameter of `{.ofConstName declName}` has no code"
       return mkApp2 (mkConst ``HasCode.code) x inst
-    addFun baseName binders (mkConst ``Ty) b false
-    addFun groupName binders (mkConst ``Ty) g false
-    addFun refsName #[] (mkConst ``Ty) r false
-    let rep := recRep (mkAppN (mkConst baseName) binders) (mkAppN (mkConst groupName) binders)
-      (mkConst refsName) root i
-    addFun codeName binders (mkConst ``Ty) (mkApp3 (mkConst ``Ty.decl) (toExpr indVal.name)
+    addFun (act baseName) binders (mkConst ``Ty) b false
+    addFun (act groupName) binders (mkConst ``Ty) g false
+    addFun (act refsName) #[] (mkConst ``Ty) r false
+    let rep := recRep (mkAppN (mkConst (act baseName)) binders) (mkAppN (mkConst (act groupName)) binders)
+      (mkConst (act refsName)) root i
+    addFun (act codeName) binders (mkConst ``Ty) (mkApp3 (mkConst ``Ty.decl) (toExpr indVal.name)
       (chainCode ps) rep) false
     let fam ← withLocalDeclD `k (mkConst ``Nat) fun k => do
       let mut body := Lean.mkConst ``Empty
       for j in (List.range group.size).reverse do
         body ← mkAppOptM ``cond #[none, mkApp2 (mkConst ``Nat.beq) k (toExpr j), group[j]!.1, body]
       mkLambdaFVars #[k] body
-    addFun sortName binders (← mkArrow (mkConst ``Nat) (mkSort Level.one)) fam false
+    addFun (act sortName) binders (← mkArrow (mkConst ``Nat) (mkSort Level.one)) fam false
     let kb := (group[root]!.2.filter GCtor.isBase).size
     return (· , root) <| group.mapIdx fun k (entry : Expr × Array GCtor) => Id.run do
       let cs := entry.2
@@ -909,10 +947,10 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
     return #[← `(bracketedBinderF| {$a : Type}), ← `(bracketedBinderF| [$i : LeanIntent.HasCode $a])]
   let args := binderStx.flatMap fun (a, i) => #[a, i]
   let tStx ← `(@$(mkCIdent declName) $(binderStx.map (·.1))*)
-  let G ← `(@$(mkCIdent sortName) $args*)
-  let B ← `(@$(mkCIdent baseName) $args*)
-  let Gr ← `(@$(mkCIdent groupName) $args*)
-  let R : Term := mkCIdent refsName
+  let G ← `(@$(mkCIdent (act sortName)) $args*)
+  let B ← `(@$(mkCIdent (act baseName)) $args*)
+  let Gr ← `(@$(mkCIdent (act groupName)) $args*)
+  let R : Term := mkCIdent (act refsName)
   let iq : Term := quote i
   let rq : Term := quote root
   -- The trees of the group's `k`-th type, and the way to build each type's values from its nodes.
@@ -923,7 +961,7 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
     else `(LeanIntent.Ty.MuAlgOf $Gr $R (LeanIntent.Ty.muN $R) $G)
   let kId := mkIdent `k
   let famK := famTy kId
-  let fold ← `(LeanIntent.Ty.muFold $G (@$(mkCIdent baseInvName) $args*) (@$(mkCIdent algName) $args*))
+  let fold ← `(LeanIntent.Ty.muFold $G (@$(mkCIdent (act baseInvName)) $args*) (@$(mkCIdent (act algName)) $args*))
   let fin (n : Nat) : TermElabM Term := `(⟨$(quote n), of_decide_eq_true rfl⟩)
   -- The maps to the trees, their inverses' parts, and the proofs.
   let (toDefs, baseAlts, algAlts, invToDefs, toInvAlts) ← liftTermElabM do
@@ -973,7 +1011,7 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
         let prf ← match fieldPrfs with
           | [] => `(rfl)
           | p :: ps => ps.foldlM (fun acc q => `(congr $acc $q)) (← `(congrArg $ctorFn $p))
-        invToAlts := invToAlts.push (← `(matchAltExpr| | $pat => by rw [$(mkCIdent (toName k)):ident]; exact $prf))
+        invToAlts := invToAlts.push (← `(matchAltExpr| | $pat => by rw [$(mkCIdent (act (toName k))):ident]; exact $prf))
         -- `baseInv`, `alg` and `to_inv`.
         let eqLemma := mkIdent (`_root_ ++ toName k ++ Name.mkSimple s!"eq_{c.alt}")
         match c.role with
@@ -1043,7 +1081,7 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
           match $x:ident with $toAlts:matchAlt*))
       invToDefs := invToDefs.push (← `(command|
         theorem $(rel (invToName k)) $binders* ($x : $G $(quote k)) :
-            $fold ($(mkCIdent (toName k)) $x) = $x :=
+            $fold ($(mkCIdent (act (toName k))) $x) = $x :=
           match $x:ident with $invToAlts:matchAlt*))
     let nn := mkIdent `n
     algAlts := algAlts.push (← `(matchAltExpr| | $nn + $(quote K), c, _, _ => c.elim0))
@@ -1060,23 +1098,23 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
   let toGAlts ← liftTermElabM do
     let mut alts := #[]
     for k in [0:K] do
-      alts := alts.push (← `(matchAltExpr| | $(quote k) => @$(mkCIdent (toName k)) $args*))
+      alts := alts.push (← `(matchAltExpr| | $(quote k) => @$(mkCIdent (act (toName k))) $args*))
     alts.push <$> `(matchAltExpr| | _ + $(quote K) => fun e => nomatch e)
   elabCommand (← `(command|
     @[expose] def $(mkIdent (`_root_ ++ toGName)) $binders* ($kId : Nat) : $G $kId → $famK :=
       match $kId:ident with $toGAlts:matchAlt*))
   elabCommand (← `(command|
     theorem $(rel toInvName) $binders* {$kId : Nat} (v : $famK) :
-        @$(mkCIdent toGName) $args* $kId ($fold v) = v :=
+        @$(mkCIdent (act toGName)) $args* $kId ($fold v) = v :=
       match $kId:ident, v with $toInvAlts:matchAlt*))
   elabCommand (← `(command|
     @[expose] def $(mkIdent (`_root_ ++ isoName)) $binders* :
-        LeanIntent.Iso $tStx (LeanIntent.Ty.denote (@$(mkCIdent codeName) $args*)) where
-      to := @$(mkCIdent (toName i)) $args*
+        LeanIntent.Iso $tStx (LeanIntent.Ty.denote (@$(mkCIdent (act codeName)) $args*)) where
+      to := @$(mkCIdent (act (toName i))) $args*
       inv := $fold
-      inv_to := @$(mkCIdent (invToName i)) $args*
-      to_inv := @$(mkCIdent toInvName) $args* $iq))
-  mkStandsAndInstance declName indVal instName codeName isoName standsName binders args tStx
+      inv_to := @$(mkCIdent (act (invToName i))) $args*
+      to_inv := @$(mkCIdent (act toInvName)) $args* $iq))
+  mkStandsAndInstance declName indVal instName (act codeName) (act isoName) (act standsName) binders args tStx
 
 /-- Writes the code, the isomorphism, the proof that the code stands for the type, and the instance
 of `HasCode`, for the declaration named `declName`. -/
@@ -1098,12 +1136,13 @@ def mkHasCode (declName : Name) : CommandElabM Unit := do
   let codeName := instName ++ `code
   let isoName := instName ++ `iso
   let standsName := instName ++ `stands
+  let act ← writtenName
   -- The code, and the number of fields of each constructor.
   let shapes ← liftTermElabM <| withParams indVal fun xs binders tApp => do
     if (← synthInstance? (mkApp (mkConst ``HasCode) tApp)).isSome then
       throwError "LeanIntent.HasCode: `{.ofConstName declName}` already has a code"
     let cs ← ctors indVal xs
-    addFun codeName binders (mkConst ``Ty) (← code indVal xs cs) false
+    addFun (act codeName) binders (mkConst ``Ty) (← code indVal xs cs) false
     return cs.map fun c => (c.name, c.fields.size)
   -- The isomorphism, elaborated by Lean and checked by its kernel.
   let k := shapes.length
@@ -1138,20 +1177,31 @@ def mkHasCode (declName : Name) : CommandElabM Unit := do
     return (toAlts, invAlts, invToAlts, toInvAlts)
   elabCommand (← `(command|
     @[expose] def $(mkIdent (`_root_ ++ isoName)) $binders* :
-        LeanIntent.Iso $tStx (LeanIntent.Ty.denote (@$(mkCIdent codeName) $args*)) where
+        LeanIntent.Iso $tStx (LeanIntent.Ty.denote (@$(mkCIdent (act codeName)) $args*)) where
       to t := match t with $toAlts:matchAlt*
       inv r := match r with $invAlts:matchAlt*
       inv_to t := match t with $invToAlts:matchAlt*
       to_inv r := match r with $toInvAlts:matchAlt*))
-  mkStandsAndInstance declName indVal instName codeName isoName standsName binders
+  mkStandsAndInstance declName indVal instName (act codeName) (act isoName) (act standsName) binders
     (args.map fun a => ⟨a.raw⟩) tStx
 
-/-- The deriving handler of `HasCode`. -/
+/-- The deriving handler of `HasCode`. For types that are not public in a `module` file, whose
+codes are private (`writtenName`), it writes as a `noncomputable section` does, so that what Lean's
+compiler refuses of a private code's programs is left without compiled code where it would be an
+error. It refuses a command that derives a public type together with one that is not, in a `module`
+file: Lean runs the handler for all of a command's types in the private scope when one of them is
+private (`Lean.Elab.applyDerivingHandlers`), which would make the public type's code private. -/
 def handler (declNames : Array Name) : CommandElabM Bool := do
   unless ← declNames.allM isInductive do
     return false
-  for n in declNames do
-    mkHasCode n
+  if (← getEnv).header.isModule && declNames.any isPrivateName then
+    let pub := declNames.toList.filter (!isPrivateName ·)
+    unless pub.isEmpty do
+      throwError "LeanIntent.HasCode: {MessageData.andList (pub.map fun n => m!"`{.ofConstName n}`")} cannot be derived by this command: the command also derives a type that is not public, so Lean would make every code it writes private; derive the public types in a command of their own"
+  let hidden := (← getEnv).header.isModule && !(← getScope).isPublic
+  withScope (fun sc => { sc with isNoncomputable := sc.isNoncomputable || hidden }) do
+    for n in declNames do
+      mkHasCode n
   return true
 
 end LeanIntent.Declared

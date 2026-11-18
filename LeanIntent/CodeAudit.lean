@@ -1,7 +1,7 @@
 module
 
 public import LeanIntent.Cone
-public import LeanIntent.Declared.Handler
+public import LeanIntent.Declared
 public import Lean.Util.CollectAxioms
 
 /-!
@@ -73,7 +73,7 @@ What the theorems do not reach, and what is trusted:
   kernel, which fixes them by structural recursion over the group (`Declared.checkRecMaps`). The
   handler runs it on what it writes and fails rather than write a code it refuses, so the two agree
   on every type the handler covers. That the handler reads the declaration in order stays trusted,
-  as `LeanIntent.Declared` states: the audit derives the code through the same functions, not a
+  as `LeanIntent.Declared.Handler` states: the audit derives the code through the same functions, not a
   second reading.
 * That a declaration whose dependencies name the constructor only in attestations and rest on no
   axiom but Lean's three proves `Ty.Stands` of a declared type's code only for a code and
@@ -379,8 +379,9 @@ being exactly those it read as the handler's. Returns the scope with a finding f
 it refuses and the refusal of `decide` (`Outcome`).
 
 Lean's limit on the steps a metaprogram takes (`maxHeartbeats`) applies to each reading of an
-attestation and to each refusal's diagnostics, counted from where each starts
-(`withCurrHeartbeats`), and not to the audit as a whole. The collection before them is no
+attestation and, for one the audit refuses, to the printing of the types it attests, to each test
+of whether a declaration that depends on it is a carrier and to the printing of each carrier's
+type, each counted from where it starts (`withCurrHeartbeats`), and not to the audit as a whole. The collection before them is no
 elaboration: it takes steps in proportion to the declarations reached, with the library, and Lean
 would count them against the first reading. -/
 def audit (first : Name) (rest : List Name) : MetaM Outcome := do
