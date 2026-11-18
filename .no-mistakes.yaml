@@ -58,13 +58,17 @@
 # toolchain changes or the machine changes, and raise a limit before three times a measured
 # duration passes it.
 #
-# Since the change that added the rule LOADED, the check imports the library's modules with the
-# state of Lean's environment extensions loaded, so Lean's collector of axioms reads what it
-# recorded for each module when it exported it instead of following every body, and the audits no
-# longer take most of the check's time. On 2026-11-18, on the same machine, each once, under
-# `nice -n 19`, through `no-mistakes admit` beside other admitted work, in a checkout with nothing
-# built and an empty artifact cache: the check took 374 seconds on the commit before that change
-# (ddd3d5f) and 54 seconds on the change. The limits above were kept as they were.
+# Since the change that added the rules LOADED and READERS, the check imports the library's
+# modules with the state of Lean's environment extensions loaded, so Lean's collector of axioms
+# reads what it recorded for each module when it exported it instead of following every body, and
+# the audits no longer take most of the check's time. On 2026-11-18, on the same machine, each
+# once, under `nice -n 19`, through `no-mistakes admit` beside other admitted work, in a checkout
+# with nothing built and an empty artifact cache: the check took 374 seconds on the commit before
+# that change (ddd3d5f) and 53 and 54 seconds on the change. Its limit of 1020 seconds was kept.
+# The listing's limit was raised from 420 to 480 seconds. Each of the listing's processes
+# elaborates tools/check.lean before its file, and that change lengthened it: on the change the
+# listing took 135 and 155 seconds as the Test command runs it, in a built checkout, at a load
+# average of 12 to 14, and three times the longer is 465, rounded up to a whole minute.
 test:
   instructions: |
     On lean-intent this step is verification. A change's claims are established by machine-checked proof, by derivation and by reading; lean-intent has no running product to drive.
@@ -96,10 +100,10 @@ test:
       lean_files=$(git ls-files -- '*.lean')
       if [ -n "$lean_files" ]; then
         status=0
-        no-mistakes admit --memory 6GiB --limit "none; measured peak 4.76 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests || status=$?
+        no-mistakes admit --memory 6GiB --limit "none; measured peak 4.76 GiB" -- gtimeout --foreground --verbose --kill-after=30 480 lean --run tools/check.lean --tests || status=$?
         case $status in
-          124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 420 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
-          137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 420 seconds and did not stop within 30 seconds of TERM" >&2 ;;
+          124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 480 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
+          137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 480 seconds and did not stop within 30 seconds of TERM" >&2 ;;
         esac
         exit "$status"
       fi
@@ -146,10 +150,10 @@ commands:
     esac
     [ "$status" -eq 0 ] || exit "$status"
     mkdir -p .lake
-    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.76 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests > .lake/tests-listing || status=$?
+    no-mistakes admit --memory 6GiB --limit "none; measured peak 4.76 GiB" -- gtimeout --foreground --verbose --kill-after=30 480 lean --run tools/check.lean --tests > .lake/tests-listing || status=$?
     case $status in
-      124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 420 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
-      137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 420 seconds and did not stop within 30 seconds of TERM" >&2 ;;
+      124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 480 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
+      137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 480 seconds and did not stop within 30 seconds of TERM" >&2 ;;
     esac
     [ "$status" -eq 0 ] || exit "$status"
     if [ -s .lake/tests-listing ]; then
