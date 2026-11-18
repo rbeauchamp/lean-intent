@@ -31,8 +31,8 @@ which holds whatever else is read and the build lists). Each change below is ref
   in a scratch module the build does not list, beside the value the build does list: the value and
   the theorem are each refused by name (`scratchValue_refused`);
 * a comparison theorem declared in a module the build does not list, such as a scratch file
-  (`scratch_refused`), and a theorem of the very name of one in a built module, declared in such a
-  module instead, which the decision reads by the module that declares it, never by its name
+  (`scratch_refused`), and a theorem of `sorting_narrower`'s name that Lean's environment records
+  under such a module, which the decision reads by the module recorded, never by the name
   (`sameName_refused`);
 * the deliverable, or the value recording its implementation, declared in a module the build does
   not list (`deliverableUnbuilt_refused`, `implementationUnbuilt_refused`);
@@ -149,8 +149,10 @@ theorem scratchValue_refused :
         .unbuilt `scratchRequired `scratch_narrower `LeanIntentExamples.Scratch] := by
   decide +kernel
 
-/-- The entry as the build would show it if the theorem of `sorting_narrower`'s name were declared
-in the scratch module, which an environment importing that module records. -/
+/-- The entry as the build would show it where Lean's environment records the theorem of
+`sorting_narrower`'s name under the scratch module, which it does where that module declares the
+theorem and no module imported before it declares the name or holds it as an auxiliary name of its
+compiled code (`docs/required-theorems.md`, the decision on where a theorem lies). -/
 @[expose] def sameNameEntry : Entry :=
   { entry with theorems := [.thm ⟨`LeanIntentExamples.Scratch, ``sorting_narrower⟩] }
 

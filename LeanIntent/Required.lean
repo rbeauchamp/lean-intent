@@ -65,16 +65,31 @@ The decisions this module makes, each on the owner's behalf:
   Lean's elaborator abstracts it into an auxiliary theorem of the value's own module, the value
   holds that theorem's constant, and it is read as that theorem.
 * **Where a theorem lies is the module Lean's environment records as declaring it**, compared with
-  the module names the build lists, never the theorem's name: a name a file the build does not list
-  also declares cannot pass for the theorem, since one environment holds one declaration of a name.
+  the module names the build lists, never the theorem's name. Lean refuses to import two modules
+  that declare one name, except where the two declarations have the same name, type and universe
+  parameters and are two theorems of the same mutual group, a theorem outside any mutual group and
+  a safe axiom, or two axioms of a type its test takes for a proposition; it then holds one of the
+  two, the theorem where the other is an axiom, and records the name under the first of those
+  modules in import order, as it records under a module the auxiliary names of that module's
+  compiled code (`throwAlreadyImported`, `subsumesInfo` and `finalizeImport` in Lean v4.35.0's
+  `src/Lean/Environment.lean`, lines 2069 to 2072, 2269 to 2284 and 2336 to 2348). So a theorem
+  whose recorded module the build does not list is refused: a theorem only such modules declare,
+  apart from the case the next paragraph names, and, until the duplicate is removed, one that such
+  a module and a listed module imported after it both declare. A theorem recorded under a listed
+  module that declares it is declared there with that name and statement.
+  `docs/required-theorems.md` sets the cases out.
 
 What this module does not establish: that a listed theorem states what the procedure asks of it,
 which review reads; that its proof rests only on axioms the project accepts, which a project's own
-gate audits, as it audits its other proofs; that Lean's kernel checked it, which the option
-`debug.skipKernelTC` skips; that every theorem the procedure requires is listed, since a theorem no
-value lists is not read, and a value in a source file that no module the environment holds imports
-is not read either; and that the module names given as the build's are those the project's proof
-check builds, which the gate reads from Lake (`LeanIntent.Required.Read.queryModules`).
+gate audits, as it audits its other proofs; that a module the build lists, recorded for a listed
+theorem's name, itself declares that theorem, where it declares the name only as an axiom or holds
+it only as an auxiliary name of its compiled code and a module imported after it declares the
+theorem, which Lean's environment then holds as a theorem of the listed module; that Lean's kernel
+checked a listed theorem's proof, which the option `debug.skipKernelTC` skips; that every theorem
+the procedure requires is listed, since a theorem no value lists is not read, and a value in a
+source file that no module the environment holds imports is not read either; and that the module
+names given as the build's are those the project's proof check builds, which the gate reads from
+Lake (`LeanIntent.Required.Read.queryModules`).
 -/
 
 public section
