@@ -76,9 +76,11 @@ a theorem Lean's kernel checks. A list of the wrong length is refused (`witnessV
 and a verdict of `false` on a member that meets the pair cannot be proved, so a meeting member is
 never passed. A type an argument of which holds a `LeanIntent.Clock` where no clock part reaches
 it, a declaration the class cannot read, has the one goal `False`, so no verdict about it can be
-proved (`not_witnessVerdicts_of_strayClock`). `reported W bs` lists the members the verdicts say meet
-the pair, which under proved verdicts are exactly those that do (`mem_reported`), and it is empty
-exactly when no trivial witness meets the pair (`reported_eq_nil_iff`).
+proved (`not_witnessVerdicts_of_strayClock`), and under proved verdicts the class holds the script
+on each `LeanIntent.Clock` an argument names (`timed_mem_of_namedClock`). `reported W bs` lists the
+members the verdicts say meet the pair, which under proved verdicts are exactly those that do
+(`mem_reported`), and it is empty exactly when no trivial witness meets the pair
+(`reported_eq_nil_iff`).
 
 ## What the class does not hold
 
@@ -636,6 +638,21 @@ theorem not_witnessVerdicts_of_strayClock (h : c.sig.strayClock = true) (q : Pai
   rintro ⟨hs, _⟩
   rw [h] at hs
   exact Bool.noConfusion hs
+
+/-- Under proved verdicts, each `LeanIntent.Clock` an argument of `W` names is read: each
+occurrence of one in an argument's code (`Ty.NamedClock`) has the path along it, and the class
+holds the script of timed actions on the clock part that follows that path, which is a
+`LeanIntent.Clock`. So no verdict is proved with a `LeanIntent.Clock` an argument names left
+unread; a type with one outside the forms the clock parts reach is refused
+(`Sig.read_of_strayClock_eq_false`, `not_witnessVerdicts_of_strayClock`). -/
+theorem timed_mem_of_namedClock {q : Pair W} {bs : List Bool} (h : WitnessVerdicts q bs)
+    {a : Ty} (ha : a ∈ c.sig.args) (o : Ty.NamedClock a) :
+    ∃ (p : Σ p, Place.Path (.code a) p) (r : Place.ArgPath p.1 c.sig.args),
+      o.path? = some p ∧ r.From p.2 ∧ ArgClock.InClock ⟨p.1, r, .value⟩ ∧
+        Witness.timed ⟨p.1, r, .value⟩ ∈ witnesses W := by
+  obtain ⟨p, r, hp, hr, hk⟩ :=
+    Sig.read_of_strayClock_eq_false ((witnessVerdicts_correct q bs).mp h).1 ha o
+  exact ⟨p, r, hp, hr, hk, Witness.timed_mem (.inr hk)⟩
 
 /-- Proved verdicts are the verdicts, in order, on the members of the class. -/
 theorem goals_of_witnessVerdicts {q : Pair W} {bs : List Bool} (h : WitnessVerdicts q bs) :
