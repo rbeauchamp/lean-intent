@@ -16,7 +16,10 @@ and change the degenerate class the owner is shown. The coverage of a structure 
 as a machine is attested the same way, by the private constructor of `Machine.Stands` that admits a
 declared structure (`LeanIntent.MachineDeclared.Handler`), and a forged one would change the classes of a
 type covered as a machine (`LeanIntent.Machines`). This module decides, from Lean's own
-environment, that a declaration depends on no such attestation of either kind (`kinds`).
+environment, that a declaration depends on no such attestation of either kind (`kinds`). It reads
+the second kind wherever the environment declares `Machine.Stands`; an environment that does not,
+such as that of modules that do not import `LeanIntent.Machines`, holds no attestation of that
+kind, and the audit runs there on the first kind alone.
 
 * **What a declaration depends on** (`DependsOn`): what cone exclusion follows (`Cone.RefersTo`),
   and also a theorem's proof and an opaque constant's value, where an attestation can be written.
@@ -100,8 +103,10 @@ What the theorems do not reach, and what is trusted:
   another would make the audit refuse every declaration that reaches it, not accept one it should
   refuse.
 * That a declaration in a module that does not import the one declaring `Ty.Stands` cannot name
-  either constructor, which follows from Lean's kernel checking each declaration in the environment
-  of its module; that `collectAxioms` reports every axiom such a declaration rests on, as Lean's own
+  either constructor, and that no declaration of an environment that does not declare
+  `Machine.Stands` names its constructor, where the audit does not read that kind (`kinds`), each
+  of which follows from Lean's kernel checking each declaration in the environment of its module;
+  that `collectAxioms` reports every axiom such a declaration rests on, as Lean's own
   audit of axioms; and that `Environment.find?` returns the declarations the kernel checked. In a
   module of Lean's module system an imported theorem is shown as an axiom, so the audit refuses
   there rather than accept a proof it cannot read; run it where every module is imported in full.
@@ -396,13 +401,24 @@ structure Kind where
   /-- The handler's reading of an attestation, given the constructor. -/
   check : Name → ConstantInfo → MetaM (Option String × Option String)
 
-/-- The kinds of attestation the audit reads: the code of a declared type, through `Ty.Stands` and
-read by `Declared.checkAttestation`, and the coverage of a structure a project declares as a machine,
-through `Machine.Stands` and read by `MachineDeclared.checkAttestation`. `LeanIntent.Machines`, which
-declares `Machine.Stands`, imports `LeanIntent.Degenerate`, so every module that can name either
-constructor is one that can name the first. -/
+/-- The kinds of attestation the audit reads in the current environment: the code of a declared
+type, through `Ty.Stands` and read by `Declared.checkAttestation`, and, where the environment
+declares `Machine.Stands`, the coverage of a structure a project declares as a machine, through
+`Machine.Stands` and read by `MachineDeclared.checkAttestation`.
+
+An environment that does not declare `Machine.Stands` declares no constructor of it, and Lean's
+kernel checked each of its declarations against the constants it declares, so none of them names
+that constructor: leaving the kind out there leaves no attestation unread and refuses nothing the
+audit must refuse, and the audit runs over modules that do not import `LeanIntent.Machines`. Where
+a constant of that name is not the library's inductive proposition, `MachineDeclared.standsDecl`
+throws an error. `LeanIntent.Machines`, which declares `Machine.Stands`, imports
+`LeanIntent.Degenerate`, so every module that can name either constructor is one that can name the
+first. -/
 def kinds : MetaM (List Kind) := do
-  return [⟨``Ty.Stands, ← Declared.standsDecl, Declared.checkAttestation⟩,
+  let code : Kind := ⟨``Ty.Stands, ← Declared.standsDecl, Declared.checkAttestation⟩
+  if (lookupIn (← getEnv) ``Machine.Stands).isNone then
+    return [code]
+  return [code,
     ⟨``Machine.Stands, ← MachineDeclared.standsDecl, MachineDeclared.checkAttestation⟩]
 
 /-- An attestation the audit refuses: the declaration `decl` that holds it, the inductive
@@ -428,11 +444,13 @@ structure Outcome where
   refusal? : Option (Refusal × Option (Array Name) × List Name)
 
 /-- The audit of the declarations `first :: rest` in the current environment, a scope that is never
-empty. It collects the reached declarations, through `Follows`, that name the private constructor of
-a kind of attestation (`kinds`) and are not among those Lean generates for that kind's inductive
-proposition; reads each with that kind's `check`; and decides with `decide`, the verified
-attestations of each kind being exactly those it read as the handler's. Returns the scope with a
-finding for each attestation it refuses and the refusal of `decide` (`Outcome`).
+empty. It runs in every environment that declares `Ty.Stands`, whether or not that environment
+declares `Machine.Stands`, and throws an error in one that does not declare `Ty.Stands`. It collects
+the reached declarations, through `Follows`, that name the private constructor of a kind of
+attestation the environment declares (`kinds`) and are not among those Lean generates for that
+kind's inductive proposition; reads each with that kind's `check`; and decides with `decide`, the
+verified attestations of each kind being exactly those it read as the handler's. Returns the scope
+with a finding for each attestation it refuses and the refusal of `decide` (`Outcome`).
 
 Lean's limit on the steps a metaprogram takes (`maxHeartbeats`) applies to each reading of an
 attestation and, for one the audit refuses, to the printing of the types it attests, to each test

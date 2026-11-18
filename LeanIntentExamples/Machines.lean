@@ -36,13 +36,14 @@ sees and steps forward that many times, reaches it.
   counter round the ring (`perStartSmall_fixedInAdvance`), where a clocked script's memory, a
   number, has more values than four.
 
-`Position` and `Bool` have codes, so the instance covers `Agent` (`agent_witnesses_length`). The
-library's own machines from positions to actions are covered through the identity, and a structure
-with a value parameter, whose fields come in another order, is covered by the same handler
-(`Indexed`). A structure the module keeps to itself is covered the same way, under private names,
-in this module only (`Hidden`, `hidden_machineOf`): it is marked `private`, and a structure of a
-`module` file that no `public section` holds, and that is not marked `public`, is private in the
-same way.
+`Position` and `Bool` have codes, so the instance covers `Agent`, without which Lean states none of
+the verdicts above (`perStart_witnesses`, `homing_verdicts`). The library's own machines from
+positions to actions are covered through the identity (`machineOf_machine`), and a structure with a
+value parameter, whose fields come in another order, is covered by the same handler (`Indexed`,
+`indexed_witnesses_length`). A structure the module keeps to itself is covered the same way, under
+private names, in this module only (`Hidden`, `hidden_machineOf`): it is marked `private`, and a
+structure of a `module` file that no `public section` holds, and that is not marked `public`, is
+private in the same way.
 -/
 
 public section
@@ -197,19 +198,19 @@ theorem counter_openLoop (k : Nat) : (machineOf (counter k)).OpenLoop := by
 
 /-! ## The trivial witnesses -/
 
-/-- The class of the agent's type: any agent, the table of constants, an agent that does not read
-its history and one that does not read what it sees now, the agent that always stays and the one
-that always steps forward, the scripts on its history, on the history's length and on what it sees
-now, then an agent that takes one action throughout and one whose actions are fixed in advance. -/
-theorem agent_witnesses_length : (machineWitnesses Agent).length = 11 := by decide
-
 /-- A constant subject of the behaviour type does not reach `0` from position `2`. -/
 theorem not_reachesFrom_two_of_constant {a : Agent} (h : Witness.Constant (behaviourOf a)) :
     ¬ ReachesFrom a 2 :=
   let ⟨_, ho⟩ := constant_apply h
   not_reachesFrom_two ho
 
-/-- The per-start pair is met by an agent that does not read its history, by one that does not read
+/-- The verdicts on the class of the agent's type, one for each member, in the class's order: any
+agent, the table of constants, an agent that does not read its history and one that does not read
+what it sees now, the agent that always stays and the one that always steps forward, the scripts on
+its history, on the history's length and on what it sees now, then an agent that takes one action
+throughout and one whose actions are fixed in advance.
+
+The per-start pair is met by an agent that does not read its history, by one that does not read
 what it sees now, by the scripts on its history, on the history's length and on what it sees now,
 and by an agent whose actions are fixed in advance, through the clocked script that suits each
 start; not by every agent, by the table, by a constant agent or by one that takes one action
@@ -336,11 +337,9 @@ theorem perStartSmall_fixedInAdvance :
 
 /-! ## The degenerate check -/
 
-/-- The degenerate class of the agent's type: the agent that always stays and the one that always
-steps forward. -/
-theorem agent_degenerate_length : (machineDegenerate Agent).length = 2 := by decide
-
-/-- Neither constant agent gets home from every start: neither reaches `0` from position `2`. -/
+/-- The verdicts on the degenerate class of the agent's type, one for each member, in the class's
+order: the agent that always stays and the one that always steps forward. Neither constant agent
+gets home from every start: neither reaches `0` from position `2`. -/
 theorem homing_verdicts : MachineVerdicts homing [false, false] :=
   ⟨fun ⟨_, hi, hm⟩ =>
       not_reachesFrom_two_of_constant ⟨_, hi⟩ (hm.2 _ (List.mem_singleton_self _) 2),
@@ -380,10 +379,9 @@ theorem stayHome_possibilities :
 
 /-! ## Other types covered -/
 
-/-- The library's own machines from positions to actions are covered through the identity, with the
-same class. -/
-theorem machine_witnesses_length : (machineWitnesses (Machine Position Bool)).length = 11 := by
-  decide
+/-- The library's own machines from positions to actions are covered through the identity: the
+machine each is read as is itself. -/
+theorem machineOf_machine (x : Machine Position Bool) : machineOf x = x := rfl
 
 /-- An agent indexed by the number of actions its interface offers, with its fields in another
 order. -/
@@ -416,9 +414,5 @@ private structure Hidden where
 /-- The machine a value of the private structure is read as: the one with its fields, each in its
 role, whatever their order and names. -/
 private theorem hidden_machineOf (h : Hidden) : machineOf h = ⟨h.State, h.start, h.next⟩ := rfl
-
-/-- The private structure has the class of the library's machines between the same types. -/
-private theorem hidden_witnesses_length : (machineWitnesses Hidden).length = 11 := by
-  decide
 
 end LeanIntentExamples.Machines
