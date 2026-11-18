@@ -1,5 +1,8 @@
-import LeanIntent.Required
-import LeanIntentExamples.Implementation
+module
+
+public import LeanIntent.Required
+public import LeanIntentExamples.Implementation
+import all Init.Prelude
 
 /-!
 # The theorems the sorting deliverable relies on, and what the decision refuses
@@ -17,13 +20,16 @@ declared (`empty_unrepresentable`).
 The decision, given what a build shows of the project (`deliverable`, `implementation` and
 `entry`, as `LeanIntent.Required.Read` would read them) and the module names the build lists
 (`built`), finds nothing (`located`), and lists each theorem with the module that declares it
-(`located_listed`). A project that declares no value of `Required`, such as one that adopted
-lean-intent before this check, is refused nothing, even with the deliverable declared in a module
-the build does not list (`undeclaredProject_accepted`, by `findings_nothing`, which holds whatever
-the project declares and the build lists). Each change below is refused by name:
+(`located_listed`). A project in whose gate environment no value of `Required` is read, such as
+one that adopted lean-intent before this check, is refused nothing, even with the deliverable
+declared in a module the build does not list (`undeclaredProject_accepted`, by `findings_nothing`,
+which holds whatever else is read and the build lists). Each change below is refused by name:
 
-* once the project declares a value of `Required`, a second deliverable that no such value names,
-  which the refusal says to declare (`undeclared_refused`);
+* once a value of `Required` is read, a second deliverable that no such value names, which the
+  refusal says to declare (`undeclared_refused`);
+* a second value of `Required` for the deliverable, declared with the comparison theorem it lists
+  in a scratch module the build does not list, beside the value the build does list: the value and
+  the theorem are each refused by name (`scratchValue_refused`);
 * a comparison theorem declared in a module the build does not list, such as a scratch file
   (`scratch_refused`), and a theorem of the very name of one in a built module, declared in such a
   module instead, which the decision reads by the module that declares it, never by its name
@@ -34,7 +40,12 @@ the project declares and the build lists). Each change below is refused by name:
   deliverable (`untied_refused`, `termDeliverable_refused`);
 * an entry that is a term rather than a theorem's name, and a constant that is not a theorem
   (`notConstant_refused`, `notTheorem_refused`).
+
+The module imports `Init.Prelude` with `import all`: its proofs run the check's decision over names,
+and `Lean.Name.beq`, which compares two names, is not exposed by that module.
 -/
+
+public section
 
 namespace LeanIntentExamples.Required
 
@@ -54,7 +65,7 @@ theorem nilSort_separates : sortedOnly.Meets nilSort ∧ ¬ sorting.Meets nilSor
   ⟨sortedOnly_meets_nilSort, sorting_refutes_nilSort⟩
 
 /-- The theorems the procedure requires of the sorting deliverable, each by its name. -/
-def sortingRequired : Required sortingDeliverable where
+@[expose] def sortingRequired : Required sortingDeliverable where
   theorems := [⟨sorting_o2⟩, ⟨sorting_o2Run⟩, ⟨sorting_o3⟩, ⟨sorting_o4⟩, ⟨sorting_o5_eq⟩,
     ⟨sorting_verdicts⟩, ⟨sorting_narrower⟩, ⟨nilSort_separates⟩]
 
@@ -65,24 +76,24 @@ theorem empty_unrepresentable : ¬ ∃ v : Required sortingDeliverable, v.theore
 /-! ## What the decision reads, accepts and refuses -/
 
 /-- Module names a build of the worked examples lists: those of the modules this example reads. -/
-def built : List Lean.Name :=
+@[expose] def built : List Lean.Name :=
   [`LeanIntentExamples.Sorting, `LeanIntentExamples.Confirmation,
     `LeanIntentExamples.Implementation, `LeanIntentExamples.Required]
 
 /-- The deliverable, by its module and its name, as the build shows it. -/
-def deliverable : Implementation.Constant :=
+@[expose] def deliverable : Implementation.Constant :=
   ⟨`LeanIntentExamples.Confirmation, ``sortingDeliverable⟩
 
 /-- The value recording the deliverable's implementation, by its module and its name. -/
-def implementation : Implementation.Constant :=
+@[expose] def implementation : Implementation.Constant :=
   ⟨`LeanIntentExamples.Implementation, ``sortingImplementation⟩
 
 /-- A theorem of the sorting record, by its module and its name. -/
-def sortingTheorem (n : Lean.Name) : Cited := .thm ⟨`LeanIntentExamples.Sorting, n⟩
+@[expose] def sortingTheorem (n : Lean.Name) : Cited := .thm ⟨`LeanIntentExamples.Sorting, n⟩
 
 /-- What the build shows of `sortingRequired`. -/
-def entry : Entry :=
-  ⟨``sortingRequired, some ``sortingDeliverable,
+@[expose] def entry : Entry :=
+  ⟨``sortingRequired, `LeanIntentExamples.Required, some ``sortingDeliverable,
     [sortingTheorem ``sorting_o2, sortingTheorem ``sorting_o2Run, sortingTheorem ``sorting_o3,
       sortingTheorem ``sorting_o4, sortingTheorem ``sorting_o5_eq,
       sortingTheorem ``sorting_verdicts,
@@ -110,7 +121,7 @@ theorem undeclaredProject_accepted :
   findings_nothing
 
 /-- A second deliverable of the project, by its module and its name. -/
-def other : Implementation.Constant := ⟨`LeanIntentExamples.Confirmation, `otherDeliverable⟩
+@[expose] def other : Implementation.Constant := ⟨`LeanIntentExamples.Confirmation, `otherDeliverable⟩
 
 theorem undeclared_refused :
     findings built [deliverable, other] [implementation] [entry] =
@@ -118,7 +129,7 @@ theorem undeclared_refused :
   decide +kernel
 
 /-- The comparison theorem, declared instead in a scratch module the build does not list. -/
-def scratchEntry : Entry :=
+@[expose] def scratchEntry : Entry :=
   { entry with theorems := [.thm ⟨`LeanIntentExamples.Scratch, `scratch_narrower⟩] }
 
 theorem scratch_refused :
@@ -126,9 +137,21 @@ theorem scratch_refused :
       [.unbuilt ``sortingRequired `scratch_narrower `LeanIntentExamples.Scratch] := by
   decide +kernel
 
+/-- A second value of `Required` for the deliverable, declared in a scratch module the build does
+not list, with the comparison theorem it lists. -/
+@[expose] def scratchValue : Entry :=
+  ⟨`scratchRequired, `LeanIntentExamples.Scratch, some ``sortingDeliverable,
+    [.thm ⟨`LeanIntentExamples.Scratch, `scratch_narrower⟩]⟩
+
+theorem scratchValue_refused :
+    findings built [deliverable] [implementation] [entry, scratchValue] =
+      [.requiredUnbuilt `scratchRequired `LeanIntentExamples.Scratch,
+        .unbuilt `scratchRequired `scratch_narrower `LeanIntentExamples.Scratch] := by
+  decide +kernel
+
 /-- The entry as the build would show it if the theorem of `sorting_narrower`'s name were declared
 in the scratch module, which an environment importing that module records. -/
-def sameNameEntry : Entry :=
+@[expose] def sameNameEntry : Entry :=
   { entry with theorems := [.thm ⟨`LeanIntentExamples.Scratch, ``sorting_narrower⟩] }
 
 theorem sameName_refused :
