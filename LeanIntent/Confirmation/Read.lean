@@ -94,12 +94,22 @@ or an axiom is found so that reading it is an error, never a value passed over. 
 is unsafe or partial is an error too (`proofSafe_iff`): such a definition may refer to itself, so
 the proofs it holds, a deliverable's `keeps` or an implementation's `fulfils`, can prove anything,
 and a safe declaration cannot refer to one, as Lean's kernel refuses
-(`type_checker::infer_constant`). -/
+(`type_checker::infer_constant`).
+
+A constant is of the module Lean records for its name (`Environment.const2ModIdx`), and of the
+current one when Lean records none. Lean v4.35.0 records a module for a name only from that
+module's `constNames` and from the `extraConstNames` of the data it reads as the module's IR
+(`finalizeImport`, `src/Lean/Environment.lean`, lines 2333 to 2348), which is the module's own data
+or its `.ir`, whose `extraConstNames` are the names of the IR declarations it stores
+(`ImportedModule.irData?`, lines 2046 to 2054; `mkIRData`, lines 1892 to 1900 and `src/LeanIR.lean`,
+lines 32 to 48). So the names read for a module given are its data's `constNames` and
+`extraConstNames` and its stored IR declarations' names, each kept only where Lean records that
+module for it, and each constant is found once. An environment that reads a module's `.ir.sig` as
+its IR, which only Lean's `leanir` makes, is outside this account. -/
 def declaredWhere (mods : Array Name) (test : Expr → MetaM Bool) : MetaM (Array Name) := do
   let env ← getEnv
   let modData := env.header.moduleData
-  let mut seenMod : Array Bool := Array.replicate modData.size false
-  let mut idxs : Array ModuleIdx := #[]
+  let mut selected : Array (ModuleIdx × ModuleData) := #[]
   let mut includeMain := false
   for m in mods do
     let idx? := env.getModuleIdx? m
@@ -109,37 +119,25 @@ def declaredWhere (mods : Array Name) (test : Expr → MetaM Bool) : MetaM (Arra
     if isMain then includeMain := true
     if let some idx := idx? then
       let i := idx.toNat
-      if h : i < seenMod.size then
-        unless seenMod[i] do
-          seenMod := seenMod.set i true
-          idxs := idxs.push idx
+      if h : i < modData.size then
+        selected := selected.push (idx, modData[i])
       else
         throwError "the environment holds no module data for {m} (index {i})"
   let isReadable (ci : ConstantInfo) : Bool :=
     ci matches .defnInfo _ | .opaqueInfo _ | .axiomInfo _
   let consts := env.constants
   let c2m := env.const2ModIdx
-  let mut extraSeen : Std.HashSet Name := {}
+  let mut taken : Std.HashSet Name := {}
   let mut candidates : Array (Name × ConstantInfo) := #[]
-  for idx in idxs do
-    if let some data := modData[idx.toNat]? then
-      for ownCi in data.constants do
-        if isReadable ownCi then
-          let c := ownCi.name
-          let ownerIdx? := c2m[c]?
-          let isOwn : Bool := ownerIdx? == some idx
-          let keep : Bool := match ownerIdx? with
-            | some ownerIdx =>
-              ownerIdx == idx ||
-                !(seenMod[ownerIdx.toNat]?.getD false &&
-                  (modData[ownerIdx.toNat]?.any (·.constNames.contains c)))
-            | none => !includeMain
-          if keep && (isOwn || !extraSeen.contains c) then
-            unless isOwn do
-              extraSeen := extraSeen.insert c
-            if let some ci := consts.find? c then
-              if isReadable ci then
-                candidates := candidates.push (c, ci)
+  for (idx, data) in selected do
+    let irNames := (IR.declMapExt.getModuleIREntries env idx).map (·.name)
+    for names in #[data.constNames, data.extraConstNames, irNames] do
+      for c in names do
+        if c2m[c]? == some idx && !taken.contains c then
+          if let some ci := consts.find? c then
+            if isReadable ci then
+              taken := taken.insert c
+              candidates := candidates.push (c, ci)
   if includeMain then
     candidates := consts.map₂.foldl (init := candidates) fun acc c ci =>
       if isReadable ci && !c2m.contains c then acc.push (c, ci) else acc
