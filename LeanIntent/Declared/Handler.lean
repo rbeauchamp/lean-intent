@@ -444,8 +444,6 @@ group with a constructor of the first kind, or that its root's base values do no
   let g := chainCode (← others.mapM fun cs => return chainCode (← cs.mapM fun c => do
     return chainCode [chainCode (← dataCodes c), chainCode (← domCodes c)]))
   let r := chainCode (others.map fun cs => chainCode (cs.map fun c => chainCode (targets c)))
-  -- `r` holds only numbers of types, so Lean's kernel decides whether the type has a value and
-  -- whether the group grows.
   let kernelTrue (e : Expr) : m Bool := do
     return Kernel.isDefEq (← getEnv) (← getLCtx) e (toExpr true) matches .ok true
   let marked := mkApp4 (mkConst ``List.getD [Level.zero]) (mkConst ``Bool)
@@ -501,12 +499,6 @@ writes it: each value paired with the chain after it, and the last with the unit
     mkApp4 (mkConst ``Prod.mk [Level.zero, Level.zero]) (denoteE c)
       (denoteE (chainCode (fs.map (·.1)))) v (chainExpr fs)
 
-/-- The inductive types `Ty` builds in: the head constant of `Ty.denote (c ?args)` for each
-constructor `c` of `Ty`, and of `Atom.denote (k ?args)` for each constructor `k` of `Atom`, each
-applied to fresh metavariables and put in weak head normal form, where that head is an inductive
-type. The others are `decl` and `atom`, which denote what their arguments do and are stuck at a
-metavariable, and `arrow`, which denotes a function type. The constructors are read from the
-environment, so a constructor `Ty` gains is counted. -/
 def builtinHeads : MetaM (Array Name) := do
   let mut heads := #[]
   for (ind, den) in [(``Ty, ``Ty.denote), (``Atom, ``Atom.denote)] do
@@ -546,8 +538,6 @@ def checkRecMaps (group : Array (Expr × Array GCtor)) (root i : Nat) (f : Expr)
   let codeOf (t inst : Expr) : Expr := mkApp2 (mkConst ``HasCode.code) t inst
   let carry (fn : Name) (t inst v : Expr) : Expr :=
     mkApp4 (mkConst fn) t (denoteE (codeOf t inst)) (mkApp2 (mkConst ``HasCode.iso) t inst) v
-  -- The data part of a constructor's fields `xs`: each field that holds no value of the group, with
-  -- its code and its value carried through its type's isomorphism.
   let dataParts (c : GCtor) (xs : Array Expr) : MetaM (Option (List (Expr × Expr))) := do
     let mut parts := #[]
     for (fld, x) in c.fields.zip xs do
@@ -555,7 +545,6 @@ def checkRecMaps (group : Array (Expr × Array GCtor)) (root i : Nat) (f : Expr)
         let some inst ← instOf t | return none
         parts := parts.push (codeOf t inst, carry ``Iso.to t inst x)
     return some parts.toList
-  -- The alternatives of the base: for each base constructor of the root, its data chain.
   let mut baseAlts := #[]
   for c in group[root]!.2.filter GCtor.isBase do
     let mut codes := #[]
@@ -564,8 +553,6 @@ def checkRecMaps (group : Array (Expr × Array GCtor)) (root i : Nat) (f : Expr)
         let some inst ← instOf t | return some s!"the type `{t}` of a field of `{c.name}` has no code"
         codes := codes.push (codeOf t inst)
     baseAlts := baseAlts.push (denoteE (chainCode codes.toList))
-  -- A map applied to a constructor, reduced to a base value or a node: by `whnf`, and where that
-  -- stops short, as it can at a recursive field that is a function, by Lean's kernel.
   let reduce (e : Expr) : MetaM Expr := do
     let w ← whnf e
     if w.isAppOf ``MuVal.base || w.isAppOf ``MuVal.node then return w
@@ -609,15 +596,12 @@ def checkRecMaps (group : Array (Expr × Array GCtor)) (root i : Nat) (f : Expr)
           return .error s!"the map does not take `{c.name}` to the node of constructor {nn}"
         unless ← kernelEq d (chainExpr parts) do
           return .error s!"the node of `{c.name}` does not hold its other fields, each carried through its own type's isomorphism"
-        -- Each recursive field's children: the map of its type at the field, its arguments carried back.
         let some aE := (← whnf (← inferType kids)).bindingDomain!.app1? ``Fin
           | return .error s!"the children of `{c.name}` are not numbered"
         let mut found := #[]
         let mut r := 0
         for (fld, x) in c.fields.zip xs do
           let .ref l doms := fld | continue
-          -- `r < A`, proved by `decide` through `Nat.decLt`, built without instance resolution, which
-          -- an environment imported without its extensions' state does not offer.
           let lt := mkApp4 (mkConst ``LT.lt [Level.zero]) (mkConst ``Nat) (mkConst ``instLTNat)
             (mkNatLit r) aE
           let h := mkApp3 (mkConst ``of_decide_eq_true) lt (mkApp2 (mkConst ``Nat.decLt) (mkNatLit r) aE)
@@ -666,26 +650,6 @@ def checkRecMaps (group : Array (Expr × Array GCtor)) (root i : Nat) (f : Expr)
       if isBase then nb := nb + 1 else nn := nn + 1
   return if todo.isEmpty then none else some "the maps of the group were not all read"
 
-/-- Whether the declaration `ci` is an attestation the handler writes, where `ctor` is the private
-constructor of `Ty.Stands` that admits a declared type (`standsDecl`). It is one when `ci` is a
-theorem whose statement does not name `ctor` and whose value names it once, as the whole value under
-its `fun` binders, applied to a type, a name, a chain, a representation and an isomorphism, where:
-
-* the type, put in weak head normal form, is `T as` for an inductive type `T` at universe level zero
-  that the handler covers (`refusal?`, `withParams`, `ctors`), applied to its parameters `as`, and
-  `T` is none of the types `Ty` builds in (`builtinHeads`), whose codes are not declarations' codes,
-  so that no attestation gives such a type, or a type that reduces to one, a second code;
-* the name, chain and representation are the code `codeWith` derives from `T`'s declaration at
-  `as`, with some instance of `HasCode` for each parameter's and field's type;
-* the isomorphism takes each constructor of `T`, applied to `as` and to its fields, to the
-  alternative `injExpr` and `chainExpr` build, holding each field carried through the isomorphism of
-  the instance whose code the representation holds for it.
-
-Lean's unifier finds those instances, and Lean's kernel then decides each equality, the type, the
-code and the image of every constructor, by its definitional equality. An isomorphism is fixed by
-its forward map, since its map back is that map's inverse, so the map back is not compared. Returns
-the type attested, printed, with `none` when the attestation is the handler's, or the reason it is
-not. The type is `none` when the attestation is refused before its type is read. -/
 def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String × Option String) := do
   let .thmInfo v := ci | return (none, some "it is not a theorem")
   if (Cone.exprRefs v.type []).contains ctor then
@@ -716,12 +680,8 @@ def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String ×
     catch ex => return ← fail (← ex.toMessageData.toString)
     let kernelEq (a b : Expr) : MetaM Bool := do
       return Kernel.isDefEq (← getEnv) (← getLCtx) a b matches .ok true
-    -- A recursive type: its code re-derived by the handler's own reading of its group, and the maps
-    -- of its group read constructor by constructor (`checkRecMaps`).
     if indVal.isRec || indVal.numNested != 0 then
       let i := indVal.all.idxOf T
-      -- The code of each field's and argument's type: one metavariable for each type, which Lean's
-      -- unifier then finds in the attestation's code, as for `codeWith` below.
       let codeOf (t : Expr) : StateT (Array (Expr × Expr)) MetaM Expr := do
         if let some (_, inst) := (← get).find? (·.1 == t) then
           return mkApp2 (mkConst ``HasCode.code) t inst
@@ -757,8 +717,6 @@ def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String ×
         unless ← kernelEq given derived do
           return ← fail "Lean's kernel does not find its code to be the one the declaration fixes"
         let instOf (t : Expr) : MetaM (Option Expr) := return (insts.find? (·.1 == t)).map (·.2)
-        -- A candidate for the map of another type of the group: the one the handler writes beside
-        -- the attestation, applied to the same binders. Only its equations, checked below, decide.
         let candidate (l : Nat) : MetaM (Option Expr) := do
           let nm := ci.name.getPrefix ++ Name.mkSimple s!"to{l}"
           return if (← getEnv).contains nm then some (mkAppN (mkConst nm) binders) else none
@@ -767,7 +725,6 @@ def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String ×
           return ← fail s!"its isomorphism is not the handler's: {why}"
         return (some ty, none)
     let cs ← (ctors indVal as : TermElabM _).run'
-    -- The code, with a metavariable for each instance, in the order `codeWith` asks for them.
     let (derived, insts) ← (codeWith indVal as cs fun t => do
       let i ← mkFreshExprMVar (mkApp (mkConst ``HasCode) t)
       modify (·.push i)
@@ -785,7 +742,6 @@ def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String ×
       return ← fail "Lean's kernel does not find the type to be its declaration applied to its parameters"
     unless ← kernelEq given derived do
       return ← fail "Lean's kernel does not find its code to be the one the declaration fixes"
-    -- Each constructor's fields, with the instance whose code the representation holds for each.
     let mut k := as.size
     let mut chains : Array (List (Name × Expr × Expr)) := #[]
     for c in cs do
@@ -837,24 +793,15 @@ def mkStandsAndInstance (declName : Name) (indVal : InductiveVal) (instName code
   elabCommand (← `(command|
     instance $(mkIdent (`_root_ ++ instName)):ident $binders* : LeanIntent.HasCode $tStx :=
       ⟨@$(mkCIdent codeName) $args*, @$(mkCIdent isoName) $args*, @$(mkCIdent standsName) $args*⟩))
-  -- The audit's reading of what the handler wrote, so that no type the handler covers gets a code
-  -- the audit would refuse (`LeanIntent.CodeAudit`).
   let (_, why?) ← liftTermElabM <| withoutExporting do
     checkAttestation ctor (← getConstInfo standsName)
   if let some why := why? then
     throwError "LeanIntent.HasCode: the code written for `{.ofConstName declName}` fails the audit of declared types' codes: {why}"
 
-/-- Where a constructor of a recursive group goes in its code: the `ib`-th of the `kb` constructors of
-the coded type whose fields hold no value of the group (its base), or the `c`-th constructor its type
-lists in the group. -/
 inductive Role where
   | base (ib kb : Nat)
   | node (c : Nat)
 
-/-- A constructor of a recursive group as the syntax the handler writes needs it: its name, the
-number of parameters of its declaration, for each field `none` when it holds no value of the group
-and otherwise the type of the group it holds and whether it is a function, its place in the code,
-and the number of its alternative in the match on its type. -/
 structure CtorPlan where
   name : Name
   numParams : Nat
@@ -897,11 +844,8 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
   let toGName := instName ++ `toG
   let toInvName := instName ++ `toInv
   let act ← writtenName
-  -- The name relative to the current namespace, by which a function of a mutual block refers to
-  -- another and a theorem to itself.
   let ns ← getCurrNamespace
   let rel (n : Name) : Lean.Ident := mkIdent (n.replacePrefix ns .anonymous)
-  -- The code, the family of the group's types, and the plan of each type's constructors.
   let (plans, root) ← liftTermElabM <| withParams indVal fun xs binders tApp => do
     if (← synthInstance? (mkApp (mkConst ``HasCode) tApp)).isSome then
       throwError "LeanIntent.HasCode: `{.ofConstName declName}` already has a code"
@@ -953,7 +897,6 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
   let R : Term := mkCIdent (act refsName)
   let iq : Term := quote i
   let rq : Term := quote root
-  -- The trees of the group's `k`-th type, and the way to build each type's values from its nodes.
   let famTy (k : Term) : Term :=
     if root == i then Syntax.mkApp (mkCIdent ``LeanIntent.Ty.MuOf) #[B, Gr, R, iq, k]
     else Syntax.mkApp (mkCIdent ``LeanIntent.Ty.MuAtOf) #[B, Gr, R, rq, k]
@@ -963,7 +906,6 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
   let famK := famTy kId
   let fold ← `(LeanIntent.Ty.muFold $G (@$(mkCIdent (act baseInvName)) $args*) (@$(mkCIdent (act algName)) $args*))
   let fin (n : Nat) : TermElabM Term := `(⟨$(quote n), of_decide_eq_true rfl⟩)
-  -- The maps to the trees, their inverses' parts, and the proofs.
   let (toDefs, baseAlts, algAlts, invToDefs, toInvAlts) ← liftTermElabM do
     let mut toDefs := #[]
     let mut baseAlts := #[]
@@ -981,7 +923,6 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
         let refs := (c.fields.zip xs).filterMap fun (f, x) => f.map fun (l, arr) => (l, arr, x)
         let dataTo ← datas.toList.mapM fun x => `(LeanIntent.Iso.to LeanIntent.HasCode.iso $x)
         let ctorFn ← `(@$(mkCIdent c.name) $holes*)
-        -- `to`: the tree of a value.
         let rhs ← match c.role with
           | .base ib kb => do `(LeanIntent.MuVal.base $(← injStx kb ib (← chainStx dataTo)))
           | .node cn => do
@@ -998,13 +939,11 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
               else `(fun e _ => match e with $alts:matchAlt*)
             `(LeanIntent.MuVal.node $(← fin cn) $(← chainStx dataTo) $children)
         toAlts := toAlts.push (← `(matchAltExpr| | $pat => $rhs))
-        -- `inv_to`: the value back from its tree.
         let fieldPrfs ← (c.fields.zip xs).toList.mapM fun (f, x) => match f with
           | none => `(LeanIntent.Iso.inv_to LeanIntent.HasCode.iso $x)
           | some (l, n) => do
             let ys ← (List.range n).toArray.mapM fun _ => return (mkIdent (← mkFreshUserName `y) : Term)
             let ih ← `($(rel (invToName l)) ($x $ys*))
-            -- Cancel argument transport inside this field; data fields keep their own inverse laws.
             let p ← if n == 0 then pure ih else
               `(by simp only [LeanIntent.Iso.inv_to] <;> exact $ih)
             ys.foldrM (fun y p => `(funext fun $(⟨y.raw⟩):ident => $p)) p
@@ -1012,7 +951,6 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
           | [] => `(rfl)
           | p :: ps => ps.foldlM (fun acc q => `(congr $acc $q)) (← `(congrArg $ctorFn $p))
         invToAlts := invToAlts.push (← `(matchAltExpr| | $pat => by rw [$(mkCIdent (act (toName k))):ident]; exact $prf))
-        -- `baseInv`, `alg` and `to_inv`.
         let eqLemma := mkIdent (`_root_ ++ toName k ++ Name.mkSimple s!"eq_{c.alt}")
         match c.role with
         | .base ib kb =>
@@ -1122,7 +1060,6 @@ def mkHasCode (declName : Name) : CommandElabM Unit := do
   let indVal ← getConstInfoInduct declName
   if let some why := refusal? indVal then
     throwError "LeanIntent.HasCode: `{.ofConstName declName}` is not covered: {why}"
-  -- A type that reaches itself through the fields of its group's constructors is recursive.
   let i := indVal.all.idxOf declName
   let recursive ← liftTermElabM <| withParams indVal fun xs _ _ => do
     if indVal.isRec || indVal.numNested != 0 then
@@ -1137,14 +1074,12 @@ def mkHasCode (declName : Name) : CommandElabM Unit := do
   let isoName := instName ++ `iso
   let standsName := instName ++ `stands
   let act ← writtenName
-  -- The code, and the number of fields of each constructor.
   let shapes ← liftTermElabM <| withParams indVal fun xs binders tApp => do
     if (← synthInstance? (mkApp (mkConst ``HasCode) tApp)).isSome then
       throwError "LeanIntent.HasCode: `{.ofConstName declName}` already has a code"
     let cs ← ctors indVal xs
     addFun (act codeName) binders (mkConst ``Ty) (← code indVal xs cs) false
     return cs.map fun c => (c.name, c.fields.size)
-  -- The isomorphism, elaborated by Lean and checked by its kernel.
   let k := shapes.length
   let binderStx ← liftTermElabM <| (List.range indVal.numParams).toArray.mapM fun _ => do
     return (mkIdent (← mkFreshUserName `α), mkIdent (← mkFreshUserName `inst))

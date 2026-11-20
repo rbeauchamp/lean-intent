@@ -2,22 +2,12 @@ module
 
 public import LeanIntent.Print.RoundTrip
 
-/-!
-# The terms the printer prints
-
-`Printable` states, apart from the printer, which terms it prints, and `pr_isSome_iff` proves that
-the printer prints exactly those, at every precedence and for every choice of `bare`: it refuses
-no term of the class, so it is not met by refusing everything, and prints none outside it.
--/
-
 public section
 
 namespace LeanIntent.Print
 
 open Lean (Name Level Expr Literal BinderInfo)
 
-/-- A universe level the printer writes: built from `0`, successors, `max`, `imax` and parameters,
-each parameter's name one component that can be written; no level metavariable. -/
 inductive LevelOk : Level → Prop
   | zero : LevelOk .zero
   | succ {l : Level} : LevelOk l → LevelOk (.succ l)
@@ -25,13 +15,6 @@ inductive LevelOk : Level → Prop
   | imax {a b : Level} : LevelOk a → LevelOk b → LevelOk (.imax a b)
   | param {n : Name} : atomOk n = true → LevelOk (.param n)
 
-/-- The terms the printer prints, under the binders `sc`, innermost first: bound variables that
-name their binder, with no binder of the same name between; constants with names whose components
-are strings that can be written, at levels it writes; sorts; string and natural number literals;
-applications; `fun` and `∀` with binder names of one component that can be written, or a
-`∀` with no binder name and the default annotation, written as an arrow; and `let`, dependent or
-not (`have`), with a binder name of one component that can be written. Free and meta variables,
-metadata and projections are not among them. -/
 inductive Printable : List Name → Expr → Prop
   | bvar {sc : List Name} {i : Nat} {n : Name} : sc[i]? = some n → atomOk n = true →
       lookup n sc = some i → Printable sc (.bvar i)
@@ -122,7 +105,6 @@ theorem prSort_isSome_iff (l : Level) : (prSort l).isSome ↔ LevelOk l := by
       exact ⟨.succ, fun h => by cases h; assumption⟩
   | max | imax | param | mvar => simp only [prSort, Option.isSome_map]; exact prLevel_isSome_iff _ _
 
-/-- The printer prints exactly the terms `Printable` admits, at every precedence. -/
 theorem pr_isSome_iff (bare : Name → Bool) (e : Expr) :
     ∀ (sc : List Name) (p : Prec), (pr bare sc e p).isSome ↔ Printable sc e := by
   induction e with

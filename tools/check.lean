@@ -6,169 +6,39 @@ import Lake.Load.Package
 meta import Lake
 meta import Lake.Load.Package
 
-/-!
-# `check`: the repository's checks, and the listing of its tests
-
-Run from the repository's top level as
-
-    lean --run tools/check.lean            # the checks below
-    lean --run tools/check.lean --tests    # the listing of tests, for no-mistakes
-
-where `lean` is elan's, which runs the Lean that `lean-toolchain` names. It is not run through
-`lake env`, so that it reads the project's configuration before Lake loads it. It is a `module`
-file, as its own rule `LEAN-MODULE` requires of every Lean file: `main` is public, and Lake's
-modules are imported a second time with `meta`, since Lean loads the compiled code of an imported
-module, which `lean --run` runs, only where the import says `meta`. The checks exit with status `0`
-when every rule holds and `1` when a rule rejects the project, after printing each rejection to
-standard output. When they cannot run they end through an uncaught error, which Lean prints to
-standard error and also ends with status `1`. Every input is read through the system that owns it,
-never by reading source text by hand:
-
-* the project's Lean files, from Git's index (`git ls-files`); the library's are every one of them
-  outside `tools/`, which holds this program;
-* the project's configuration, from Lake's own TOML parser (`Lake.Toml.loadToml`) and loader
-  (`Lake.loadPackage`, which resolves no dependency);
-* the modules each library target selects, from Lake (`Lake.LeanLib.getModuleArray`, which reads
-  the target's globs over the working tree, as a build of the target does);
-* each file's module name, from Lean (`moduleNameOfFileName`), whether it is a `module` file, from
-  Lean's parser of its header (`Parser.parseHeader`), and its build, from Lake;
-* the axioms each declaration rests on, from Lean (`collectAxioms`) over the environment Lean
-  imports from the built modules;
-* the compiled code of each declaration and what it uses, from Lean (`Lean.IR.findEnvDecl`,
-  `Lean.IR.collectUsedDecls`) over that environment;
-* the attestations of declared types' codes that the library's declarations depend on, from the
-  library's own audit (`LeanIntent.CodeAudit.audit`) over the environment Lean imports from the
-  built modules, run by `tools/codes.lean` in a process of its own, since this program is not
-  built against the library.
-
-The rules:
-
-* `LAKE-CONFIG`: `lakefile.toml` sets only `name`, `defaultTargets`, `leanOptions` (with only
-  `autoImplicit` and `relaxedAutoImplicit`) and `lean_lib` tables (with only `name`, `roots` and
-  `globs`), and no `lakefile.lean` exists. So the package requires no other package and depends on
-  nothing beyond Lean's own libraries, and Lake runs no code of the project to configure it.
-* `LEAN-BUILD`: the modules the library targets select are exactly the modules of the library's
-  files, and each target selects at least one; and `lake build --wfail` builds every library file,
-  given as its target, with no error and no warning. So a build of the library targets builds
-  exactly the files these rules build and audit: a library file that no target selects, such as one
-  outside the targets' directories, and a module a target selects that Git's index does not list,
-  such as a file not yet added, are each refused. Lake rejects a file that is not a module of the
-  workspace as an unknown target, and a `sorry` is a warning.
-* `LEAN-MODULE`: every Lean file Git's index lists, the library's and those under `tools/`, is a
-  `module` file, as Lean's parser reads its header (`Parser.parseHeader`,
-  `Elab.HeaderSyntax.isModule`). Lean refuses a `module` file's import of a file that is not one, so
-  a project's `module` file can import a module of the library only if the library's file is one.
-* `AXIOMS`: no library module declares an axiom, and every constant a library module declares rests
-  only on `propext`, `Classical.choice` and `Quot.sound`, Lean's own axioms. So no claim the
-  library makes about itself rests on `sorry` (`sorryAx`), on code run to decide it (the axiom
-  `native_decide` adds to the module that uses it, asserting what that code returned) or on an
-  axiom of the project. The library's modules must declare at least one constant.
-* `PROCESS`: the compiled code of the library, each compiled declaration of a library module with
-  everything it uses, as Lean's C emitter collects that (`Lean.IR.collectUsedDecls`, closures and
-  initializers included), calls no function of Lean's runtime that starts a process or that tells a
-  process where it lies or what it runs in (`processQueries`). So a text the library computes takes
-  nothing from those, and a checker that refuses a process start can call the library. The one
-  exception is `notFollowed`. The rule fails rather than passing when it reads no compiled code,
-  when a declaration it reaches has no compiled code to read, or when a function of `boundQueries`
-  is not bound to the C function it lists, as a new Lean release might make it. It sees calls by
-  name: it does not see a closure called through a value held in a reference, such as Lean's table
-  of elaborators, or code of a project that a text's term elaborates.
-* `CODES`: the audit of declared types' codes (`LeanIntent.CodeAudit`) accepts every constant the
-  library's modules declare, its worked examples included: no declaration they depend on attests a
-  declared type's code with a code or isomorphism other than the one the deriving handler writes
-  from the type's declaration, and none rests on an axiom other than Lean's three. `tools/codes.lean`
-  says what it prints and when it fails; the rule fails rather than passing when the library's
-  modules declare no constant.
-
-The rules read what the build produced, so they hold only if no code the build runs was written to
-defeat them: elaborating a Lean file runs the metaprograms it invokes.
-
-## The listing of tests
-
-With `--tests` this program checks nothing and prints the tests of the repository, one line each,
-for the no-mistakes pipeline, whose `test.tests_as_evidence` setting in `.no-mistakes.yaml` blocks
-a change whose listing gains a line that its base's listing lacks. A test is code whose verdict
-comes from running it on chosen inputs, rather than from a proof or a type-check over every input.
-It reads one Lake project, the one at the repository's top level, and runs only under the Lean
-this repository pins (`testsLean`). It reads:
-
-* the project's Lean files, every one Git's index lists, `tools/` included, in an order in which
-  every file comes after the files of the project it imports, as Lean's parser reads its header
-  (`Parser.parseHeader`);
-* each file's commands, from Lean's frontend, which elaborates the file in a process of its own
-  (`--tests-module`) against the modules of the project it imports, written by the processes before
-  it to a directory removed afterwards, with `debug.byAsSorry`, so that no proof written with `by`
-  is elaborated: the syntax of each command as Lean's parser read it, as macros expanded it and as
-  Lean elaborated it as a command, and the elaborators that ran, from the info tree of the snapshot
-  Lean's frontend makes of the command;
-* the test driver `lakefile.toml` names for `lake test`, from Lake's loader.
-
-A command is a test when its syntax holds a token of `testTokens`, the commands, terms and tactics
-of the pinned Lean that evaluate code the file writes or compare what running a command, a tactic
-or a simp set on a chosen input produced with what the file states; when it holds a configuration
-that makes `decide` run compiled code (`nativeConfig`); or when an elaborator the project declares,
-other than a macro, elaborates some of it. A test driver is a test too. Each line is the file's
-path, quoted; the number of commands of the file, up to and including the test, whose syntax is the
-same as its own; and that syntax with positions, whitespace and comments left out (`syntaxKey`). A
-line therefore changes only when its test changes, the file is renamed, or a command with the same
-syntax is added or removed before it in the file. The listing exits with status `0` and prints
-nothing but these lines when it has read every file. It fails, with another status, when Git's
-index lists no Lean file, when the imports form a cycle, when Lean cannot elaborate a file or its
-imports, when a command holds a token that starts with `#` and a letter that neither `testTokens`
-nor `otherTokens` classifies, or when the Lean that runs it is not the release `testsLean` names.
-
-Not every check of a chosen input is listed. A declaration that Lean's elaborator and kernel check,
-`theorem` and `example` among them, is not a test unless it holds one of the tokens or
-configurations above; a proof about a chosen input, such as `example : f 3 = 9 := by decide`, is
-left to review. A proof written with `by` is read only as its syntax, so code that a project's macro
-or elaborator, or a configuration given as a term, would run inside it is not seen; nor is code
-that Lean evaluates to another end than a verdict, such as `include_str`'s path or a
-configuration's value; nor is code that a deriving handler the project declares runs, since a
-deriving handler is no elaborator and the commands it elaborates are elaborated by Lean's own, so a
-command whose `deriving` clause names one is not listed (the library's handler,
-`LeanIntent.Declared`, writes a code and an isomorphism whose proofs Lean's kernel checks).
--/
-
 open Lean
 
 namespace Check
 
-/-- A rejection: the code of the rule that rejects and what it rejects. -/
 structure Rejection where
   rule : String
   message : String
 
-/-- Lean's own axioms, the only ones a library declaration may rest on. -/
 def allowedAxioms : List Name := [``propext, ``Classical.choice, ``Quot.sound]
 
-/-- Runs `cmd` with `args`, returning its exit status and its standard output and error. -/
+def ratchetFile : String := "tools/comment-ratchet.json"
+
 def run (cmd : String) (args : Array String) : IO (UInt32 × String) := do
   let out ← IO.Process.output { cmd, args }
   return (out.exitCode, out.stdout ++ out.stderr)
 
-/-- The output of `git` run with `args`, or an error when it fails. -/
 def git (args : Array String) : IO String := do
   let o ← IO.Process.output { cmd := "git", args }
   unless o.exitCode == 0 do
     throw <| IO.userError s!"git {" ".intercalate args.toList} failed:\n{o.stderr}"
   return o.stdout
 
-/-- The Lean files that Git's index lists under the current directory, relative to it. -/
 def trackedLeanFiles : IO (Array String) := do
   let out ← git #["ls-files", "-z", "--", "*.lean"]
   return ((out.splitOn "\x00").filter (· ≠ "")).toArray
 
-/-- The library's Lean files: the tracked Lean files outside `tools/`. -/
 def libraryFiles : IO (Array String) :=
   return (← trackedLeanFiles).filter (!·.startsWith "tools/")
 
-/-- The module names Lean gives the files of `files`, relative to the current directory. -/
 def moduleNames (files : Array String) : IO (Array Name) := do
   let cwd ← IO.currentDir
   files.mapM fun f => moduleNameOfFileName (System.FilePath.mk f) (some cwd)
 
-/-- The configuration of the project in the current directory, as Lake's own loader reads it from
-`lakefile.toml`, without resolving dependencies, so that reading it runs no code of the project. -/
 def loadConfig : IO Lake.Package := do
   let (elan?, lean?, lake?) ← Lake.findInstall?
   let some lean := lean? | throw <| IO.userError "Lake found no Lean installation"
@@ -182,12 +52,9 @@ def loadConfig : IO Lake.Package := do
     | throw <| IO.userError "Lake could not load lakefile.toml"
   return pkg
 
-/-- The keys of the table `t` that `allowed` does not hold, each written after `path`. -/
 def extraKeys (path : String) (allowed : List Name) (t : Lake.Toml.Table) : Array String :=
   t.items.filterMap fun (k, _) => if allowed.contains k then none else some s!"{path}{k}"
 
-/-- The keys of `lakefile.toml`, as Lake's own TOML parser reads it into `t`, that `LAKE-CONFIG`
-does not allow; a value of another shape than an allowed key takes counts as a key not allowed. -/
 def configExtraKeys (t : Lake.Toml.Table) : Array String := Id.run do
   let mut extra := extraKeys "" [`name, `defaultTargets, `leanOptions, `lean_lib] t
   for (k, v) in t.items do
@@ -205,7 +72,6 @@ def configExtraKeys (t : Lake.Toml.Table) : Array String := Id.run do
       | _ => extra := extra.push "lean_lib, which is not an array of tables"
   return extra
 
-/-- `LAKE-CONFIG` for the project in the current directory. -/
 def checkConfig : IO (Array Rejection) := do
   let reject (message : String) : Rejection := { rule := "LAKE-CONFIG", message }
   let mut errs : Array Rejection := #[]
@@ -219,9 +85,6 @@ def checkConfig : IO (Array Rejection) := do
     errs := errs.push (reject s!"lakefile.toml sets {k}, which is not among the keys this rule allows")
   return errs
 
-/-- `LEAN-BUILD`'s first part: the modules the library targets of `pkg` select, as Lake reads each
-target's globs over the working tree, are exactly `mods`, the modules Lean gives the library files
-`files`, and each target selects at least one. -/
 def checkModules (pkg : Lake.Package) (files : Array String) (mods : Array Name) :
     IO (Array Rejection) := do
   let reject (message : String) : Rejection := { rule := "LEAN-BUILD", message }
@@ -240,8 +103,6 @@ def checkModules (pkg : Lake.Package) (files : Array String) (mods : Array Name)
       errs := errs.push (reject s!"a library target selects the module {m}, whose file Git's index does not list, so these rules do not build or audit it")
   return errs
 
-/-- `LEAN-MODULE` for the Lean files `files`: each is a `module` file, as Lean's parser reads its
-header. A file whose header Lean's parser cannot read is an error, since the rule cannot decide it. -/
 def checkModuleFiles (files : Array String) : IO (Array Rejection) := do
   let mut errs : Array Rejection := #[]
   for f in files do
@@ -254,8 +115,6 @@ def checkModuleFiles (files : Array String) : IO (Array Rejection) := do
         s!"{f} is not a `module` file: its header does not begin with `module`" }
   return errs
 
-/-- `LEAN-BUILD`'s second part: Lake builds every file of `files`, each given as its target, with
-warnings as errors. -/
 def build (files : Array String) : IO (Array Rejection) := do
   let (code, out) ← run "lake" (#["build", "--wfail"] ++ files)
   if code == 0 then
@@ -263,10 +122,6 @@ def build (files : Array String) : IO (Array Rejection) := do
   return #[{ rule := "LEAN-BUILD", message :=
     s!"lake build --wfail of the library's Lean files failed; a file that is not a module of the workspace is an unknown target:\n{out}" }]
 
-/-- `CODES` for the library's modules `mods`, built into the directory `libDir`, by the status of
-`tools/codes.lean`: no rejection for `0`; for `1`, a refusal, one rejection for each line it printed
-to standard output, or, when it printed none, one rejection carrying its standard error; and for
-any other status, `2` when it could not run, an error carrying its standard output and error. -/
 def checkCodes (libDir : System.FilePath) (mods : Array Name) : IO (Array Rejection) := do
   let args := #["--run", "tools/codes.lean"] ++ mods.map (·.toString)
   let o ← IO.Process.output { cmd := "lean", args, env := #[("LEAN_PATH", some libDir.toString)] }
@@ -280,11 +135,9 @@ def checkCodes (libDir : System.FilePath) (mods : Array Name) : IO (Array Reject
     return lines.map fun l => { rule := "CODES", message := l }
   | c => throw <| IO.userError s!"tools/codes.lean could not run (status {c}):\n{o.stdout}{o.stderr}"
 
-/-- The axioms that the constant `c` of `env` rests on, as Lean collects them. -/
 def axiomsOf (env : Environment) (c : Name) : IO (Array Name) :=
   (collectAxioms c : CoreM (Array Name)).toIO' { fileName := "<check>", fileMap := default } { env }
 
-/-- `AXIOMS` for the constant `c`, declared by the module `mod`. -/
 def auditConstant (env : Environment) (mod : Name) (c : Name) (ci : ConstantInfo) :
     IO (Array Rejection) := do
   let mut errs : Array Rejection := #[]
@@ -296,77 +149,30 @@ def auditConstant (env : Environment) (mod : Name) (c : Name) (ci : ConstantInfo
       errs := errs.push (reject s!"rests on the axiom {a}")
   return errs
 
-/-- The atoms of `stx`, appended to `acc`. -/
 partial def atoms (stx : Syntax) (acc : Array String) : Array String :=
   match stx with
   | .atom _ val => acc.push val
   | .node _ _ args => args.foldl (fun acc arg => atoms arg acc) acc
   | _ => acc
 
-/-- The nodes of `stx`, appended to `acc`. -/
 partial def nodes (stx : Syntax) (acc : Array Syntax) : Array Syntax :=
   match stx with
   | .node _ _ args => args.foldl (fun acc arg => nodes arg acc) (acc.push stx)
   | _ => acc
 
-
-/-- The Lean release whose elaborators `testTokens`, `otherTokens` and `nativeConfig` describe. They
-were read from Lean 4.34.1 and again from 4.35.0: 4.35.0's token table, with `Lean`, `Lake` and
-`Std` imported, holds the same 29 tokens that start with `#` and a letter as 4.34.1's; and the
-declarations of its modules under `Lean.Elab`, `Lean.Meta`, `Std` and `Lake` that use
-`evalTerm`, `evalExpr`, `evalConst` or `Meta.nativeEqTrue` differ from 4.34.1's only by one
-declaration moved to another module, by the configuration of the `constructor` tactic, which Lean
-evaluates to its value, and by the removal of `Meta.reduceBoolNative`, which served
-`Lean.reduceBool`, a constant 4.35.0 no longer has. The listing refuses to run under any other
-release, whose elaborators they may not describe. -/
 def testsLean : String := "4.35.0"
 
-/-- The tokens of the commands, terms and tactics of the pinned Lean whose verdict comes from
-running code on inputs the file chooses, rather than from Lean's elaborator and kernel checking
-that a term has a type. Two kinds, read from the pinned Lean's elaborators:
-
-* those that evaluate a term the file writes with Lean's evaluator (`evalTerm`, `evalExpr`,
-  `evalConst`) and fail when the evaluation throws or yields `false`: `#eval`, `#eval!` and `#guard`;
-  `run_cmd`, `run_elab`, `run_meta` and `run_tac`, which run a metaprogram, and `by_elab`, which runs
-  one to make a term; `test_extern`, which compares a function's compiled implementation with its
-  definition on an input; and `native_decide`, which takes its decision from compiled code
-  (`Meta.nativeEqTrue`) and adds an axiom asserting it, instead of Lean's kernel reducing it;
-* those that run a command, a tactic or a simp set on an input the file chooses and compare what it
-  produced with what the file states: `#guard_msgs`, `#guard_panic`, `#guard_expr`, `#check_simp`,
-  `#check_tactic` and `#check_tactic_failure`.
-
-The evaluating elaborators were found by searching the pinned Lean for calls of its evaluators and
-of `Meta.nativeEqTrue`. Those that evaluate code the file writes to another end than a verdict on
-it are not tests: `include_str` evaluates the path of a file it includes, `#widget` the widget it
-displays and a tactic's configuration its value, and `idbg` is a debugger; `dbg_trace` runs only
-when compiled code runs. Code written to fail on a chosen input there is not listed. `bv_decide` and
-`bv_check` call `Meta.nativeEqTrue` on Lean's own checker of a certificate, not on code the file
-writes, and prove their goal for every value of its variables; `AXIOMS` refuses the axiom they add.
-The commands of the second kind are the tokens of the pinned Lean's token table, with `Lean`,
-`Lake` and `Std` imported, that start with `#` and a letter, each read from its elaborator. -/
 def testTokens : List String :=
   ["#eval", "#eval!", "#guard", "run_cmd", "run_elab", "run_meta", "run_tac", "by_elab",
    "test_extern", "native_decide", "#guard_msgs", "#guard_panic", "#guard_expr", "#check_simp",
    "#check_tactic", "#check_tactic_failure"]
 
-/-- The rest of those tokens of the pinned Lean that start with `#` and a letter, none of which is a
-test: the command fails only when Lean cannot elaborate what it is given, so its verdict is a
-type-check (`#check`, `#check_failure`, which succeeds only when its term does not type-check,
-`#synth`, `#reduce`), or it prints or reports what Lean has (`#print`, `#where`, `#version`, ...,
-and `#grind_lint`, which reports how many theorems `grind` instantiates), or it runs the command
-it is given (`#time`, `#info_trees`, `#with_exporting`), or it evaluates the widget it displays
-(`#widget`), or it is the vector literal `#v[`. A token that starts with `#` and a letter and is in
-neither set makes the listing an error, so that no such command goes unclassified. -/
 def otherTokens : List String :=
   ["#check", "#check_failure", "#check_assertions", "#synth", "#reduce", "#print", "#where",
    "#version", "#exit", "#import_path", "#show_deprecated_modules", "#dump_async_env_state",
    "#discr_tree_key", "#discr_tree_simp_key", "#grind_lint", "#widget", "#time", "#info_trees",
    "#with_exporting", "#v["]
 
-/-- Whether `n` is syntax that makes `decide` take its decision from compiled code
-(`Meta.nativeEqTrue`): a configuration item that sets `native`, `+native` or `(native := v)`, or a
-`decide` whose configuration holds `(config := c)`, whose value Lean evaluates into the whole
-configuration of `decide`, `native` included. -/
 def nativeConfig (n : Syntax) : Bool :=
   let item (kinds : List Name) (names : List Name) (m : Syntax) : Bool :=
     kinds.contains m.getKind && m[1].isIdent && names.contains m[1].getId
@@ -374,37 +180,17 @@ def nativeConfig (n : Syntax) : Bool :=
   item ([``Parser.Term.posConfigItem, ``Parser.Tactic.posConfigItem] ++ vals) [`native] n ||
     (n.getKind == ``Parser.Tactic.decide && (nodes n #[]).any (item vals [`config]))
 
-/-- `n` written so that distinct names give distinct strings: each component in turn, a string as a
-quoted literal and a number in decimal, after `_` for the anonymous name. -/
 def nameKey : Name → String
   | .anonymous => "_"
   | .str p s => nameKey p ++ "." ++ s.quote
   | .num p k => nameKey p ++ "." ++ toString k
 
-/-- `stx` with its source information left out (positions, whitespace and comments, which Lean's
-parser keeps there as trivia): a node as its kind and its children in parentheses, an atom as its
-quoted text and an identifier as its name, so that two syntax trees give the same string exactly
-when they agree in kinds, atoms, names and shape. -/
 partial def syntaxKey : Syntax → String
   | .missing => "?"
   | .atom _ val => val.quote
   | .ident _ _ n _ => "`" ++ nameKey n
   | .node _ k args => "(" ++ nameKey k ++ args.foldl (fun acc a => acc ++ " " ++ syntaxKey a) "" ++ ")"
 
-/-- The tests of `file`, the module `mod` of a project whose modules are `mods`, read by Lean's
-frontend as it elaborates the file with `debug.byAsSorry`, which elaborates every `by` block whose
-type is a proposition as `sorry`. A command is a test when Lean, while it elaborates the command,
-runs code on inputs the file chooses and takes the command's verdict from that run: its syntax, as
-Lean's parser read it, as a macro expanded it or as Lean elaborated it as a command, holds a token
-of `testTokens` or syntax that `nativeConfig` accepts, or some of it is elaborated by an elaborator
-the project declares other than a macro. A command's syntax and the info tree of its elaboration
-are those of the snapshot Lean's frontend makes of the command, the info tree that records its
-macro expansions and elaborators. Each test is printed as the file's path from the repository's top
-level, the number of commands of the file before it, the test included, whose syntax is the same
-as its own, and `syntaxKey` of its syntax. The module is then written to `out`, so that the modules
-that import it can be elaborated. A file Lean cannot elaborate, its imports included, is an error,
-and so is a command whose syntax holds a token that starts with `#` and a letter and is in neither
-`testTokens` nor `otherTokens`. -/
 unsafe def testsOfModule (path file : String) (mod : Name) (mods : Array Name)
     (out : System.FilePath) : IO (Array String) := do
   let input ← IO.FS.readFile file
@@ -463,7 +249,6 @@ unsafe def testsOfModule (path file : String) (mod : Name) (mods : Array Name)
   writeModule env olean
   return tests
 
-/-- The modules `file` imports, as Lean's parser reads its header. -/
 def importsOf (file : String) : IO (Array Name) := do
   let input ← IO.FS.readFile file
   let (header, _, messages) ← Parser.parseHeader (Parser.mkInputContext input file)
@@ -471,8 +256,6 @@ def importsOf (file : String) : IO (Array Name) := do
     throw <| IO.userError s!"{file}: Lean's parser could not read its header"
   return (Elab.headerToImports header).map (·.module)
 
-/-- The numbers below `n` in an order in which each comes after every number `deps` gives it, or
-`none` when no such order exists because the numbers' `deps` form a cycle. -/
 partial def importOrder (n : Nat) (deps : Nat → Array Nat) : Option (Array Nat) :=
   let rec go (done : Array Nat) : Option (Array Nat) :=
     if done.size == n then some done
@@ -481,12 +264,9 @@ partial def importOrder (n : Nat) (deps : Nat → Array Nat) : Option (Array Nat
       | none => none
   go #[]
 
-/-- The file in `out` to which `moduleTests` writes the tests of the module `mod`. -/
 def moduleTestsFile (out : System.FilePath) (mod : Name) : System.FilePath :=
   modToFilePath out mod "tests"
 
-/-- The lines this program prints when `lean` runs it with `args` in `cwd`, or an error holding its
-output when it exits with any status but `0`. -/
 def runSelf (args : Array String) (cwd : Option System.FilePath := none) : IO (Array String) := do
   let top := System.FilePath.mk (← git #["rev-parse", "--show-toplevel"]).trimAscii.toString
   let script := top / "tools" / "check.lean"
@@ -495,10 +275,6 @@ def runSelf (args : Array String) (cwd : Option System.FilePath := none) : IO (A
     throw <| IO.userError s!"lean --run tools/check.lean {" ".intercalate args.toList} exited with status {o.exitCode}:\n{o.stderr}{o.stdout}"
   return ((o.stdout.splitOn "\n").filter (· ≠ "")).toArray
 
-/-- Writes the tests of `file`, one of the tracked Lean files of the project in the current
-directory, whose imports of the project are written to `out` (`testsOfModule`), to the file
-`moduleTestsFile` names, read by this program in a process of its own, so that no module's
-environment stays in memory while the next is elaborated. -/
 unsafe def moduleTests (file out : String) : IO Unit := do
   let files ← trackedLeanFiles
   let mods ← moduleNames files
@@ -509,12 +285,6 @@ unsafe def moduleTests (file out : String) : IO Unit := do
   let tests ← testsOfModule (pre ++ file) file mod mods out
   IO.FS.writeFile (moduleTestsFile out mod) (String.join (tests.toList.map (· ++ "\n")))
 
-/-- The tests of the project in the current directory: those `moduleTests` reads in each tracked
-Lean file, every file read after the files of the project it imports, whose modules are written to
-a directory removed afterwards; and the test driver Lake would run for `lake test`, if
-`lakefile.toml` names one, as Lake's loader reads it. Each file's tests are read from the file
-`moduleTests` writes, not from what its process prints, which holds whatever the code the project's
-commands run prints. -/
 def projectTests : IO (Array String) := do
   unless Lean.versionString == testsLean do
     throw <| IO.userError s!"the tests are read for Lean {testsLean}, not Lean {Lean.versionString}, which runs here: read testTokens, otherTokens and nativeConfig again from its elaborators"
@@ -539,39 +309,25 @@ def projectTests : IO (Array String) := do
   finally
     IO.FS.removeDirAll out
 
-
-/-- The declarations of Lean's `Init` that `PROCESS` confirms are bound to the C function it looks
-for: the functions of `IO` that start a process (`IO.Process.output` and `IO.Process.run` go through
-`IO.Process.spawn`), that say where the process lies or what its environment holds. -/
 def boundQueries : List (Name × String) :=
   [(``IO.Process.spawn, "lean_io_process_spawn"), (``IO.appPath, "lean_io_app_path"),
    (``IO.currentDir, "lean_io_current_dir"),
    (``IO.Process.getCurrentDir, "lean_io_process_get_current_dir"),
    (``IO.getEnv, "lean_io_getenv")]
 
-/-- The C functions of Lean's runtime that `PROCESS` refuses: those of `boundQueries`, and libuv's
-that say the same or what user and host the process runs as (`Std.Internal.UV.System`, read at Lean
-v4.35.0 by a search of every `extern` attribute for names holding `spawn`, `exec`, `fork`, `system`,
-`getenv`, `environ`, `app_path`, `exe`, `current_dir`, `cwd`, `homedir`, `tmpdir`, `passwd`,
-`hostname` or `uname`). -/
 def processQueries : List String :=
   boundQueries.map (·.2) ++
     ["lean_uv_exepath", "lean_uv_cwd", "lean_uv_os_getenv", "lean_uv_os_environ",
      "lean_uv_os_homedir", "lean_uv_os_tmpdir", "lean_uv_os_get_passwd", "lean_uv_os_gethostname",
      "lean_uv_os_uname"]
 
-/-- What `PROCESS` does not follow, each with its reason. `Lean.manualRoot` reads `LEAN_MANUAL_ROOT`
-when Lean starts, for the links to Lean's manual it writes into a logged error and a docstring
-(`Lean/DocString/Links.lean`, `Lean/Log.lean`), neither of which any text of the library prints. -/
 def notFollowed : List Name := [`Lean.manualRoot]
 
-/-- Whether a compiled binding `entry` calls the C function `symbol`. -/
 def bindsTo (symbol : String) : ExternEntry → Bool
   | .standard _ fn => fn == symbol
   | .inline _ pattern => (pattern.splitOn symbol).length > 1
   | _ => false
 
-/-- `PROCESS` over the compiled declarations `roots`, reached in the environment `env`. -/
 def checkProcess (env : Environment) (roots : Array Name) : Array Rejection := Id.run do
   let reject (message : String) : Rejection := { rule := "PROCESS", message }
   if roots.isEmpty then
@@ -583,7 +339,6 @@ def checkProcess (env : Environment) (roots : Array Name) : Array Rejection := I
       | _ => false
     unless bound do
       errs := errs.push <| reject s!"{decl} is not bound to {symbol} under this Lean: read processQueries again from its extern attributes"
-  -- A breadth-first walk, whose parent map names one way each declaration is reached.
   let mut parent : Std.HashMap Name Name := roots.foldl (fun m r => m.insert r r) {}
   let mut queue := roots
   let mut next := 0
@@ -613,7 +368,414 @@ def checkProcess (env : Environment) (roots : Array Name) : Array Rejection := I
         queue := queue.push used
   return errs
 
-/-- Every rule for the project in the current directory. -/
+structure CommentSpan where
+  startByte : Nat
+  stopByte : Nat
+  kind : String
+  startLine : Nat
+  endLine : Nat
+
+structure CommentAcc where
+  spans : Std.HashMap Nat CommentSpan := {}
+
+def recordSpan (fileMap : FileMap) (kind : String) (startPos stopPos : String.Pos.Raw)
+    (acc : CommentAcc) : Except String CommentAcc :=
+  let sb := startPos.byteIdx
+  let eb := stopPos.byteIdx
+  match acc.spans.get? sb with
+  | some prev =>
+    if prev.stopByte == eb && prev.kind == kind then .ok acc
+    else .error s!"inconsistent overlapping comment span at byte {sb}"
+  | none =>
+    let lastPos := if eb > sb then String.Pos.Raw.prev fileMap.source stopPos else stopPos
+    let sl := (fileMap.toPosition startPos).line
+    let el := (fileMap.toPosition lastPos).line
+    .ok { spans := acc.spans.insert sb { startByte := sb, stopByte := eb, kind, startLine := sl, endLine := el } }
+
+partial def scanTrivia (fileMap : FileMap) (sub : Substring.Raw) (acc : CommentAcc) :
+    Except String CommentAcc :=
+  go sub.startPos acc
+where
+  finishBlock (nesting : Nat) (pos : String.Pos.Raw) : Except String String.Pos.Raw :=
+    if pos ≥ sub.stopPos then
+      .error "unterminated block comment in Lean parser trivia"
+    else
+      let c := String.Pos.Raw.get sub.str pos
+      let next := String.Pos.Raw.next sub.str pos
+      if c == '-' && next < sub.stopPos && String.Pos.Raw.get sub.str next == '/' then
+        let after := String.Pos.Raw.next sub.str next
+        if nesting == 1 then .ok after
+        else finishBlock (nesting - 1) after
+      else if c == '/' && next < sub.stopPos && String.Pos.Raw.get sub.str next == '-' then
+        finishBlock (nesting + 1) (String.Pos.Raw.next sub.str next)
+      else
+        finishBlock nesting next
+  go (pos : String.Pos.Raw) (acc : CommentAcc) : Except String CommentAcc :=
+    if pos ≥ sub.stopPos then
+      .ok acc
+    else
+      let c := String.Pos.Raw.get sub.str pos
+      let next := String.Pos.Raw.next sub.str pos
+      if c.isWhitespace then
+        go next acc
+      else if c == '-' && next < sub.stopPos && String.Pos.Raw.get sub.str next == '-' then
+        let rec toEol (p : String.Pos.Raw) : String.Pos.Raw :=
+          if p ≥ sub.stopPos then p
+          else if String.Pos.Raw.get sub.str p == '\n' then p
+          else toEol (String.Pos.Raw.next sub.str p)
+        let eol := toEol (String.Pos.Raw.next sub.str next)
+        match recordSpan fileMap "line" pos eol acc with
+        | .ok acc' => go eol acc'
+        | .error e => .error e
+      else if c == '/' && next < sub.stopPos && String.Pos.Raw.get sub.str next == '-' then
+        let afterOpen := String.Pos.Raw.next sub.str next
+        if afterOpen ≥ sub.stopPos then
+          .error "unterminated block comment in Lean parser trivia"
+        else
+          let third := String.Pos.Raw.get sub.str afterOpen
+          if third == '-' || third == '!' then
+            .error "unexpected doc comment opener in Lean parser trivia"
+          else
+            match finishBlock 1 (String.Pos.Raw.next sub.str afterOpen) with
+            | .error e => .error e
+            | .ok endPos =>
+              match recordSpan fileMap "block" pos endPos acc with
+              | .ok acc' => go endPos acc'
+              | .error e => .error e
+      else
+        .error s!"unexpected non-whitespace character {repr c} at byte {pos.byteIdx} in Lean parser trivia"
+
+def checkSlice (fileMap : FileMap) (input : String) (startPos stopPos : String.Pos.Raw)
+    (acc : CommentAcc) : Except String CommentAcc :=
+  if startPos < stopPos then
+    scanTrivia fileMap ⟨input, startPos, stopPos⟩ acc
+  else
+    .ok acc
+
+def checkLeading (fileMap : FileMap) (info : SourceInfo) (acc : CommentAcc) :
+    Except String CommentAcc :=
+  match info with
+  | .original leading _ _ _ =>
+    if leading.startPos < leading.stopPos then scanTrivia fileMap leading acc else .ok acc
+  | _ => .ok acc
+
+def checkTrailing (fileMap : FileMap) (info : SourceInfo) (acc : CommentAcc) :
+    Except String CommentAcc :=
+  match info with
+  | .original _ _ trailing _ =>
+    if trailing.startPos < trailing.stopPos then scanTrivia fileMap trailing acc else .ok acc
+  | _ => .ok acc
+
+def checkInfo (fileMap : FileMap) (info : SourceInfo) (acc : CommentAcc) :
+    Except String CommentAcc := do
+  let acc ← checkLeading fileMap info acc
+  checkTrailing fileMap info acc
+
+partial def walkSyntax (fileMap : FileMap) (stx : Syntax) (acc : CommentAcc) :
+    Except String CommentAcc := do
+  match stx with
+  | .missing => return acc
+  | .atom info _ => checkInfo fileMap info acc
+  | .ident info _ _ _ => checkInfo fileMap info acc
+  | .node info k args =>
+    let acc ← checkInfo fileMap info acc
+    if k == ``Parser.Command.docComment || k == ``Parser.Command.plainDocComment ||
+       k == ``Parser.Command.moduleDoc then
+      let kind := if k == ``Parser.Command.moduleDoc then "moddoc" else "doc"
+      let acc ← match stx.getPos?, stx.getTailPos? with
+        | some s, some e => recordSpan fileMap kind s e acc
+        | _, _ => .error s!"{kind} node has no source position"
+      let acc ← match stx.getHeadInfo? with
+        | some head => checkLeading fileMap head acc
+        | none => .ok acc
+      match stx.getTailInfo? with
+      | some tail => checkTrailing fileMap tail acc
+      | none => .ok acc
+    else
+      args.foldlM (fun acc arg => walkSyntax fileMap arg acc) acc
+
+def collectCommand (file : String) (fileMap : FileMap) (input : String)
+    (prevPos nextPos : String.Pos.Raw) (stx : Syntax) (acc : CommentAcc) : IO CommentAcc := do
+  if stx.isOfKind ``Parser.Command.exit then
+    throw <| IO.userError s!"{file}: `#exit` is not allowed when checking comments"
+  let step : Except String CommentAcc := do
+    let acc ← match stx.getPos? with
+      | some cpos => checkSlice fileMap input prevPos cpos acc
+      | none => .ok acc
+    let acc ← walkSyntax fileMap stx acc
+    match stx.getTailPos? with
+    | some cend => checkSlice fileMap input cend nextPos acc
+    | none => .ok acc
+  match step with
+  | .ok a => return a
+  | .error e => throw <| IO.userError s!"{file}: {e}"
+
+inductive FastParseOutcome where
+  | ok (spans : Array CommentSpan)
+  | needsFrontend
+  | failed (msg : String)
+
+def sortedSpans (acc : CommentAcc) : Array CommentSpan :=
+  (acc.spans.toList.map (·.2)).toArray.qsort fun a b => a.startByte < b.startByte
+
+def distinctCommentLines (spans : Array CommentSpan) : Nat := Id.run do
+  let mut ls : Std.HashSet Nat := {}
+  for sp in spans do
+    for l in [sp.startLine : sp.endLine + 1] do
+      ls := ls.insert l
+  return ls.size
+
+def parseCommentsFast (env : Environment) (file : String) : IO FastParseOutcome := do
+  let input ← IO.FS.readFile file
+  let inputCtx := Parser.mkInputContext input file
+  let (header, mps, messages) ← Parser.parseHeader inputCtx
+  if messages.hasErrors then
+    let shown ← messages.toList.mapM (·.toString)
+    return .failed s!"{file}: Lean's parser could not read its header:\n{String.join shown}"
+  let mut acc : CommentAcc := {}
+  let headerStep : Except String CommentAcc := do
+    match header.raw.getPos? with
+    | some hpos =>
+      let acc ← checkSlice inputCtx.fileMap input ⟨0⟩ hpos acc
+      let acc ← walkSyntax inputCtx.fileMap header.raw acc
+      match header.raw.getTailPos? with
+      | some hend => checkSlice inputCtx.fileMap input hend mps.pos acc
+      | none => .ok acc
+    | none =>
+      checkSlice inputCtx.fileMap input ⟨0⟩ mps.pos acc
+  match headerStep with
+  | .ok a => acc := a
+  | .error e => return .failed s!"{file}: {e}"
+  let pmctx : Parser.ParserModuleContext := { env, options := {} }
+  let mut mps := mps
+  let mut messages := messages
+  repeat
+    let prevPos := mps.pos
+    let (stx, mps', messages') := Parser.parseCommand inputCtx pmctx mps messages
+    if messages'.hasErrors then
+      return .needsFrontend
+    mps := mps'
+    messages := messages'
+    if stx.isOfKind ``Parser.Command.eoi then
+      let eoiStep : Except String CommentAcc := do
+        let acc ← walkSyntax inputCtx.fileMap stx acc
+        checkSlice inputCtx.fileMap input prevPos inputCtx.inputString.rawEndPos acc
+      match eoiStep with
+      | .ok a => acc := a
+      | .error e => return .failed s!"{file}: {e}"
+      break
+    try
+      acc ← collectCommand file inputCtx.fileMap input prevPos mps.pos stx acc
+    catch e =>
+      return .failed (toString e)
+  unless mps.pos == inputCtx.inputString.rawEndPos do
+    return .failed s!"{file}: parser stopped at byte {mps.pos.byteIdx} before EOF {inputCtx.inputString.rawEndPos.byteIdx}"
+  return .ok (sortedSpans acc)
+
+unsafe def parseCommentsViaFrontend (file : String) (mod : Name) : IO (Array CommentSpan) := do
+  let input ← IO.FS.readFile file
+  let inputCtx := Parser.mkInputContext input file
+  let opts := (({} : Options).setBool `Elab.async false).setBool `debug.byAsSorry true
+  let (header, parserState, messages) ← Parser.parseHeader inputCtx
+  if messages.hasErrors then
+    let shown ← messages.toList.mapM (·.toString)
+    throw <| IO.userError s!"{file}: Lean's parser could not read its header:\n{String.join shown}"
+  enableInitializersExecution
+  let (env, messages) ← Elab.processHeader header opts messages inputCtx (mainModule := mod)
+  if messages.hasErrors then
+    let shown ← messages.toList.mapM (·.toString)
+    throw <| IO.userError s!"{file}: Lean could not process its header:\n{String.join shown}"
+  let state := Elab.Command.mkState env messages opts
+  let s ← Elab.IO.processCommandsIncrementally inputCtx parserState state none
+  if s.commandState.messages.hasErrors then
+    let shown ← s.commandState.messages.toList.mapM (·.toString)
+    throw <| IO.userError s!"{file}: Lean could not parse or elaborate it:\n{String.join shown}"
+  let mut acc : CommentAcc := {}
+  let headerStep : Except String CommentAcc := do
+    match header.raw.getPos? with
+    | some hpos =>
+      let acc ← checkSlice inputCtx.fileMap input ⟨0⟩ hpos acc
+      let acc ← walkSyntax inputCtx.fileMap header.raw acc
+      match header.raw.getTailPos? with
+      | some hend => checkSlice inputCtx.fileMap input hend parserState.pos acc
+      | none => .ok acc
+    | none =>
+      checkSlice inputCtx.fileMap input ⟨0⟩ parserState.pos acc
+  match headerStep with
+  | .ok a => acc := a
+  | .error e => throw <| IO.userError s!"{file}: {e}"
+  let mut snap := s.initialSnap
+  let mut prevPos := parserState.pos
+  repeat
+    let cmd := snap.stx
+    let nextPos := snap.parserState.pos
+    if cmd.isOfKind ``Parser.Command.eoi then
+      let eoiStep : Except String CommentAcc := do
+        let acc ← walkSyntax inputCtx.fileMap cmd acc
+        checkSlice inputCtx.fileMap input prevPos inputCtx.inputString.rawEndPos acc
+      match eoiStep with
+      | .ok a => acc := a
+      | .error e => throw <| IO.userError s!"{file}: {e}"
+      prevPos := nextPos
+      break
+    acc ← collectCommand file inputCtx.fileMap input prevPos nextPos cmd acc
+    prevPos := nextPos
+    match snap.nextCmdSnap? with
+    | some next => snap := next.get
+    | none => break
+  unless prevPos == inputCtx.inputString.rawEndPos do
+    throw <| IO.userError s!"{file}: frontend stopped at byte {prevPos.byteIdx} before EOF {inputCtx.inputString.rawEndPos.byteIdx}"
+  return sortedSpans acc
+
+unsafe def fileCommentSpans (env : Environment) (file : String) (mod : Name) :
+    IO (Array CommentSpan) := do
+  match ← parseCommentsFast env file with
+  | .ok spans => return spans
+  | .failed msg => throw <| IO.userError msg
+  | .needsFrontend => parseCommentsViaFrontend file mod
+
+def parsePosNat (j : Json) (ctx : String) : IO Nat := do
+  match j with
+  | .num n =>
+    if n.exponent == 0 && n.mantissa > 0 then
+      return n.mantissa.toNat
+    throw <| IO.userError s!"{ctx}: expected a positive integer, got {j}"
+  | _ => throw <| IO.userError s!"{ctx}: expected a positive integer, got {j}"
+
+def loadRatchet : IO (Std.HashMap String (Nat × Nat)) := do
+  let raw ← IO.FS.readFile ratchetFile
+  let json ← match Json.parse raw with
+    | .ok j => pure j
+    | .error e => throw <| IO.userError s!"{ratchetFile}: invalid JSON: {e}"
+  let .arr entries := json
+    | throw <| IO.userError s!"{ratchetFile}: top-level JSON value must be an array"
+  let mut map : Std.HashMap String (Nat × Nat) := {}
+  for idx in [0 : entries.size] do
+    let entry := entries[idx]!
+    let .obj kvs := entry
+      | throw <| IO.userError s!"{ratchetFile}[{idx}]: entry must be a JSON object"
+    let keys := kvs.toList.map (·.1)
+    unless keys.length == 3 && keys.contains "file" && keys.contains "comments" && keys.contains "lines" do
+      throw <| IO.userError s!"{ratchetFile}[{idx}]: entry must have exact keys file, comments, lines"
+    let some (.str file) := kvs.get? "file"
+      | throw <| IO.userError s!"{ratchetFile}[{idx}]: file must be a string"
+    if file.isEmpty then
+      throw <| IO.userError s!"{ratchetFile}[{idx}]: file must not be empty"
+    if map.contains file then
+      throw <| IO.userError s!"{ratchetFile}[{idx}]: duplicate entry for {file}"
+    let some cJson := kvs.get? "comments"
+      | throw <| IO.userError s!"{ratchetFile}[{idx}]: missing comments"
+    let some lJson := kvs.get? "lines"
+      | throw <| IO.userError s!"{ratchetFile}[{idx}]: missing lines"
+    let comments ← parsePosNat cJson s!"{ratchetFile}[{idx}].comments ({file})"
+    let lines ← parsePosNat lJson s!"{ratchetFile}[{idx}].lines ({file})"
+    map := map.insert file (comments, lines)
+  return map
+
+unsafe def loadParserEnv (libDir : System.FilePath) (libMods : Array Name) : IO Environment := do
+  initSearchPath (← findSysroot) [libDir]
+  enableInitializersExecution
+  importModules ((libMods ++ #[`Lean, `Lake]).map fun m => { module := m }) {} (loadExts := true)
+
+unsafe def checkComments (libDir : System.FilePath) (libMods : Array Name)
+    (allFiles : Array String) : IO (Array Rejection) := do
+  let reject (message : String) : Rejection := { rule := "NO-COMMENTS", message }
+  if allFiles.isEmpty then
+    return #[reject "Git's index lists no Lean file"]
+  let ratchet ← loadRatchet
+  let mut errs : Array Rejection := #[]
+  for (f, _) in ratchet.toList do
+    unless allFiles.contains f do
+      errs := errs.push (reject s!"{ratchetFile} lists {f}, which is not a tracked Lean file")
+  let allMods ← moduleNames allFiles
+  let env ← loadParserEnv libDir libMods
+  for (f, m) in allFiles.zip allMods do
+    let spans ← fileCommentSpans env f m
+    let actualComments := spans.size
+    let actualLines := distinctCommentLines spans
+    match ratchet.get? f with
+    | none =>
+      if actualComments > 0 || actualLines > 0 then
+        errs := errs.push (reject s!"{f} has {actualComments} comment(s) across {actualLines} line(s), and is not in {ratchetFile}")
+    | some (maxComments, maxLines) =>
+      if actualComments == 0 && actualLines == 0 then
+        errs := errs.push (reject s!"{f} now has 0 comments; remove it from {ratchetFile} to lock in the ratchet")
+      else if actualComments > maxComments || actualLines > maxLines then
+        errs := errs.push (reject s!"{f} has {actualComments} comment(s) across {actualLines} line(s), exceeding its ratchet limit of {maxComments} comment(s) across {maxLines} line(s) in {ratchetFile}")
+      else if actualComments < maxComments || actualLines < maxLines then
+        errs := errs.push (reject s!"{f} now has {actualComments} comment(s) across {actualLines} line(s), below its ratchet limit of {maxComments} comment(s) across {maxLines} line(s); tighten {ratchetFile} to lock in the reduction")
+  return errs
+
+unsafe def listComments (target? : Option String) (asJson : Bool := false) : IO Unit := do
+  let allFiles ← trackedLeanFiles
+  if allFiles.isEmpty then
+    throw <| IO.userError "the project tracks no Lean file"
+  let pkg ← loadConfig
+  let libFiles ← libraryFiles
+  let libMods ← moduleNames libFiles
+  let allMods ← moduleNames allFiles
+  let env ← loadParserEnv pkg.leanLibDir libMods
+  match target? with
+  | some file =>
+    let some mod := (allFiles.zip allMods).find? (·.1 == file) |>.map (·.2)
+      | throw <| IO.userError s!"{file} is not a Lean file Git's index lists here"
+    let spans ← fileCommentSpans env file mod
+    let lines := distinctCommentLines spans
+    IO.println s!"{file}: {spans.size} comment(s), {lines} line(s)"
+    for sp in spans do
+      IO.println s!"  {sp.kind} L{sp.startLine}-L{sp.endLine}"
+  | none =>
+    let mut rows : Array (String × Nat × Nat) := #[]
+    let mut totComments := 0
+    let mut totLines := 0
+    for (f, m) in allFiles.zip allMods do
+      let spans ← fileCommentSpans env f m
+      let c := spans.size
+      let l := distinctCommentLines spans
+      if c > 0 then
+        rows := rows.push (f, c, l)
+        totComments := totComments + c
+        totLines := totLines + l
+    if asJson then
+      IO.println "["
+      for idx in [0 : rows.size] do
+        let (f, c, l) := rows[idx]!
+        let comma := if idx + 1 < rows.size then "," else ""
+        IO.println s!"  \{\"file\": {Json.str f}, \"comments\": {c}, \"lines\": {l}}{comma}"
+      IO.println "]"
+    else
+      for (f, c, l) in rows do
+        IO.println s!"{f}: {c} comment(s), {l} line(s)"
+      IO.println s!"total: {rows.size}/{allFiles.size} files with comments, {totComments} comment(s), {totLines} line(s)"
+
+def checkCommentsSubprocess : IO (Array Rejection) := do
+  let top := System.FilePath.mk (← git #["rev-parse", "--show-toplevel"]).trimAscii.toString
+  let script := top / "tools" / "check.lean"
+  let o ← IO.Process.output { cmd := "lean", args := #["--run", script.toString, "--check-comments"] }
+  match o.exitCode with
+  | 0 => return #[]
+  | 1 =>
+    let lines := ((o.stdout.splitOn "\n").filter (· ≠ "")).toArray
+    if lines.isEmpty then
+      return #[{ rule := "NO-COMMENTS", message :=
+        s!"tools/check.lean --check-comments exited with status 1 and printed no reason; its standard error:\n{o.stderr}" }]
+    return lines.map fun l => { rule := "NO-COMMENTS", message := l }
+  | c => throw <| IO.userError s!"tools/check.lean --check-comments could not run (status {c}):\n{o.stdout}{o.stderr}"
+
+unsafe def runCheckCommentsMain : IO UInt32 := do
+  try
+    let pkg ← loadConfig
+    let libFiles ← libraryFiles
+    let libMods ← moduleNames libFiles
+    let allFiles ← trackedLeanFiles
+    let errs ← checkComments pkg.leanLibDir libMods allFiles
+    for e in errs do
+      IO.println e.message
+    return if errs.isEmpty then 0 else 1
+  catch e =>
+    try IO.eprintln s!"tools/check.lean --check-comments could not run: {e}" catch _ => pure ()
+    return 2
+
 def check : IO (Array Rejection) := do
   let config ← checkConfig
   unless config.isEmpty do
@@ -626,13 +788,15 @@ def check : IO (Array Rejection) := do
   let selected ← checkModules pkg files mods
   unless selected.isEmpty do
     return selected
-  let notModules ← checkModuleFiles (← trackedLeanFiles)
+  let allFiles ← trackedLeanFiles
+  let notModules ← checkModuleFiles allFiles
   unless notModules.isEmpty do
     return notModules
   let built ← build files
   unless built.isEmpty do
     return built
   let codes ← checkCodes pkg.leanLibDir mods
+  let commentErrs ← checkCommentsSubprocess
   initSearchPath (← findSysroot) [pkg.leanLibDir]
   let env ← importModules (mods.map fun m => { module := m }) {}
   let idxs := mods.filterMap env.getModuleIdx?
@@ -648,14 +812,10 @@ def check : IO (Array Rejection) := do
           compiled := compiled.push c
   if audited == 0 then
     errs := errs.push { rule := "AXIOMS", message := "the library's modules declare no constant" }
-  return errs ++ checkProcess env compiled ++ codes
+  return errs ++ checkProcess env compiled ++ codes ++ commentErrs
 
 end Check
 
-/-- `unsafe` because reading a file's tests (`--tests-module`) runs Lean's frontend, which imports
-the file's modules with their environment extensions only after `enableInitializersExecution`,
-which is `unsafe`: it lets importing run the `initialize` declarations of the imported modules, as
-elaborating them did. -/
 public unsafe def main (args : List String) : IO UInt32 := do
   match args with
   | ["--tests"] =>
@@ -665,9 +825,20 @@ public unsafe def main (args : List String) : IO UInt32 := do
   | ["--tests-module", file, out] =>
     Check.moduleTests file out
     return 0
+  | ["--check-comments"] =>
+    Check.runCheckCommentsMain
+  | ["--comments"] =>
+    Check.listComments none false
+    return 0
+  | ["--comments", file] =>
+    Check.listComments (some file) false
+    return 0
+  | ["--comments-json"] =>
+    Check.listComments none true
+    return 0
   | [] =>
     let errs ← Check.check
     for e in errs do
       IO.println s!"[{e.rule}] {e.message}"
     return if errs.isEmpty then 0 else 1
-  | _ => throw <| IO.userError "usage: lean --run tools/check.lean [--tests | --tests-module <file> <out>]"
+  | _ => throw <| IO.userError "usage: lean --run tools/check.lean [--tests | --tests-module <file> <out> | --check-comments | --comments [<file>] | --comments-json]"

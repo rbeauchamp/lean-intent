@@ -2,52 +2,6 @@ module
 
 public import LeanIntent.Cone
 
-/-!
-# The declarations a term's meaning reaches
-
-A term means what the declarations it names mean, and those mean what the declarations they name
-mean in turn. `meaning lookup eqn stop roots` collects the declarations reached from the names
-`roots`, by following from each declaration every name it refers to, and stopping at the names
-`stop` chooses. `LeanIntent.Render` prints every declaration it collects, so that what an owner
-reads of a term reaches everything the term means.
-
-What a declaration refers to is the relation of the cone that the check that a record does not
-depend on its implementation follows (lean-intent #2), used here as that check defines it and not
-restated: `LeanIntent.Cone.RefersTo`, whose names `LeanIntent.Cone.declRefs` lists
-(`LeanIntent.Cone.mem_declRefs`). It is what can change what a term that names the declaration
-means: the names its type mentions (`LeanIntent.Cone.Mentions`: as a constant, as the structure a
-projection reads, or as the type Lean's kernel gives a literal); a definition's value; an inductive
-type's mutual block, constructors and recursors, named as Lean names them; a constructor's
-inductive type; and a recursor's block and rules. A theorem's proof and an opaque constant's value
-are not followed: Lean's kernel never unfolds an opaque constant, and by definitional proof
-irrelevance any two proofs of a proposition are equal, so neither changes what a term that names
-the constant means. Nor is the mutual block of a definition, theorem or opaque constant, which
-Lean's kernel does not read.
-
-One exception (`refsVia`): a definition that `eqn` gives an equation for refers to the names its
-type and that equation mention, in place of the names its value mentions. `LeanIntent.Render` gives
-one for a definition by structural or well-founded recursion, whose value Lean compiles into a term
-its syntax cannot write, and shows it by that equation, which determines it; so what is collected
-is what the shown form depends on.
-
-What is proved, for every lookup, every choice of equations, every choice of names to stop at, and
-every list of roots:
-
-* `meaning_ok`: when `meaning` returns a list of declarations, each is the one `lookup` finds under
-  its name, and a name is in the list exactly when it is reached (`Reach`): a root, or a name a
-  reached declaration refers to (`refsVia`), that `stop` does not choose. So every name reached is
-  collected, and nothing else is.
-* `ctor_mem`, `induct_mem`, `block_mem`: in particular, the list holds every constructor of every
-  inductive type it holds, the inductive type of every constructor it holds, and the block of every
-  recursor it holds, except names `stop` chooses.
-* `meaning_unknown`: when it refuses because a name has no declaration, that name is reached.
-
-`meaning` also refuses when it would take more than `2 ^ 64` steps, more than the declarations that
-fit in a 64-bit address space could ask of it, so it never returns a list it has not finished. That
-`lookup` returns the declarations Lean's kernel checked is trusted with Lean; `LeanIntent.Render`
-reads them with `Lean.Environment.find?`.
--/
-
 public section
 
 namespace LeanIntent.Print
@@ -55,9 +9,6 @@ namespace LeanIntent.Print
 open Lean (Name ConstantInfo Expr)
 open LeanIntent.Cone (declRefs mem_declRefs exprRefs mem_exprRefs Mentions RefersTo)
 
-/-- What the declaration `ci`, named `c`, refers to in a meaning: the names
-`LeanIntent.Cone.declRefs` lists, except for a definition that `eqn` gives an equation for, which
-refers to the names its type and that equation mention, in place of those its value mentions. -/
 @[expose] def refsVia (eqn : Name → Option Expr) (c : Name) : ConstantInfo → List Name
   | .defnInfo v =>
     match eqn c with
@@ -65,14 +16,10 @@ refers to the names its type and that equation mention, in place of those its va
     | none => declRefs (.defnInfo v)
   | ci => declRefs ci
 
-/-- What `refsVia` lists for a definition with an equation: the names its type or its equation
-mention (`LeanIntent.Cone.Mentions`). -/
 theorem mem_refsVia_eqn {eqn : Name → Option Expr} {c k : Name} {v : Lean.DefinitionVal} {t : Expr}
     (h : eqn c = some t) : k ∈ refsVia eqn c (.defnInfo v) ↔ Mentions k v.type ∨ Mentions k t := by
   simp [refsVia, h, mem_exprRefs]
 
-/-- For every other declaration, `refsVia` lists what `LeanIntent.Cone.declRefs` lists, the names
-it refers to by the cone's relation (`LeanIntent.Cone.RefersTo`). -/
 theorem refsVia_eq_declRefs {eqn : Name → Option Expr} {c : Name} {ci : ConstantInfo}
     (h : eqn c = none ∨ ∀ v, ci ≠ .defnInfo v) : refsVia eqn c ci = declRefs ci := by
   cases ci with
@@ -94,27 +41,17 @@ theorem mem_declRefs_block {eqn : Name → Option Expr} {c : Name} {v : Lean.Rec
     (h : i ∈ v.all) : i ∈ refsVia eqn c (.recInfo v) :=
   (mem_declRefs (.recInfo v) i).mpr (Or.inr (Or.inl h))
 
-/-! ## The closure -/
-
-/-- `Reach lookup eqn stop roots c`: the name `c`, which `stop` does not choose, is one of `roots`,
-or is referred to (`refsVia eqn`) by the declaration `lookup` finds under a name reached before. -/
 inductive Reach (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr)
     (stop : Name → Bool) (roots : List Name) : Name → Prop where
   | root {c : Name} : c ∈ roots → stop c = false → Reach lookup eqn stop roots c
   | step {d c : Name} {ci : ConstantInfo} : Reach lookup eqn stop roots d → lookup d = some ci →
       c ∈ refsVia eqn d ci → stop c = false → Reach lookup eqn stop roots c
 
-/-- Why `meaning` returns no declarations. -/
 inductive Gap where
-  /-- A reached name has no declaration. -/
   | unknown (c : Name)
-  /-- More steps were needed than the fuel allows. -/
   | fuel
   deriving @[expose] Inhabited, Repr, @[expose] DecidableEq
 
-/-- The closure: takes each name of `work` in turn, skips it when `stop` chooses it or `done`
-already holds it, and otherwise adds its declaration to `done` and the names it refers to to
-`work`. -/
 @[expose] def collect (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr) (stop : Name → Bool) :
     Nat → List Name → List (Name × ConstantInfo) → Except Gap (List (Name × ConstantInfo))
   | 0, _, _ => .error .fuel
@@ -126,8 +63,6 @@ already holds it, and otherwise adds its declaration to `done` and the names it 
       | none => .error (.unknown c)
       | some ci => collect lookup eqn stop f (refsVia eqn c ci ++ work) ((c, ci) :: done)
 
-/-- The declarations reached from `roots`, in the order they are reached, each with its name; or
-why there are none. -/
 @[expose] def meaning (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr) (stop : Name → Bool)
     (roots : List Name) : Except Gap (List (Name × ConstantInfo)) :=
   (collect lookup eqn stop (2 ^ 64) roots []).map List.reverse
@@ -137,7 +72,6 @@ section Proofs
 variable {lookup : Name → Option ConstantInfo} {eqn : Name → Option Expr} {stop : Name → Bool}
   {roots : List Name}
 
-/-- What `collect` keeps true of the names still to take and the declarations already collected. -/
 structure Inv (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr) (stop : Name → Bool)
     (roots : List Name) (work : List Name) (done : List (Name × ConstantInfo)) : Prop where
   found : ∀ p ∈ done, lookup p.1 = some p.2
@@ -268,8 +202,6 @@ theorem inv_init : Inv lookup eqn stop roots roots [] where
   pending := fun _ hc hs => .root hc hs
   closed := by simp
 
-/-- **What `meaning` collects.** Each declaration it returns is the one `lookup` finds under its
-name, and a name is among those it returns exactly when it is reached from `roots`. -/
 theorem meaning_ok {out : List (Name × ConstantInfo)} (h : meaning lookup eqn stop roots = .ok out) :
     (∀ p ∈ out, lookup p.1 = some p.2) ∧
       ∀ c, c ∈ out.map Prod.fst ↔ Reach lookup eqn stop roots c := by
@@ -293,7 +225,6 @@ theorem meaning_ok {out : List (Name × ConstantInfo)} (h : meaning lookup eqn s
         cases this
         simpa using ho.closed p hp _ hc hs
 
-/-- A refusal for a name with no declaration names a reached name. -/
 theorem meaning_unknown {c : Name} (h : meaning lookup eqn stop roots = .error (.unknown c)) :
     Reach lookup eqn stop roots c ∧ lookup c = none := by
   simp only [meaning] at h
@@ -309,24 +240,18 @@ theorem reach_of_mem {out : List (Name × ConstantInfo)} (h : meaning lookup eqn
     Reach lookup eqn stop roots c ∧ lookup c = some ci :=
   ⟨((meaning_ok h).2 c).mp (List.mem_map.mpr ⟨_, hp, rfl⟩), (meaning_ok h).1 _ hp⟩
 
-/-- Every constructor of an inductive type `meaning` returns is among the names it returns, unless
-`stop` chooses it. -/
 theorem ctor_mem {out : List (Name × ConstantInfo)} (h : meaning lookup eqn stop roots = .ok out)
     {c k : Name} {v : Lean.InductiveVal} (hp : (c, .inductInfo v) ∈ out) (hk : k ∈ v.ctors)
     (hs : stop k = false) : k ∈ out.map Prod.fst :=
   let ⟨hr, hl⟩ := reach_of_mem h hp
   ((meaning_ok h).2 k).mpr (.step hr hl (mem_declRefs_ctor hk) hs)
 
-/-- The inductive type of a constructor `meaning` returns is among the names it returns, unless
-`stop` chooses it. -/
 theorem induct_mem {out : List (Name × ConstantInfo)} (h : meaning lookup eqn stop roots = .ok out)
     {c : Name} {v : Lean.ConstructorVal} (hp : (c, .ctorInfo v) ∈ out)
     (hs : stop v.induct = false) : v.induct ∈ out.map Prod.fst :=
   let ⟨hr, hl⟩ := reach_of_mem h hp
   ((meaning_ok h).2 _).mpr (.step hr hl mem_declRefs_induct hs)
 
-/-- Every inductive type of the block of a recursor `meaning` returns is among the names it
-returns, unless `stop` chooses it. -/
 theorem block_mem {out : List (Name × ConstantInfo)} (h : meaning lookup eqn stop roots = .ok out)
     {c i : Name} {v : Lean.RecursorVal} (hp : (c, .recInfo v) ∈ out) (hi : i ∈ v.all)
     (hs : stop i = false) : i ∈ out.map Prod.fst :=
