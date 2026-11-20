@@ -56,7 +56,7 @@ def moduleOf (c : Name) : MetaM Name := do
   let env ← getEnv
   match env.getModuleIdxFor? c with
   | some idx =>
-    match env.header.moduleNames[idx.toNat]? with
+    match Confirmation.Read.moduleName? env.header idx.toNat with
     | some m => return m
     | none => throwError "the environment records no module of index {idx.toNat}, which declares {c}"
   | none =>

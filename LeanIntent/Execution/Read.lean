@@ -172,12 +172,12 @@ implemented in another language (`extern`). -/
 /-- The modules of `env` whose imports reach the module `m`, `m` included: those whose code can
 call a declaration of `m`. -/
 @[expose] def importersOf (env : Environment) (m : Name) : Std.HashSet Name := Id.run do
-  let names := env.header.moduleNames
+  let mods := env.header.modules
   let mut importers : Std.HashMap Name (Array Name) := {}
-  for h : i in [0:names.size] do
+  for h : i in [0:mods.size] do
     for imp in (env.header.moduleData[i]?.map (·.imports)).getD #[] do
       importers := importers.insert imp.module
-        ((importers.getD imp.module #[]).push names[i])
+        ((importers.getD imp.module #[]).push mods[i].module)
   let mut found : Std.HashSet Name := {}
   let mut work := [m]
   repeat
@@ -194,7 +194,7 @@ call a declaration of `m`. -/
 constant `n`, or, for a declaration the environment holds no constant of, the module whose IR holds
 it. -/
 @[expose] def importedModuleOf (env : Environment) (n : Name) : Option Name :=
-  env.getModuleIdxFor? n |>.bind fun i => env.header.moduleNames[i.toNat]?
+  env.getModuleIdxFor? n |>.bind fun i => Confirmation.Read.moduleName? env.header i.toNat
 
 /-- **Whether `main` reaches the implementation `c`** in the current environment, through the
 declarations each one's stored IR calls or makes a closure of (`irRefs`), followed only through

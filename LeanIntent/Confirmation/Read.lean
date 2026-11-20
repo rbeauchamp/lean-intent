@@ -81,6 +81,12 @@ theorem proofSafe_iff (ci : ConstantInfo) : proofSafe ci = true ↔
   | defnInfo v => cases h : v.safety <;> simp [proofSafe, h]
   | _ => simp [proofSafe]
 
+/-- The name of the imported module at index `i`, read directly from `header.modules` without
+allocating `header.moduleNames` (`header.modules.map (·.module)` in Lean v4.35.0's
+`src/Lean/Environment.lean`, lines 182 to 183). -/
+@[expose] def moduleName? (header : EnvironmentHeader) (i : Nat) : Option Name :=
+  header.modules[i]?.map (·.module)
+
 /-- The definitions, opaque constants and axioms of the modules `mods`, the current one included when
 it is listed, whose type, reduced by unfolding every definition, meets `test`, sorted by name; an
 error when a module given is not imported, since it would hide what it declares. An opaque constant
@@ -91,15 +97,55 @@ and a safe declaration cannot refer to one, as Lean's kernel refuses
 (`type_checker::infer_constant`). -/
 def declaredWhere (mods : Array Name) (test : Expr → MetaM Bool) : MetaM (Array Name) := do
   let env ← getEnv
+  let modData := env.header.moduleData
+  let mut seenMod : Array Bool := Array.replicate modData.size false
+  let mut idxs : Array ModuleIdx := #[]
+  let mut includeMain := false
   for m in mods do
-    unless m == env.mainModule || env.header.moduleNames.contains m do
+    let idx? := env.getModuleIdx? m
+    let isMain := m == env.mainModule
+    unless isMain || idx?.isSome do
       throwError "the module {m} is not imported here, so what it declares cannot be read"
-  let inMods := fun (c : Name) => match env.getModuleIdxFor? c with
-    | some idx => env.header.moduleNames[idx.toNat]?.any mods.contains
-    | none => mods.contains env.mainModule
-  let candidates := env.constants.fold (init := #[]) fun acc c ci =>
-    if (ci matches .defnInfo _ | .opaqueInfo _ | .axiomInfo _) && inMods c then acc.push (c, ci)
-    else acc
+    if isMain then includeMain := true
+    if let some idx := idx? then
+      let i := idx.toNat
+      if h : i < seenMod.size then
+        unless seenMod[i] do
+          seenMod := seenMod.set i true
+          idxs := idxs.push idx
+      else
+        throwError "the environment holds no module data for {m} (index {i})"
+  let isReadable (ci : ConstantInfo) : Bool :=
+    ci matches .defnInfo _ | .opaqueInfo _ | .axiomInfo _
+  let consts := env.constants
+  let c2m := env.const2ModIdx
+  let mut extraSeen : Std.HashSet Name := {}
+  let mut candidates : Array (Name × ConstantInfo) := #[]
+  for idx in idxs do
+    if let some data := modData[idx.toNat]? then
+      for ownCi in data.constants do
+        if isReadable ownCi then
+          let c := ownCi.name
+          let ownerIdx? := c2m[c]?
+          let isOwn : Bool := ownerIdx? == some idx
+          let keep : Bool := match ownerIdx? with
+            | some ownerIdx =>
+              ownerIdx == idx ||
+                !(seenMod[ownerIdx.toNat]?.getD false &&
+                  (modData[ownerIdx.toNat]?.any (·.constNames.contains c)))
+            | none => !includeMain
+          if keep && (isOwn || !extraSeen.contains c) then
+            unless isOwn do
+              extraSeen := extraSeen.insert c
+            if let some ci := consts.find? c then
+              if isReadable ci then
+                candidates := candidates.push (c, ci)
+  if includeMain then
+    candidates := consts.map₂.foldl (init := candidates) fun acc c ci =>
+      if isReadable ci && !c2m.contains c then acc.push (c, ci) else acc
+    if consts.stage₁ then
+      candidates := consts.map₁.fold (init := candidates) fun acc c ci =>
+        if isReadable ci && !c2m.contains c then acc.push (c, ci) else acc
   let mut found := #[]
   for (c, ci) in candidates do
     if ← test (← readWhnf ci.type) then

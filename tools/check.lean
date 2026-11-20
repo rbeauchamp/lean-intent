@@ -424,9 +424,13 @@ unsafe def testsOfModule (path file : String) (mod : Name) (mods : Array Name)
   if s.commandState.messages.hasErrors then
     return ← fail s.commandState.messages
   let env := s.commandState.env
+  let modIdxs : Std.HashSet ModuleIdx := mods.foldl (init := {}) fun s m =>
+    match env.getModuleIdx? m with
+    | some idx => s.insert idx
+    | none => s
   let declared (c : Name) : Bool :=
     match env.getModuleIdxFor? c with
-    | some idx => env.header.moduleNames[idx.toNat]?.any mods.contains
+    | some idx => modIdxs.contains idx
     | none => env.contains c
   let isMacro (c : Name) : Bool := (env.find? c).any (·.type.isConstOf ``Macro)
   let mut snap := s.initialSnap
@@ -643,7 +647,7 @@ def check : IO (Array Rejection) := do
     if let some idx := env.getModuleIdxFor? c then
       if idxs.contains idx then
         audited := audited + 1
-        errs := errs ++ (← auditConstant env env.header.moduleNames[idx.toNat]! c ci)
+        errs := errs ++ (← auditConstant env env.header.modules[idx.toNat]!.module c ci)
         if (IR.findEnvDecl env c).isSome then
           compiled := compiled.push c
   if audited == 0 then

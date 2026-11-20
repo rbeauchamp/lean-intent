@@ -111,7 +111,7 @@ def ownDeclaration (c : Name) : MetaM (Name × ConstantInfo) := do
   let env ← getEnv
   match env.getModuleIdxFor? c with
   | some idx =>
-    let some m := env.header.moduleNames[idx.toNat]?
+    let some m := Confirmation.Read.moduleName? env.header idx.toNat
       | throwError "the environment records no module of index {idx.toNat}, which declares {c}"
     match env.header.moduleData[idx.toNat]?.bind (·.constants.find? (·.name == c)) with
     | some own => return (m, own)
@@ -176,7 +176,7 @@ def declaredAnywhere (heads : Array Name) : MetaM (Array (Implementation.Constan
   let read (ci : ConstantInfo) := ci matches .defnInfo _ | .opaqueInfo _ | .axiomInfo _
   let mut candidates : Array (Name × ConstantInfo) := #[]
   for h : i in [0:env.header.moduleData.size] do
-    let some m := env.header.moduleNames[i]?
+    let some m := Confirmation.Read.moduleName? env.header i
       | throwError "the environment names no module of index {i}, whose declarations it holds"
     for ci in env.header.moduleData[i].constants do
       if read ci then candidates := candidates.push (m, ci)
@@ -216,7 +216,7 @@ def check (built : Array Name) : MetaM Report := do
       a `module` file imports only what each module exports, so a value could go unread: run the \
       check from a file that is not a `module` file"
   for m in built do
-    unless m == env.mainModule || env.header.moduleNames.contains m do
+    unless m == env.mainModule || (env.getModuleIdx? m).isSome do
       throwError "the module {m}, which the build lists, is not imported here, so what it declares \
         cannot be read"
   let found ← declaredAnywhere #[``Deliverable, ``Implementation, ``Required]
