@@ -89,9 +89,10 @@ allocating `header.moduleNames` (`header.modules.map (·.module)` in Lean v4.35.
 
 /-- The definitions, opaque constants and axioms of the modules `mods`, the current one included when
 it is listed, whose type, reduced by unfolding every definition, meets `test`, sorted by name; an
-error when a module given is not imported, since it would hide what it declares. An opaque constant
-or an axiom is found so that reading it is an error, never a value passed over. A constant found that
-is unsafe or partial is an error too (`proofSafe_iff`): such a definition may refer to itself, so
+error when a module given is not imported, since it would hide what it declares, or when the
+environment holds no data for one that is. An opaque constant or an axiom is found so that reading it
+is an error, never a value passed over. A constant found that is unsafe or partial is an error too
+(`proofSafe_iff`): such a definition may refer to itself, so
 the proofs it holds, a deliverable's `keeps` or an implementation's `fulfils`, can prove anything,
 and a safe declaration cannot refer to one, as Lean's kernel refuses
 (`type_checker::infer_constant`).
