@@ -1065,7 +1065,6 @@ theorem lenDet_of_injective {b g r : Ty} {o m : Nat} (x₀ : muTy b g r o r.muN 
     intro c d k h
     simp only [zeroCtor, Bool.and_eq_true, List.isEmpty_iff] at h
     exact treeLen_node_none (by rw [h.2]; rfl)
-  -- A node of a constructor with a field of its own type, holding `x₀` there.
   have stepNode : ∀ (c : Fin (r.muN m)), stepCtor r o m c = true → ∃ f, ∃ hf : f ∈ r.selfFields m c,
       (r.selfFields m c).head? = some f ∧
       ∃ k : (f : Fin (r.muA m c)) → g.den [m, c, 1, f] → muTy b g r o r.muN (r.muS m c f),
@@ -1550,9 +1549,6 @@ end Place
 
 mutual
 
-/-- Every path from a value of the code `t`, applying no function: the value itself, and the
-components of each side of a pair or, for any other code, of each field (`Ty.paths_eq`). Its match
-has no catch-all case, so a code former added to `Ty` must say what its values' components are. -/
 @[expose] def Ty.paths : (t : Ty) → List (Σ p, Place.Path (.code t) p)
   | .unit => [⟨_, .self _⟩]
   | .bool => [⟨_, .self _⟩]
@@ -2343,8 +2339,6 @@ carries. -/
 theorem Ty.isClock_iff (t : Ty) : t.isClock = true ↔ ∃ ps r, t = .decl Clock.codeName ps r := by
   cases t <;> simp [Ty.isClock]
 
-/-- Whether a place holds values of a `LeanIntent.Clock α`: a code that is one. A tree of a group
-is not one, since `LeanIntent.Clock` is not recursive. -/
 @[expose] def Place.isClock : Place → Bool
   | .code t => t.isClock
   | .tree _ _ _ _ _ => false

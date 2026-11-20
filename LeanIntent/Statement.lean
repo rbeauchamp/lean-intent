@@ -4,46 +4,6 @@ public import LeanIntent.Answers
 public import LeanIntent.Codec.Text
 import all Init.Data.String.Defs
 
-/-!
-# Statements: the owners' log, one text each
-
-A project records who may answer for its intent, and every answer, as statements committed in the
-project: an owners declaration, a delegation, an answer, a retraction of an answer, a revocation of
-a delegation, the origin of a record's source when the owner adopted it from someone else, and a
-consequence's rest on an external tool. Each statement is a record of where it came from: the date, and the owner's words
-or a reference to where they are kept. A reviewer reads its text, the project commits its text, and
-a check reads its text, so each statement has exactly one text and each text at most one statement:
-
-* `Statement.print` writes a statement's text, a function of the statement alone;
-* `Statement.parse` reads a text back, and accepts exactly the texts `print` writes
-  (`Statement.parse_eq_some_iff`), so `parse (print s) = some s` for every statement
-  (`Statement.parse_print`), no two statements share a text (`Statement.print_injective`), and a
-  text that `print` does not write is refused, never read leniently;
-* `Statement.parseUTF8` reads the bytes of a committed file, and accepts exactly the UTF-8 encoding
-  of a printed text (`Statement.parseUTF8_eq_some_iff`), so the bytes a project commits, and those a
-  signature covers for a project that signs, are fixed by the statement alone;
-* every printed text is plain (`Statement.plain_print`): its only control character is the line feed
-  that ends each line, and it holds no line or paragraph separator or bidirectional formatting
-  character, so each line a display shows is a line the parser reads.
-
-The grammar is closed. Every value has a fixed place: there is no optional whitespace, every list is
-printed in the order the statement holds it, and every number in decimal with no leading zeros
-except those that pad a date. Names of projects, principals and statements are identifiers in a
-closed set of ASCII characters (`identChar`). Any other string is printed on one line by
-`Codec.line` or as lines by `Codec.text`, with `\` and each concealing character escaped. A
-public key is printed as OpenSSH writes it, its algorithm from a closed list and its data in
-base64.
-
-What this module does not decide: whether a statement's authority traces back to a declared owner
-(`LeanIntent.Trace` decides it for answers and retractions), whether a signature over it is valid
-(lean-intent #19), and whether an answer's text has changed since it was given, which
-`LeanIntent.Confirmation` decides from the `revision` and `predicate` fields, which hold what was
-shown. It reads the text of each statement, and no more.
-
-The module imports `Init.Data.String.Defs` with `import all`: `fromUTF8?_eq_some_iff` unfolds Lean's
-`String.fromUTF8` and `String.toUTF8`, whose bodies that module does not expose to a `module` file.
--/
-
 public section
 
 namespace LeanIntent
@@ -458,8 +418,6 @@ theorem base64Char_plain (c : Char) (h : base64Char c = true) : concealing c = f
   map (authority.seq (keyed chars!"revokes " (by decide) ident))
     (fun r => (r.author, r.delegation)) (fun (a, i) => some ⟨a, i⟩) (fun _ => rfl)
 
-/-- An origin: who adopts the words, the `record`, who `wrote` them, what they `had read`, and the
-`words`. -/
 @[expose] def origin : Codec Statement.Origin :=
   map (authority.seq ((keyed chars!"record " (by decide) line).seq
       ((keyed chars!"written by " (by decide) line).seq

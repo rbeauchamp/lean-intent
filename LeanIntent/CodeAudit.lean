@@ -392,7 +392,6 @@ def audit (first : Name) (rest : List Name) : MetaM Outcome := do
   let relevant := relevantIn env (importers env m)
   let exempt := generatedBy env ``Ty.Stands
   let lookup := lookupIn env
-  -- The reached declarations, what each depends on, and those that name the constructor.
   let mut visited : Std.HashSet Name := {}
   let mut refs : Std.HashMap Name (List Name) := {}
   let mut candidates : Array (Name × ConstantInfo) := #[]
@@ -410,25 +409,18 @@ def audit (first : Name) (rest : List Name) : MetaM Outcome := do
           work := ds ++ work
           if relevant c && !exempt c && applies ctor ci then
             candidates := candidates.push (c, ci)
-  -- Each read as the handler's, or refused.
   let mut verified : Std.HashSet Name := {}
   let mut refused : Array (Name × Option String × String) := #[]
   for (c, ci) in candidates do
     match ← withCurrHeartbeats (Declared.checkAttestation ctor ci) with
     | (_, none) => verified := verified.insert c
     | (_, some why) =>
-      -- One diagnostic path for every refusal; no binder-dependent type can be discarded.
       let es := attestedTypes ctor ci.type ++ (match ci.value? (allowOpaque := true) with
         | some v => attestedTypes ctor v
         | none => [])
       let tys ← withCurrHeartbeats (es.toArray.mapM diagnosticType)
       let tys := tys.foldl (fun acc t => if acc.contains t then acc else acc.push t) #[]
       refused := refused.push (c, if tys.isEmpty then none else some (", ".intercalate tys.toList), why)
-  -- The reached declarations that depend on each refused one, for its carriers. They are read only
-  -- for a refused attestation, so they are collected only when there is one. Each declaration
-  -- counts once for each name it depends on, however often the name occurs in it, and joins that
-  -- name's list at its head, which copies nothing, so collecting them takes time linear in the
-  -- names the reached declarations depend on, as the traversal above does.
   let mut dependents : Std.HashMap Name (List Name) := {}
   unless refused.isEmpty do
     for (c, ds) in refs.toList do
@@ -456,7 +448,6 @@ def audit (first : Name) (rest : List Name) : MetaM Outcome := do
           carriers := carriers.push (d, ← withCurrHeartbeats (diagnosticType ci.type))
     findings := findings.push { decl := c, type? := ty, why, carriers }
   let refusal? := decide lookup relevant exempt verified.contains (axiomsIn env) ctor first rest
-  -- A refusal at a name outside the modules that can name the constructor is for its axioms.
   let outside (c : Name) : Option (Array Name) :=
     if relevant c then none else some ((axiomsIn env c).filter fun a => !leanAxioms.contains a)
   let refusal? := refusal?.map fun r => (r, match r with | .impl c => outside c | _ => none)

@@ -503,8 +503,6 @@ theorem chain_iff_leads {act : Act} {x : Bool} {a : Authority} :
   · rintro ⟨y, o, hle, ho⟩
     exact hle.chain_of (.owner ho)
 
-/-- **A link that breaks breaks every chain through it**: no authority whose links lead to it traces
-back. -/
 theorem Fails.not_chain {act : Act} {x : Bool} {b : Authority} {why : Broken}
     (hf : Fails project owners log act x b why) : ¬ Chain project owners log act x b := by
   intro hc
@@ -919,9 +917,6 @@ theorem mem_checkLog {s : Statement} {d : Except Refusal Unit} :
 
 /-! ## Monotonicity, where it holds -/
 
-/-- **A statement that is no revocation, added with a fresh id, keeps every chain.** Delegations,
-answers, retractions and owners declarations added to the log, none with an id a statement of the
-log has, take no authority away. -/
 theorem Chain.append_fresh {act : Act} {x : Bool} {a : Authority} {more : List Statement}
     (hfresh : ∀ t ∈ more, t.project = project → t.id ∉ log.map Statement.id)
     (hrev : ∀ t ∈ more, ∀ v, t.body ≠ .revocation v)
@@ -947,9 +942,6 @@ theorem Chain.append_fresh {act : Act} {x : Bool} {a : Authority} {more : List S
         | revocation v => exact absurd hrb (hrev r hr' v)
         | _ => simp
 
-/-- **A statement that is no delegation makes no chain.** A chain in the log with statements added,
-none a delegation, is a chain in the log: revocations, retractions, answers and owners declarations
-grant no authority, and a revocation only removes it. -/
 theorem Chain.of_append {act : Act} {x : Bool} {a : Authority} {more : List Statement}
     (hdel : ∀ t ∈ more, ∀ del, t.body ≠ .delegation del)
     (h : Chain project owners (log ++ more) act x a) : Chain project owners log act x a := by
