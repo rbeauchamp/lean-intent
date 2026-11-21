@@ -465,33 +465,70 @@ def checkSlice (fileMap : FileMap) (startPos stopPos : String.Pos.Raw)
   else
     .ok acc
 
-partial def collectSyntax (fileMap : FileMap) (prevPos nextPos : String.Pos.Raw) (stx : Syntax)
+def matchesLiteralToken (env : Environment) (token : Syntax) (raw : String) : Bool := Id.run do
+  let parse (p : Parser.ParserFn) (input : String) : Option Syntax := do
+    let s := p.run (Parser.InputContext.mk input "<token>") { env, options := {} } {}
+      (Parser.mkParserState input)
+    guard (!s.hasError && s.stackSize == 1)
+    return s.stxStack.back
+  match token with
+  | .ident _ spelling .. =>
+    let some (.ident _ parsed ..) := parse (Parser.tokenFn []) raw | return false
+    return spelling.toString == raw && parsed.toString == raw
+  | .node _ k _ =>
+    unless token.isLit? k == some raw do return false
+    if k == interpolatedStrLitKind then
+      let chunk := if raw.startsWith "}" then "\"" ++ (raw.drop 1).toString else raw
+      let emptyHole : Parser.ParserFn := fun _ s => s.pushSyntax .missing
+      let some parsed := parse (Parser.interpolatedStrFn emptyHole) (chunk ++ "}\"") | return false
+      return parsed[0].isLit? k == some chunk
+    return ((parse (Parser.tokenFn []) raw).bind (·.isLit? k)) == some raw
+  | _ => return false
+
+def mayStartComment (raw : String) (next : Char) : Bool :=
+  raw.contains "--" || raw.contains "/-" || (next == '-' && (raw.endsWith "-" || raw.endsWith "/"))
+
+def checkToken (env : Environment) (token : Syntax) (raw : String) (next : Char)
+    (start : String.Pos.Raw) : Except String Unit :=
+  if mayStartComment raw next && !matchesLiteralToken env token raw then
+    .error s!"cannot account for a possible comment in the parser token at byte {start.byteIdx}"
+  else .ok ()
+
+theorem checkToken_with_opener (env : Environment) (token : Syntax) (raw : String) (next : Char)
+    (start : String.Pos.Raw) (h : mayStartComment raw next = true) :
+    checkToken env token raw next start = .ok () ↔ matchesLiteralToken env token raw = true := by
+  cases hLit : matchesLiteralToken env token raw <;> simp [checkToken, h, hLit]
+
+partial def collectSyntax (env : Environment) (fileMap : FileMap) (prevPos nextPos : String.Pos.Raw) (stx : Syntax)
     (acc : CommentAcc) : Except String CommentAcc := do
   unless prevPos ≤ nextPos && nextPos ≤ fileMap.source.rawEndPos do
     throw "Lean's parser returned an invalid command range"
   let (pos, acc) ← walk stx prevPos acc
   checkSlice fileMap pos nextPos acc
 where
-  consume (pos start stop : String.Pos.Raw) (kind : Option String) (acc : CommentAcc) :
+  consume (pos start stop : String.Pos.Raw) (account : CommentAcc → Except String CommentAcc) (acc : CommentAcc) :
       Except String (String.Pos.Raw × CommentAcc) := do
     unless pos ≤ start && start ≤ stop && stop ≤ nextPos do
       throw s!"source range [{start.byteIdx}, {stop.byteIdx}) outside unread bytes [{pos.byteIdx}, {nextPos.byteIdx})"
     let acc ← checkSlice fileMap pos start acc
-    let acc ← match kind with
-      | some k => recordSpan fileMap k start stop acc
-      | none => pure acc
-    return (stop, acc)
+    return (stop, ← account acc)
+  consumeToken (s : Syntax) (pos start stop : String.Pos.Raw) (acc : CommentAcc) :=
+    consume pos start stop (fun a => do
+      let raw := start.extract fileMap.source stop
+      checkToken env s raw (stop.get fileMap.source) start
+      return a) acc
   walk (s : Syntax) (pos : String.Pos.Raw) (acc : CommentAcc) :
       Except String (String.Pos.Raw × CommentAcc) := do
     match s with
     | .atom (.original _ start _ stop) _ | .ident (.original _ start _ stop) .. =>
-      consume pos start stop none acc
+      consumeToken s pos start stop acc
     | .node _ k args =>
       if k == ``Parser.Command.docComment || k == ``Parser.Command.plainDocComment ||
           k == ``Parser.Command.moduleDoc then
         let some (.original _ start ..) := s.getHeadInfo? | throw "docstring has no original start"
         let some (.original _ _ _ stop) := s.getTailInfo? | throw "docstring has no original end"
-        consume pos start stop (some (if k == ``Parser.Command.moduleDoc then "moddoc" else "doc")) acc
+        let kind := if k == ``Parser.Command.moduleDoc then "moddoc" else "doc"
+        consume pos start stop (recordSpan fileMap kind start stop) acc
       else if k == choiceKind then
         let some first := args[0]? | throw "empty parser choice"
         let (stop, acc) ← walk first pos acc
@@ -501,6 +538,8 @@ where
           unless altStop == stop do throw "parser alternatives cover different source ranges"
           acc := altAcc
         return (stop, acc)
+      else if let #[.atom (.original _ start _ stop) _] := args then
+        consumeToken s pos start stop acc
       else
         args.foldlM (fun (p, a) arg => walk arg p a) (pos, acc)
     | _ => return (pos, acc)
@@ -539,12 +578,12 @@ unsafe def commentsOfModule (file : String) (mod : Name) : IO (Array Comment) :=
     (Elab.Command.mkState env messages opts) none
   if s.commandState.messages.hasErrors then
     return ← fail "Lean could not elaborate it" s.commandState.messages
-  let mut acc ← scan <| collectSyntax fileMap ⟨0⟩ parserState.pos header.raw {}
+  let mut acc ← scan <| collectSyntax env fileMap ⟨0⟩ parserState.pos header.raw {}
   let mut snap := s.initialSnap
   let mut prevPos := parserState.pos
   repeat
     let nextPos := snap.parserState.pos
-    acc ← scan <| collectSyntax fileMap prevPos nextPos snap.stx acc
+    acc ← scan <| collectSyntax env fileMap prevPos nextPos snap.stx acc
     prevPos := nextPos
     match snap.nextCmdSnap? with
     | some next => snap := next.get
