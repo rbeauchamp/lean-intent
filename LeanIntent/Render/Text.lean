@@ -487,7 +487,8 @@ A module of a project that merely shares one of those names is not. An error whe
 cannot establish where those libraries are. -/
 def leanOwnModules : MetaM (Array Bool) := do
   let lib := (← leanLibDir).components
-  (← getEnv).header.moduleNames.mapM fun m => do
+  (← getEnv).header.modules.mapM fun imp => do
+    let m := imp.module
     return isLeanOwn lib m (← if leanRoots.contains m.getRoot then realOLean? m else pure none)
 
 /-- Whether the meaning stops at the constant `c`: it is in `shown`, or declared in one of Lean's
@@ -774,7 +775,7 @@ def definitions (R : Reader) (roots : List Name) (shown : NameSet) : MetaM Strin
     if todo.isEmpty then
       let isLibrary (c : Name) : Bool := R.form == .readable &&
         match env.getModuleIdxFor? c with
-        | some idx => (env.header.moduleNames[idx.toNat]?.map Name.getRoot) == some `LeanIntent
+        | some idx => (env.header.modules[idx.toNat]?.map (·.module.getRoot)) == some `LeanIntent
         | none => false
       let isGenerated (c : Name) : Bool := R.form == .readable &&
         (isMatcherCore env c || isCasesOnRecursor env c)
@@ -949,7 +950,7 @@ def notationPart (R : Reader) : MetaM String := do
   let env ← getEnv
   let lines := kinds.map fun k =>
     match env.getModuleIdxFor? k with
-    | some idx => s!"- `{k}`, declared in {env.header.moduleNames[idx.toNat]!}\n"
+    | some idx => s!"- `{k}`, declared in {env.header.modules[idx.toNat]!.module}\n"
     | none => s!"- `{k}`, declared in the file that made this text\n"
   return s!"## Notation from outside Lean's own libraries\n\nThe statements above use this notation, \
     whose declaration this text does not print. Lean read each statement back as the term its \

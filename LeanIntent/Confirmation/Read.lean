@@ -81,25 +81,70 @@ theorem proofSafe_iff (ci : ConstantInfo) : proofSafe ci = true ↔
   | defnInfo v => cases h : v.safety <;> simp [proofSafe, h]
   | _ => simp [proofSafe]
 
+/-- The name of the imported module at index `i`, read directly from `header.modules` without
+allocating `header.moduleNames` (`header.modules.map (·.module)` in Lean v4.35.0's
+`src/Lean/Environment.lean`, lines 182 to 183). -/
+@[expose] def moduleName? (header : EnvironmentHeader) (i : Nat) : Option Name :=
+  header.modules[i]?.map (·.module)
+
 /-- The definitions, opaque constants and axioms of the modules `mods`, the current one included when
 it is listed, whose type, reduced by unfolding every definition, meets `test`, sorted by name; an
-error when a module given is not imported, since it would hide what it declares. An opaque constant
-or an axiom is found so that reading it is an error, never a value passed over. A constant found that
-is unsafe or partial is an error too (`proofSafe_iff`): such a definition may refer to itself, so
+error when a module given is not imported, since it would hide what it declares, or when the
+environment holds no data for one that is. An opaque constant or an axiom is found so that reading it
+is an error, never a value passed over. A constant found that is unsafe or partial is an error too
+(`proofSafe_iff`): such a definition may refer to itself, so
 the proofs it holds, a deliverable's `keeps` or an implementation's `fulfils`, can prove anything,
 and a safe declaration cannot refer to one, as Lean's kernel refuses
-(`type_checker::infer_constant`). -/
+(`type_checker::infer_constant`).
+
+A constant is of the module Lean records for its name (`Environment.const2ModIdx`), and of the
+current one when Lean records none. Lean v4.35.0 records a module for a name only from that
+module's `constNames` and from the `extraConstNames` of the data it reads as the module's IR
+(`finalizeImport`, `src/Lean/Environment.lean`, lines 2333 to 2348), which is the module's own data
+or its `.ir`, whose `extraConstNames` are the names of the IR declarations it stores
+(`ImportedModule.irData?`, lines 2046 to 2054; `mkIRData`, lines 1892 to 1900 and `src/LeanIR.lean`,
+lines 32 to 48). So the names read for a module given are its data's `constNames` and
+`extraConstNames` and its stored IR declarations' names, each kept only where Lean records that
+module for it, and each constant is found once. An environment that reads a module's `.ir.sig` as
+its IR, which only Lean's `leanir` makes, is outside this account. -/
 def declaredWhere (mods : Array Name) (test : Expr → MetaM Bool) : MetaM (Array Name) := do
   let env ← getEnv
+  let modData := env.header.moduleData
+  let mut selected : Array (ModuleIdx × ModuleData) := #[]
+  let mut includeMain := false
   for m in mods do
-    unless m == env.mainModule || env.header.moduleNames.contains m do
+    let idx? := env.getModuleIdx? m
+    let isMain := m == env.mainModule
+    unless isMain || idx?.isSome do
       throwError "the module {m} is not imported here, so what it declares cannot be read"
-  let inMods := fun (c : Name) => match env.getModuleIdxFor? c with
-    | some idx => env.header.moduleNames[idx.toNat]?.any mods.contains
-    | none => mods.contains env.mainModule
-  let candidates := env.constants.fold (init := #[]) fun acc c ci =>
-    if (ci matches .defnInfo _ | .opaqueInfo _ | .axiomInfo _) && inMods c then acc.push (c, ci)
-    else acc
+    if isMain then includeMain := true
+    if let some idx := idx? then
+      let i := idx.toNat
+      if h : i < modData.size then
+        selected := selected.push (idx, modData[i])
+      else
+        throwError "the environment holds no module data for {m} (index {i})"
+  let isReadable (ci : ConstantInfo) : Bool :=
+    ci matches .defnInfo _ | .opaqueInfo _ | .axiomInfo _
+  let consts := env.constants
+  let c2m := env.const2ModIdx
+  let mut taken : Std.HashSet Name := {}
+  let mut candidates : Array (Name × ConstantInfo) := #[]
+  for (idx, data) in selected do
+    let irNames := (IR.declMapExt.getModuleIREntries env idx).map (·.name)
+    for names in #[data.constNames, data.extraConstNames, irNames] do
+      for c in names do
+        if c2m[c]? == some idx && !taken.contains c then
+          if let some ci := consts.find? c then
+            if isReadable ci then
+              taken := taken.insert c
+              candidates := candidates.push (c, ci)
+  if includeMain then
+    candidates := consts.map₂.foldl (init := candidates) fun acc c ci =>
+      if isReadable ci && !c2m.contains c then acc.push (c, ci) else acc
+    if consts.stage₁ then
+      candidates := consts.map₁.fold (init := candidates) fun acc c ci =>
+        if isReadable ci && !c2m.contains c then acc.push (c, ci) else acc
   let mut found := #[]
   for (c, ci) in candidates do
     if ← test (← readWhnf ci.type) then
