@@ -207,13 +207,6 @@ it. -/
 @[expose] def importedModuleOf (env : Environment) (n : Name) : Option Name :=
   env.getModuleIdxFor? n |>.bind fun i => Confirmation.Read.moduleName? env.header i.toNat
 
-/-- **Whether `main` reaches the implementation `c`** in the current environment, through the
-declarations each one's stored IR calls or makes a closure of (`irRefs`), followed only through
-declarations of modules whose imports reach `c`'s (`importersOf`), since no other can call it. The
-declarations are found by a walk from `main` that records what each one's IR calls, and `c` too for
-each other declaration with stored IR that is `c`'s compiled code (`isCompiledCodeOf`, over the
-environment's constants: a reduce-arity copy of `c`), and the verdict is `Execution.reach` over that
-record. An error when more declarations are reached than `2 ^ 64`. -/
 def reachesIn (c : Implementation.Constant) : CoreM Bool := do
   let env ← getEnv
   unless importedModuleOf env c.name == some c.module do return false
@@ -237,9 +230,6 @@ def reachesIn (c : Implementation.Constant) : CoreM Bool := do
   | .unreached => return false
   | .exhausted => throwError "`main` reaches more than 2 ^ 64 declarations"
 
-/-- What the build shows of the executable `name`, whose root module is `root`, in the
-environment `env` of that module and what it imports: whether `env` declares `main`, and which of
-the implementations `targets` it reaches. -/
 def executableIn (env : Environment) (name root : Name) (targets : List Implementation.Constant) :
     CoreM Executable := do
   let entry := env.contains `main

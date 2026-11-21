@@ -240,8 +240,6 @@ theorem reach_exhausted {fuel : Nat} (h : reach refs root target fuel = .exhaust
   search_exhausted fuel fuel ∅ [root] (fun _ hv => absurd hv Std.HashSet.not_mem_empty)
     (fun _ hw => List.mem_singleton.mp hw ▸ .root) (by simp) h
 
-/-- **What the search decides**: given fuel for every name reached, it reports the target reached
-exactly when `target` is reached from `root` through `refs`, and unreached otherwise. -/
 theorem reach_eq_reached_iff {fuel : Nat} (hw : Within refs root fuel) :
     reach refs root target fuel = .reached ↔ Reaches refs root target := by
   constructor
@@ -654,10 +652,6 @@ theorem mem_idle {x : Name} :
   · rintro ⟨e, he, rfl, hn⟩
     exact ⟨e, ⟨he, fun cl hc h => hn cl hc h⟩, rfl⟩
 
-/-- Where the decision finds nothing, the report lists every claim of a deliverable not declared
-awaiting its implementation as reached, for every implementation recorded for it and every
-executable of the name it gives, and every claim of a deliverable declared awaiting it as
-awaiting. -/
 theorem listed_of_nil (h : findings ds is as es cls = []) {cl : Claim} (hc : cl ∈ cls) :
     ∃ d ∈ ds, cl.deliverable = some d ∧
       ((d ∈ as ∧ (d, cl.executable) ∈ (report ds is as es cls).awaiting) ∨

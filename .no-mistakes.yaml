@@ -7,7 +7,8 @@
 # errors, refuses a Lean file that is not a `module` file, audits the axioms every declaration
 # rests on and the runtime functions its compiled code calls, runs the audit of declared types'
 # codes over every declaration (through tools/codes.lean, a program it runs because it is not
-# itself built against the library), and with --tests it lists the repository's tests. no-mistakes
+# itself built against the library), enforces the Lean comment ratchet (`NO-COMMENTS` against
+# tools/comment-ratchet.json), and with --tests it lists the repository's tests. no-mistakes
 # honours `test.instructions`, `test.no_surface` and `test.tests_as_evidence` only from the copy of
 # this file on the default branch, so a change to any of them governs the runs that follow its
 # merge.
@@ -24,7 +25,15 @@
 # elaborates tools/check.lean against Lean and Lake and runs once per side, peaked at 2.94 and
 # 2.95 GiB under Lean v4.36.0 on 2026-11-20 (down from 4.76 GiB under Lean v4.35.0 on 2026-10-30
 # and 2026-11-05); the 6 GiB bound is kept. Measure again when the library grows or the toolchain
-# changes, and raise a bound before a peak comes within 15% of it.
+# changes, and raise a bound before a peak comes within 15% of it. The comment check
+# (NO-COMMENTS), which the check runs after its build has ended and after its audit of codes, and
+# before it imports the library for its other audits, reads each tracked Lean file in a child
+# process, three at a time, and is now the check's peak: on 2026-11-20 under Lean v4.36.0 on the
+# same machine, the check with it peaked at 5.63 GiB, 140 seconds into a run in an already-built
+# tree, sampled every 0.2 seconds (measured alone under Lean v4.35.0 over 67 files against a built
+# library, it had peaked at 5.52 and 5.46 GiB), which is below the 9 GiB bound by more than 15%.
+# The check with it has not been measured with an empty artifact cache; the build's own peak there,
+# 4.55 GiB, comes before the comment check starts.
 #
 # Time. Each check also runs under a wall-clock limit, so that a check that stalls fails and gives
 # back its share of the memory budget instead of holding the share and the run until someone stops
@@ -53,10 +62,19 @@
 # nothing built (3 * 106 = 318 seconds, below the kept 420-second limit derived from v4.35.0 runs
 # of 90–123 seconds at load 3 to 14). Measure again when the library grows, the toolchain changes
 # or the machine changes, and raise a limit before three times a measured duration passes it.
+# Those durations predate the check's comment check (NO-COMMENTS), which measured alone under Lean
+# v4.35.0 on 2026-11-20 on the same machine, against a built library, took 47 and 49 seconds. With
+# it, on 2026-11-20 under Lean v4.36.0 on the same machine, through `no-mistakes admit`, in one
+# worktree whose earlier build was made under Lean v4.35.0: the check took 331 seconds on its
+# first run there and 313 seconds when run again in the built tree, at a load average of 4 to 7
+# (3 * 331 = 993 seconds, below the 1020-second limit), and the listing then took 130 seconds
+# (3 * 130 = 390 seconds, below the 420-second limit). Neither was measured with it in a clean
+# tree with an empty artifact cache; measure both there, and raise a limit that three times the
+# duration passes.
 test:
   instructions: |
     On lean-intent this step is verification. A change's claims are established by machine-checked proof, by derivation and by reading; lean-intent has no running product to drive.
-    1. The pipeline has already run the repository's checks in this step, in this run's own checkout of the change, as its configured test command (commands.test in .no-mistakes.yaml); do not run lean --run tools/check.lean, or that command, again. The context above this runbook states that run's result, at this pipeline's version on a line beginning "Configured test command already ran successfully as baseline" when it exited 0, or "Configured test command failed with exit code" followed by its exit status. Cite that run: its command and its exit status. If the context states no result of the configured test command, the checks did not run in this step: report the check open and say so. The configured test command exits 0 only if its listing of tests exits 0 and prints nothing and the check it runs first, through no-mistakes admit, exits 0; that check is lean --run tools/check.lean. It exits 0 only when lakefile.toml requires no other package, Lake builds every library module with no error and no warning (a sorry is a warning), every Lean file Git's index lists is a module file, every declaration of the library rests only on Lean's axioms propext, Classical.choice and Quot.sound, the library's compiled code calls no runtime function that starts a process or asks where it runs or what its environment holds, and the audit of declared types' codes (LeanIntent.CodeAudit, run by tools/codes.lean) accepts every declaration of the library. tools/check.lean's module comment says what each rule decides; claim no more than that.
+    1. The pipeline has already run the repository's checks in this step, in this run's own checkout of the change, as its configured test command (commands.test in .no-mistakes.yaml); do not run lean --run tools/check.lean, or that command, again. The context above this runbook states that run's result, at this pipeline's version on a line beginning "Configured test command already ran successfully as baseline" when it exited 0, or "Configured test command failed with exit code" followed by its exit status. Cite that run: its command and its exit status. If the context states no result of the configured test command, the checks did not run in this step: report the check open and say so. The configured test command exits 0 only if its listing of tests exits 0 and prints nothing and the check it runs first, through no-mistakes admit, exits 0; that check is lean --run tools/check.lean. It exits 0 only when lakefile.toml requires no other package, Lake builds every library module with no error and no warning (a sorry is a warning), every Lean file Git's index lists is a module file, every declaration of the library rests only on Lean's axioms propext, Classical.choice and Quot.sound, the library's compiled code calls no runtime function that starts a process or asks where it runs or what its environment holds, the audit of declared types' codes (LeanIntent.CodeAudit, run by tools/codes.lean) accepts every declaration of the library, and NO-COMMENTS accepts every tracked Lean file against tools/comment-ratchet.json. docs/adr/0001-repository-checks-and-trusted-base.md (with ADR-0002, ADR-0003 and ADR-0004) says what each rule decides; claim no more than that.
     2. Do not write, request or suggest a test, and do not improvise disposable break-it runs as evidence: lean-intent establishes its claims by theorems. A claim about what a theorem states is settled by reading its statement, binders and hypotheses included, never its docstring or name alone.
     3. Report each claim by how it was established: machine-checked (a Lean proof that the check above built; cite the theorem and the command's exit status), argued (by derivation or by reading; cite the file and lines), observed (executed in this run for this claim), assumed (a hypothesis the change relies on; say why it is trusted) or open (not established; say what would establish it and which issue tracks it).
   # lean-intent has no running product; proof, its check and reading settle its claims.
@@ -72,11 +90,12 @@ test:
   # run, or when the listing reaches its limit.
   # That program prints one line for each command whose verdict comes from running code on chosen
   # inputs, read through Lean's frontend, and fails rather than printing nothing when it cannot
-  # read a file; its module comment says what it lists and what it does not. The guard asks Git the
-  # question that program asks for its own list of files, `git ls-files -- '*.lean'`, so it skips
-  # the listing only where that list is empty, which the program refuses; and `set -e` ends the
-  # command with a status other than 0, never an empty listing, when Git cannot answer. A head with
-  # no Lean file still fails the Test command below, which runs tools/check.lean first.
+  # read a file; docs/adr/0002-test-listing-and-pinned-lean-tokens.md says what it lists and what it
+  # does not. The guard asks Git the question that program asks for its own list of files,
+  # `git ls-files -- '*.lean'`, so it skips the listing only where that list is empty, which the
+  # program refuses; and `set -e` ends the command with a status other than 0, never an empty
+  # listing, when Git cannot answer. A head with no Lean file still fails the Test command below,
+  # which runs tools/check.lean first.
   tests_as_evidence:
     policy: forbid
     list_command: |
@@ -109,7 +128,7 @@ no_ci: true
 # passing when it finds nothing to check: the checks refuse a library with no Lean file or no
 # declaration, and the listing a project with no Lean file. The two run one after the other, so
 # the command's peak is the larger of the two peaks the paragraph on memory above gives, the
-# check's 4.55 GiB, which is below the check's 9 GiB bound by more than 15%.
+# check's 5.63 GiB, which is below the check's 9 GiB bound by more than 15%.
 #
 # What a change re-checks is Lake's decision: Lake reuses an earlier output only where its own
 # record of the module's inputs matches, the trace in .lake/build or the input hash that finds an
@@ -127,7 +146,7 @@ commands:
     export LAKE_CACHE_DIR="$PWD/.lake/cache"
     unset LAKE_ARTIFACT_CACHE
     status=0
-    no-mistakes admit --memory 9GiB --limit "none; measured peak 4.55 GiB" -- gtimeout --foreground --verbose --kill-after=30 1020 lean --run tools/check.lean || status=$?
+    no-mistakes admit --memory 9GiB --limit "none; measured peak 5.63 GiB" -- gtimeout --foreground --verbose --kill-after=30 1020 lean --run tools/check.lean || status=$?
     case $status in
       124) echo "lean --run tools/check.lean reached its wall-clock limit of 1020 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
       137) echo "lean --run tools/check.lean was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 1020 seconds and did not stop within 30 seconds of TERM" >&2 ;;
@@ -160,7 +179,7 @@ commands:
 build_outputs:
   command: |
     status=0
-    no-mistakes admit --memory 9GiB --limit "none; measured peak 4.55 GiB" -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true gtimeout --foreground --verbose --kill-after=30 1020 lean --run tools/check.lean || status=$?
+    no-mistakes admit --memory 9GiB --limit "none; measured peak 5.63 GiB" -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true gtimeout --foreground --verbose --kill-after=30 1020 lean --run tools/check.lean || status=$?
     case $status in
       124) echo "lean --run tools/check.lean reached its wall-clock limit of 1020 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
       137) echo "lean --run tools/check.lean was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 1020 seconds and did not stop within 30 seconds of TERM" >&2 ;;

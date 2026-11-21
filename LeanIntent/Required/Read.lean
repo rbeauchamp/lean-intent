@@ -197,20 +197,6 @@ def declaredAnywhere (heads : Array Name) : MetaM (Array (Implementation.Constan
         found := found.push (⟨m, ci.name⟩, head)
   return found.qsort fun a b => Name.lt a.1.name b.1.name
 
-/-- **What a gate reads**, from the finished build: the report on where the required theorems lie,
-given `built`, the module names the project's build lists. It reads every module the environment
-holds, so it takes no list of modules to read, and it is `Required.report` of `built`, of every
-deliverable and every value recording an implementation there, each by the module whose own data
-declares it, and of the entries of every value of `Required` there, whichever package declares
-each: the environment does not record a module's package. So its findings are empty exactly when
-the environment holds no value of `Required`, or each deliverable, each value recording an
-implementation and each value of `Required` it holds is declared in a module `built` names, each
-deliverable is named by a value of `Required`, each such value names a deliverable, and each thing
-such a value lists is a theorem declared in a module `built` names
-(`Required.findings_eq_nil_iff`, of the entries as this module reads them).
-
-An error in a `module` file, where Lean need not import everything each module declares, so that a
-value could go unread, and an error naming a module of `built` that is not imported. -/
 def check (built : Array Name) : MetaM Report := do
   let env ← getEnv
   if env.header.isModule then

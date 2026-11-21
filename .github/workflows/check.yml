@@ -20,11 +20,12 @@ jobs:
         run: |
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/227caca133724d5516bee25c2aeb3e609478f2d8/elan-init.sh | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-      # LAKE-CONFIG, LEAN-BUILD, LEAN-MODULE, AXIOMS, PROCESS and CODES: no other package is
-      # required, every library module builds with no error and no warning, every Lean file is a
-      # `module` file, every declaration rests only on Lean's axioms, the library's compiled code
-      # neither starts a process nor asks where it runs, and no declaration depends on a declared
-      # type's code other than the one its deriving handler writes.
+      # LAKE-CONFIG, LEAN-BUILD, LEAN-MODULE, AXIOMS, PROCESS, CODES and NO-COMMENTS: no other
+      # package is required, every library module builds with no error and no warning, every Lean
+      # file is a `module` file, every declaration rests only on Lean's axioms, the library's
+      # compiled code neither starts a process nor asks where it runs, no declaration depends on a
+      # declared type's code other than the one its deriving handler writes, and every tracked Lean
+      # file obeys the comment ratchet in tools/comment-ratchet.json.
       - name: Build the library and audit its axioms
         run: lean --run tools/check.lean
       # The repository establishes its claims by proof, so its listing of tests is empty.

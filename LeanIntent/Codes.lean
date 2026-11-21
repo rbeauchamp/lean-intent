@@ -277,11 +277,6 @@ evaluates it alike for every type parameter. -/
 has values of every depth (`growsAt`; `Ty.mu_infinite`). -/
 @[expose] def grows (r : Ty) (i : Nat) : Bool := r.growsAt i i
 
-/-- The type a code denotes, at the path `p` into it: `den t []` is the type `t` denotes, and a path
-`k :: p` into a chain is the path `p` into its `k`-th item. A group's type `mu b g r i` denotes the
-trees of `MuVal` whose data are the types the chains of the constructors' other fields denote, at the
-paths `[j, c, 0]` into `g`, and whose positions are the types of the recursive fields' arguments, at
-the paths `[j, c, 1, f]`; where the group does not grow (`Ty.grows`), it has only its base values. -/
 @[expose, reducible] def den : Ty → List Nat → Type
   | unit, _ => Unit
   | bool, [] => Bool
@@ -536,8 +531,6 @@ type is above the bound, and lists only its empty value here. -/
   | mu b _ _ _ => b.part.map .base
   | muAt b g r j i => [(muAt b g r j i).empty]
 
-/-- Whether the type has exactly one value: the unit type, `Fin 1` and a bit vector of width zero; a
-pair of two such types; a declared type whose representation is one; and a function to such a type. -/
 @[expose] def unique : Ty → Bool
   | unit => true
   | prod a b => a.unique && b.unique
@@ -550,10 +543,6 @@ pair of two such types; a declared type whose representation is one; and a funct
   | muAt _ _ r j i => !r.growsAt j i
   | _ => false
 
-/-- Whether the type has finitely many values: the unit type, `Bool`, `Fin (n + 1)` and a machine
-type do, numbers, strings, lists and arrays do not, an option, a pair or a sum does exactly when each
-of its components does, and a function type exactly when its result has one value, or its argument
-and its result have finitely many. -/
 @[expose] def finite : Ty → Bool
   | unit => true
   | bool => true
@@ -573,13 +562,6 @@ and its result have finitely many. -/
   | mu b _ r i => !r.grows i && b.finite
   | muAt _ _ r j i => !r.growsAt j i
 
-/-- The rule that fixes which values of a type the degenerate class takes constant subjects at,
-written apart from `part`: a number, a string, a list or an array only at its empty value; the unit
-type, `Bool`, `Fin (n + 1)` and a machine type at every value; an option at `none` and at each value
-its component's rule admits under `some`; a pair at each pair of values its sides' rules admit; a
-sum at each value either side's rule admits; a declared type as its representation; and a function
-type at every function where it has finitely many, and otherwise at the constant function at each
-value its result's rule admits. -/
 @[expose] def Small : (t : Ty) → t.denote → Prop
   | unit, _ => True
   | bool, _ => True
@@ -693,8 +675,6 @@ theorem muTy_infinite {b g r : Ty} {o i : Nat} (hg : r.growsAt o i = true) :
   simp only [growsAt, Bool.and_eq_true, beq_iff_eq] at hg
   obtain ⟨hpi, hfix⟩ := hg
   generalize hp : iter (r.growsStep (r.inhabited o)) (r.items + 1) (r.inhabited o) = p at hpi hfix
-  -- Each type `p` marks has a constructor whose recursive fields hold types with a value, one of
-  -- them a type `p` marks.
   have hstep : ∀ j, p.getD j false = true → ∃ c, ∃ hc : c < r.muN j, ∃ f, ∃ hf : f < r.muA j c,
       p.getD (r.muS j c f) false = true ∧
         ∀ f' : Fin (r.muA j c), Nonempty (muTy b g r o r.muN (r.muS j c f')) := by
@@ -704,7 +684,6 @@ theorem muTy_infinite {b g r : Ty} {o i : Nat} (hg : r.growsAt o i = true) :
       List.mem_range, List.all_eq_true] at hj
     obtain ⟨_, _, c, hc, hall, f, hf, hpf⟩ := hj
     exact ⟨c, hc, f, hf, hpf, fun f' => inhabited_sound (hall f' f'.2)⟩
-  -- The chosen constructor and field of each type `p` marks, as numbers.
   let C : Nat → Nat := fun j => if hj : p.getD j false = true then (hstep j hj).choose else 0
   let F : Nat → Nat := fun j =>
     if hj : p.getD j false = true then (hstep j hj).choose_spec.choose_spec.choose else 0
@@ -719,7 +698,6 @@ theorem muTy_infinite {b g r : Ty} {o i : Nat} (hg : r.growsAt o i = true) :
     exact ⟨(hstep j hj).choose_spec.choose, (hstep j hj).choose_spec.choose_spec.choose_spec.choose,
       (hstep j hj).choose_spec.choose_spec.choose_spec.choose_spec.1,
       (hstep j hj).choose_spec.choose_spec.choose_spec.choose_spec.2⟩
-  -- The depth of a value along the chosen fields.
   let depth : {j : Nat} → muTy b g r o r.muN j → Nat := fun v =>
     MuVal.rec (motive := fun _ _ => Nat) (fun _ => 0)
       (fun {j} c _ _ ih => if h : c.val = C j ∧ F j < r.muA j c then
@@ -729,7 +707,6 @@ theorem muTy_infinite {b g r : Ty} {o i : Nat} (hg : r.growsAt o i = true) :
     intro j j' e v
     subst e
     rfl
-  -- A value of each type `p` marks of depth at least `m`.
   let chain : (m : Nat) → (j : Nat) → p.getD j false = true → muTy b g r o r.muN j :=
     fun m => Nat.rec (fun j hj => .node ⟨C j, (hC j hj).1⟩ (g.denEmpty [j, C j, 0])
         fun f _ => Classical.choice ((hC j hj).2.2.2 f))

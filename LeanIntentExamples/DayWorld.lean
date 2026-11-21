@@ -318,8 +318,6 @@ theorem dayCycle_not_o5_eq {lo hi : E} (hlt : lo < hi) {sight : Fin 4 → Obs}
     (clockWorld_meets (length := 4) (start := 0) (by decide) (by decide) hlt hsight)
     (fun h => absurd (congrArg DayWorld.length h) (show (2 : Nat) ≠ 4 by decide))
 
-/-- O5 with the widest freedom, which every record meets: the freedoms are decided on the owner's
-behalf in `AcornVerif.Intent.Decisions`. -/
 theorem dayCycle_o5_widest : O5 (dayCycle Ctx Act Obs E) .widest := o5_widest _
 
 /-- Every day lasts the same even number of ticks, at least two, and is placed alike. -/
