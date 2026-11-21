@@ -7,7 +7,8 @@
 # errors, refuses a Lean file that is not a `module` file, audits the axioms every declaration
 # rests on and the runtime functions its compiled code calls, runs the audit of declared types'
 # codes over every declaration (through tools/codes.lean, a program it runs because it is not
-# itself built against the library), and with --tests it lists the repository's tests. no-mistakes
+# itself built against the library), enforces the Lean comment ratchet (`NO-COMMENTS` against
+# tools/comment-ratchet.json), and with --tests it lists the repository's tests. no-mistakes
 # honours `test.instructions`, `test.no_surface` and `test.tests_as_evidence` only from the copy of
 # this file on the default branch, so a change to any of them governs the runs that follow its
 # merge.
@@ -23,7 +24,10 @@
 # below its 9 GiB bound by more than 15%. The listing, which elaborates tools/check.lean against
 # Lean and Lake and runs once per side: 4.76 GiB on 2026-10-30 and again on 2026-11-05. Measure
 # again when the library grows or the toolchain changes, and raise a bound before a peak comes
-# within 15% of it.
+# within 15% of it. The comment check (NO-COMMENTS), which the check runs after its build and its
+# audit of codes and before it imports the library for its other audits, reads each tracked Lean
+# file in a child process, three at a time: measured alone on 2026-11-20 over 67 files against a
+# built library, 5.52 and 5.46 GiB in two runs sampled every 0.15 seconds, below the build's peak.
 #
 # Time. Each check also runs under a wall-clock limit, so that a check that stalls fails and gives
 # back its share of the memory budget instead of holding the share and the run until someone stops
@@ -52,11 +56,15 @@
 # seconds. The second figure of each pair comes from this change's own validation run, at a load
 # average of 4 to 14, the others from runs at 3 to 9. Measure again when the library grows, the
 # toolchain changes or the machine changes, and raise a limit before three times a measured
-# duration passes it.
+# duration passes it. Those durations of the check predate its comment check (NO-COMMENTS), which
+# measured alone on 2026-11-20 on the same machine, against a built library, took 47 and 49
+# seconds. The check with it has not been measured, so its 1020 seconds are no longer known to be
+# three times its longest run: 325 and 49 seconds together are 374, of which 1020 is 2.7 times.
+# Measure the check again, and raise its limit if three times its duration passes 1020 seconds.
 test:
   instructions: |
     On lean-intent this step is verification. A change's claims are established by machine-checked proof, by derivation and by reading; lean-intent has no running product to drive.
-    1. The pipeline has already run the repository's checks in this step, in this run's own checkout of the change, as its configured test command (commands.test in .no-mistakes.yaml); do not run lean --run tools/check.lean, or that command, again. The context above this runbook states that run's result, at this pipeline's version on a line beginning "Configured test command already ran successfully as baseline" when it exited 0, or "Configured test command failed with exit code" followed by its exit status. Cite that run: its command and its exit status. If the context states no result of the configured test command, the checks did not run in this step: report the check open and say so. The configured test command exits 0 only if its listing of tests exits 0 and prints nothing and the check it runs first, through no-mistakes admit, exits 0; that check is lean --run tools/check.lean. It exits 0 only when lakefile.toml requires no other package, Lake builds every library module with no error and no warning (a sorry is a warning), every Lean file Git's index lists is a module file, every declaration of the library rests only on Lean's axioms propext, Classical.choice and Quot.sound, the library's compiled code calls no runtime function that starts a process or asks where it runs or what its environment holds, and the audit of declared types' codes (LeanIntent.CodeAudit, run by tools/codes.lean) accepts every declaration of the library. tools/check.lean's module comment says what each rule decides; claim no more than that.
+    1. The pipeline has already run the repository's checks in this step, in this run's own checkout of the change, as its configured test command (commands.test in .no-mistakes.yaml); do not run lean --run tools/check.lean, or that command, again. The context above this runbook states that run's result, at this pipeline's version on a line beginning "Configured test command already ran successfully as baseline" when it exited 0, or "Configured test command failed with exit code" followed by its exit status. Cite that run: its command and its exit status. If the context states no result of the configured test command, the checks did not run in this step: report the check open and say so. The configured test command exits 0 only if its listing of tests exits 0 and prints nothing and the check it runs first, through no-mistakes admit, exits 0; that check is lean --run tools/check.lean. It exits 0 only when lakefile.toml requires no other package, Lake builds every library module with no error and no warning (a sorry is a warning), every Lean file Git's index lists is a module file, every declaration of the library rests only on Lean's axioms propext, Classical.choice and Quot.sound, the library's compiled code calls no runtime function that starts a process or asks where it runs or what its environment holds, the audit of declared types' codes (LeanIntent.CodeAudit, run by tools/codes.lean) accepts every declaration of the library, and NO-COMMENTS accepts every tracked Lean file against tools/comment-ratchet.json. docs/adr/0001-repository-checks-and-trusted-base.md (with ADR-0002, ADR-0003 and ADR-0004) says what each rule decides; claim no more than that.
     2. Do not write, request or suggest a test, and do not improvise disposable break-it runs as evidence: lean-intent establishes its claims by theorems. A claim about what a theorem states is settled by reading its statement, binders and hypotheses included, never its docstring or name alone.
     3. Report each claim by how it was established: machine-checked (a Lean proof that the check above built; cite the theorem and the command's exit status), argued (by derivation or by reading; cite the file and lines), observed (executed in this run for this claim), assumed (a hypothesis the change relies on; say why it is trusted) or open (not established; say what would establish it and which issue tracks it).
   # lean-intent has no running product; proof, its check and reading settle its claims.
@@ -72,11 +80,12 @@ test:
   # run, or when the listing reaches its limit.
   # That program prints one line for each command whose verdict comes from running code on chosen
   # inputs, read through Lean's frontend, and fails rather than printing nothing when it cannot
-  # read a file; its module comment says what it lists and what it does not. The guard asks Git the
-  # question that program asks for its own list of files, `git ls-files -- '*.lean'`, so it skips
-  # the listing only where that list is empty, which the program refuses; and `set -e` ends the
-  # command with a status other than 0, never an empty listing, when Git cannot answer. A head with
-  # no Lean file still fails the Test command below, which runs tools/check.lean first.
+  # read a file; docs/adr/0002-test-listing-and-pinned-lean-tokens.md says what it lists and what it
+  # does not. The guard asks Git the question that program asks for its own list of files,
+  # `git ls-files -- '*.lean'`, so it skips the listing only where that list is empty, which the
+  # program refuses; and `set -e` ends the command with a status other than 0, never an empty
+  # listing, when Git cannot answer. A head with no Lean file still fails the Test command below,
+  # which runs tools/check.lean first.
   tests_as_evidence:
     policy: forbid
     list_command: |

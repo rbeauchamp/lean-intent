@@ -40,8 +40,6 @@ inductive Prec where
   | term | simple | head | arg
   deriving @[expose] DecidableEq
 
-/-- Whether a sort, a natural number literal or an application needs parentheses at `p`: as the
-function of an application or as an argument. -/
 @[expose] def Prec.tight : Prec → Bool
   | .head | .arg => true
   | _ => false

@@ -435,7 +435,6 @@ theorem parseLog_ownersText : parseLog [ownersText] = .ok [owners] :=
 must reduce to a string literal, from the finished build. -/
 @[expose] def committedLog : OwnersLog := ⟨[ownersText]⟩
 
-/-- Every printed log reads back as its statements. -/
 theorem parseLog_printed : parseLog (log.map Statement.print) = .ok log :=
   parseLog_eq_ok_iff.mpr rfl
 

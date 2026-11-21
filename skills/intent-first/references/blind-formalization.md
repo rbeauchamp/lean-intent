@@ -133,7 +133,7 @@ Reply with three parts.
    - a property for each thing the owner's words require of the subject, named so that the owner can read it;
    - a domain hypothesis for each fact about the world that those properties rely on;
    - the predicates the properties are written in, in vocab;
-   - the shape that fits what the subject is, as Shape in Record.lean describes.
+   - the shape that fits what the subject is, a constructor of Shape in Record.lean: function for a function whose result depends only on its arguments; for a subject that carries state from one call to the next, the step constructor its type has (step, stepOn, action or actionOn: from a state, with or without an input, to the next state, with or without an output); bundle for a description made of functions that carries no state from one use to the next, such as a world's rules, with each of its functions named as a Member (first and rest, at least one function) and the plain values that are the rest of the subject (data); and value only for a value with no behaviour.
 
 2. In plain words: each property and hypothesis; each point where the owner's words left you a choice, with the choice you made and why; and each requirement you inferred rather than read in the words.
 

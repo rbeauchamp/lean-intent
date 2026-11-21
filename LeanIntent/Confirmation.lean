@@ -133,8 +133,6 @@ structure Question where
   predicate : String
   deriving @[expose] DecidableEq
 
-/-- The question every revision asks: whether its rendering, as it stands, is the plain restatement
-of the owner's intent. Its predicate is this fixed text, which no consequence's text is. -/
 @[expose] def restatement : Question :=
   ⟨"the record's plain restatement", .entailment, "the record, as its revision prints it"⟩
 

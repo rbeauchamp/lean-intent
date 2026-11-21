@@ -163,11 +163,6 @@ annotation, which Lean applies to the arguments written after them and nothing e
 @[expose] def holdsMatch (env : Environment) (e : Expr) : Bool :=
   (e.find? fun x => x.isConst && isMatcherCore env x.constName!).isSome
 
-/-- Whether Lean's parser and elaborator read `text` as a term, in the namespace `ns` with nothing
-opened, in the current local context and with the universe parameters of `e`, and elaborate it to
-`e`, binder names and metadata aside. A term that holds a `match` may instead elaborate to one that
-Lean's kernel finds definitionally equal to `e`: Lean compiles a `match` anew each time it reads one,
-into a new auxiliary constant, so no reading of it is the same term. -/
 def elaboratesTo (text : String) (e : Expr) (ns : Name := .anonymous) : MetaM Bool := do
   match Parser.runParserCategory (← getEnv) `term text with
   | .error _ => return false
@@ -293,7 +288,6 @@ def Reader.print (R : Reader) (e : Expr) : MetaM String := do
   if e.hasMVar || e.hasLooseBVars || (e.hasFVar && R.params.isEmpty) then
     throwError "cannot print{indentExpr e}\nas it has free or meta variables"
   if R.form == .exact then return ← R.printClosed e
-  -- A binder keeps a parameter's name unless the term mentions that parameter.
   let locals ← R.params.toList.filterMapM fun x => do
     if e.containsFVar x.fvarId! then return some (← x.fvarId!.getDecl).userName else return none
   let ec := canon (constRoots e ++ locals) [] (eraseMData e)
@@ -425,7 +419,6 @@ def readSettled (s : Restatement) (e : Expr) : MetaM (Settled s) := do
   let f := fence text
   s!"{f}lean\n{text}\n{f}\n"
 
-/-- A statement: its heading, its exact print, then any lines `settled` before its gloss. -/
 @[expose] def statement (heading text : String) (gloss : Array String) (settled : String := "") : String :=
   s!"### {heading}\n\n{code text}\n{settled}- **Requires:** {gloss[0]!}\n\
     - **Rules out:** {gloss[1]!}\n- **Still allows:** {gloss[2]!}\n\
@@ -756,13 +749,10 @@ def definitions (R : Reader) (roots : List Name) (shown : NameSet) : MetaM Strin
   let own := R.own
   let mut eqns : NameMap (Name × Expr) := {}
   repeat
-    -- Finding an equation may add declarations, so each pass reads the environment anew.
     let env ← getEnv
     let lookup := fun c => (env.setExporting false).find? c
     let stop := stopAt env own shown
     let found := eqns
-    -- `Prop` mentions no name: a definition by recursion whose equation is not yet found is
-    -- followed through its type alone in this pass.
     let eqn := fun c => match found.find? c with
       | some (_, t) => some t
       | none => if (recursionKind env c).isSome then some (.sort .zero) else none
@@ -872,7 +862,6 @@ def recordPart (R : Reader) (exTerm : Expr) (note : String := "") (statuses : St
   let ex ← ctorArgs exTerm ``Explanation.mk 11
   let r ← ctorArgs ex[1]! ``IntentRecord.mk 5
   let restatement ← readRestatement ex[6]!
-  -- A record that is a family applied to values speaks of those values, however it was reached.
   let note := match ex[1]!.getAppFn with
     | .const f _ =>
       if note.isEmpty && R.form == Form.readable && R.params.isEmpty && ex[1]!.isApp &&
@@ -934,9 +923,6 @@ def recordPart (R : Reader) (exTerm : Expr) (note : String := "") (statuses : St
     doc := doc ++ statement s!"{← strLit c[1]!}, {shownAs}" (← R.print c[3]!) (← readGloss s[5]!)
       settled
     printed := printed.push c[3]!
-  -- The record's own constant is the record shown above, statement by statement. What it means for
-  -- a subject to meet the record, and for a consequence to hold of it as shown, are lean-intent's
-  -- definitions, printed with the rest.
   let shown : NameSet := if let .const c _ := ex[1]!.getAppFn then ({} : NameSet).insert c else {}
   let roots := printed.toList.flatMap (exprRefs · []) ++ [``IntentRecord.Meets] ++
     if consequences.isEmpty then [] else [``Consequence.HoldsOf]

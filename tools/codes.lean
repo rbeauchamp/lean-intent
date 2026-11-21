@@ -3,27 +3,6 @@ module
 import LeanIntent.CodeAudit
 meta import LeanIntent.CodeAudit
 
-/-!
-# `codes`: the audit of declared types' codes over the library
-
-`tools/check.lean` runs this program for its rule `CODES`, once it has built the library, as
-
-    lean --run tools/codes.lean <module>...
-
-with `LEAN_PATH` naming the library's build, so that Lean finds `LeanIntent.CodeAudit` and the
-modules it is given. It is a `module` file: `main` is public, and `LeanIntent.CodeAudit` is imported
-a second time with `meta`, since Lean loads the compiled code of an imported module, which
-`lean --run` runs, only where the import says `meta`. It imports those modules and runs
-`LeanIntent.CodeAudit.audit` from every constant they declare, printing one line for each reason the
-audit refuses (`LeanIntent.CodeAudit.report`). It exits with status `0` when the audit accepts,
-having printed nothing; `1` when it refuses, or when the modules declare no constant, since an audit
-of nothing would accept anything, having printed to standard output a line for each reason; and `2`
-when it cannot run: any error raised in `main` (its arguments, a module Lean cannot import, an error
-the audit throws, a failure to print) is caught and printed to standard error. Lean ends a program
-whose `main` raises an error with status `1`, which would read as a refusal, so `main` never lets
-one escape.
--/
-
 open Lean
 
 public def main (args : List String) : IO UInt32 := do

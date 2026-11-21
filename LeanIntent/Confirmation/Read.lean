@@ -181,8 +181,6 @@ def keptOf (a : Expr) : MetaM (Question × Verdict × Answerer) := do
   let args ← ctorArgs attributed[1]! ``Answer.mk 3
   return (← questionOf args[1]!, ← readVerdict args[2]!, ← readAnswerer attributed[2]!)
 
-/-- The explanation of the deliverable `decl`, a definition of type `LeanIntent.Deliverable W`, by
-its name, with the deliverable's constructor arguments. -/
 def deliverableParts (decl : Name) : MetaM (Name × Name × Array Expr) := do
   let d ← ctorArgs (← constOf decl) ``Deliverable.mk 5
   return (← constName d[1]! s!"the record of {decl}", ← constName d[2]! s!"the explanation of {decl}",
@@ -227,11 +225,6 @@ def attributedOf (decl : Name) : MetaM (Array (Question × Verdict × Answerer))
   let e ← constOf decl
   (if t.getAppFn.isConstOf ``Attributed then pure #[e] else listElems e) >>= (·.mapM keptOf)
 
-/-- The values of the modules `mods`, among the deliverables `decls` with the current revisions
-`revs`, that say who settled something and that no deliverable holds, which would print a claim the
-check never asks about: an explanation that claims so and is no deliverable's, and an attributed
-answer, or a list of them, holding one no deliverable keeps. These are all `LeanIntent.Render` prints
-such words from, but for a term given to `answerText` directly. -/
 def undeclaredIn (mods decls : Array Name) (revs : Array Revision) : MetaM (List String) := do
   let held ← decls.mapM fun d => return (← deliverableParts d).2.1
   let kept := revs.toList.flatMap (·.kept)

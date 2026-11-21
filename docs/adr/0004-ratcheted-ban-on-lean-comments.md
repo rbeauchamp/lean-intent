@@ -1,0 +1,63 @@
+# ADR-0004: Ratcheted ban on Lean comments (`NO-COMMENTS`)
+
+## Status
+
+Accepted
+
+## Context
+
+Code comments across `lean-intent`'s `.lean` files accumulated 6,804 comment lines (~26.1% of all Lean source lines; ~7,030 lines or 27.0% including collapsed blank lines): mostly tautological docstrings restating types and definitions, alongside stale comments that drifted behind code changes and excuse comments that rationalized hacky or incomplete implementations (e.g., unnecessary `import all`, skipped generic explanations, hardcoded magic fuel bounds, and stringly-typed sentinels; tracked in #85–#95). Meanwhile, genuine architectural and TCB rationale belongs in durable documentation (`docs/` and `docs/adr/`) rather than scattered inside source files.
+
+Removing all ~2,400 comments cleanly in one change would make a single pull request too large to audit and review carefully.
+
+## Decision
+
+### Scope
+
+- All four Lean comment forms are banned across every tracked `.lean` file (`git ls-files -z -- '*.lean'`, including `LeanIntent/`, `LeanIntentExamples/`, and `tools/`):
+  - line comments (`-- ...`),
+  - plain block comments (`/- ... -/`),
+  - declaration docstrings (`/-- ... -/`), and
+  - module docstrings (`/-! ... -/`).
+- Non-Lean configuration and workflow files (`.no-mistakes.yaml`, `.github/workflows/check.yml`, `lakefile.toml`) and Markdown documentation (`README.md`, `docs/`, `.github/pull_request_template.md`) are excluded: `tools/check.lean` has no YAML parser (and `LAKE-CONFIG` forbids external dependencies), `.no-mistakes.yaml`'s timeout messages and `AGENTS.md` cite its config comments, and `check.yml` documents a commit-pinned GitHub Action version.
+
+### Owning-system enforcement (`NO-COMMENTS` in `tools/check.lean`)
+
+`NO-COMMENTS` reads every tracked `.lean` file through Lean's own frontend, and through nothing else: no regex, no hand-rolled lexer, and no parser run against an environment other than the file's own.
+
+- **Each file's own grammar.** For each file in the inventory, `fileComments` runs `lean --run tools/check.lean --comments-module <file> <toolDir> <libDir>`. The child parses the header with `Parser.parseHeader`, loads its imports with `Elab.processHeader`, and elaborates its commands with `Elab.IO.processCommandsIncrementally` under `Elab.async := false` and `debug.byAsSorry := true`. Each command uses the grammar in force at that point in the file. For example, a file-local macro that takes `interpolatedStr(term)` makes the block comment inside `fmt "{1 /- explanation -/}"` part of the interpolated expression.
+- **Compiled imports.** Both inventory commands and the rule use Lake's built library (`.lake/build/lib/lean`). Before starting the readers, the parent follows each selected file's header imports into tracked modules under `tools/`, using Lean's header parser and module names. It compiles each such tool with `lean -o` after its own tool imports are available, once per inventory. Readers search the temporary tool directory first, then the built library, inherited search paths and the toolchain. A cycle or compilation error fails the inventory. The parent removes the directory after the readers finish.
+- **Process and memory isolation.** The parent prepares tool imports serially, then runs up to three readers concurrently. Each reader's imported `Environment` lives in its own process. The parent waits for every reader before releasing their shared search directory, including when a reader fails. `Check.check` stays safe because the child calls `enableInitializersExecution`. Before tool import preparation and interior gap checking were added, the 67-file inventory and the rule's comparison took 47 and 49 seconds on the owner's 18-core machine under Lean v4.35.0. The largest sums of resident memory sampled over the parent and its children at 0.15-second intervals were 5.52 and 5.46 GiB respectively. The build's recorded peak is 7.25 GiB and the check's configured bound is 9 GiB.
+- **What a child reports.** A child prints one line for each comment, `<fingerprint> <kind> <first line> <last line>`, in source order, and exits with status 0. The parent refuses a child that exits otherwise and any printed line that is not of that form, so text a file's elaboration printed can add a refusal and can never hide a comment.
+- **Fail-closed completeness.**
+  - A header, import or elaboration error fails the check rather than counting 0.
+  - The frontend must have read the whole file: the parser position after the last command it read must equal the end of the source. A file that ends with `#exit` is accepted, since the trivia after `#exit` belong to that command and are scanned; a file with anything after `#exit` that the frontend does not read is refused, since comments there could not be counted.
+  - For the header and each command, `collectSyntax` visits the original leaves in source order. It scans each gap as trivia, from the previous parser position through the final gap before the next parser position. An unexplained token in a gap, an unterminated block comment, or a token outside the unread interval fails the inventory. At a parser choice each alternative starts at the same cursor and must reach the same end.
+  - A parser such as `Lean.Doc.Parser.asStringFn` can collapse several tokens and their intervening comments into one atom. When a leaf contains both characters of `--` or `/-`, `checkToken_ok_iff` requires it to pass `matchesLiteralToken`. The reader checks the original source spelling against both the syntax and Lean's built-in token parser with an empty keyword table. For an interpolated string it checks each literal chunk with `interpolatedStrFn`. A continuation's opening `}` becomes `"` to enter the same literal loop, and an appended `}"` can close an empty hole. The parser's first chunk must cover the exact spelling after that opening-character substitution. Embedded expressions are visited separately.
+  - When the only possible opener crosses the leaf's end, the reader also accepts an original atom if Lean's symbol parser reads its spelling at its source position and returns the same end position before trailing trivia. It uses the header's token table or the one in force before the command and reads from the full normalized input so longer tokens are visible. In `let x : Int <--n`, Lean consumes the complete `<-` before looking for trivia. The next hyphen belongs to unary minus. An opaque span that neither recognizer accounts for still fails the inventory.
+  - A `Parser.Command.docComment`, `Parser.Command.plainDocComment` or `Parser.Command.moduleDoc` node contributes one comment covering its original source range. Its body can itself contain comment delimiters. The scanner resumes at the end of the docstring. The frontend and syntax extensions are trusted to supply faithful original ranges and to use Lean's literal, identifier and docstring representations for the syntax they denote. The final syntax tree carries no history of which parser functions ran.
+  - Offsets and slices come from one buffer: every scanned slice is cut from `inputCtx.fileMap.source`, the line-ending-normalized text that Lean's positions index, so a file with CRLF line endings is read at the right bytes.
+- **Inventory for people.** `lean --run tools/check.lean --comments` prints each file's count of comments and of comment lines and their totals; `lean --run tools/check.lean --comments <file>` prints each remaining comment of one file with its kind, line range and fingerprint, for the `/delete-comment` skill (`.agents/skills/delete-comment/SKILL.md`). Both read through the same child processes as the rule.
+
+### Strict per-file downward-only ratchet (`tools/comment-ratchet.json`)
+
+- **What the manifest records.** `tools/comment-ratchet.json` is a JSON array with one object for each file that still has comments: `{"file": "...", "comments": N, "lines": M, "fingerprints": ["...", ...]}`. `fingerprints` holds one fingerprint for each remaining comment, in ascending order and with repeats (two comments with the same text give the same fingerprint twice); `comments` is their number; `lines` is the number of distinct lines a comment touches.
+- **Fingerprint.** A comment's fingerprint is the 64-bit FNV-1a hash of the UTF-8 bytes of its exact source text, delimiters included, in the line-ending-normalized source, written as 16 lowercase hexadecimal digits (`fingerprint`). `tools/check.lean` defines it itself, so it does not change with the Lean release.
+- **A JSON array, not an object,** because `Lean.Json.parse` silently overwrites duplicate object keys. The checker refuses a duplicate `file`, an unknown or missing key, `comments` or `lines` that is not a positive integer, a fingerprint that is not 16 lowercase hexadecimal digits, fingerprints out of ascending order, `comments` that differs from the number of fingerprints, and an entry naming a file that is not in `git ls-files -- '*.lean'`.
+- **The manifest describes exactly what remains.** For every tracked `.lean` file, the fingerprints of the comments the frontend reads, as a multiset, must equal the file's entry, where a file with no entry has none, and their distinct lines must equal `lines`. So with the manifest unchanged:
+  - a comment added to any file, listed or not, is refused;
+  - a comment whose text changes in any byte is refused, as is a comment deleted while another is added in the same file, which the earlier count-only ceiling admitted when the totals stayed the same;
+  - a deleted comment is refused until its fingerprint is removed from the entry and `comments` and `lines` are lowered to match (or the entry is removed when none remain), so a deletion leaves no slack.
+- **The manifest only shrinks.** When Git gives a merge base of `HEAD` with `origin/main`, or failing that with `main`, and that commit holds `tools/comment-ratchet.json`, every fingerprint the candidate manifest records for a file must be among those that commit's manifest records for the same file, counted with repeats (`baseRatchet`, `missingFrom`). A candidate manifest therefore cannot gain an entry, a fingerprint or a repeat, so adding a comment together with a manifest row for it is refused. A file that is renamed, or a commented declaration that moves to another file, is refused the same way: drain its comments first.
+- **Where that comparison does not run.** It is skipped, with a note on standard error, when neither `origin/main` nor `main` names a commit, when Git finds no merge base with it (a shallow checkout, such as the one the `check` workflow makes on GitHub's machines), or when the merge base holds no `tools/comment-ratchet.json` (the change that introduces the ratchet). On `main` itself the merge base is `HEAD`, so the comparison is of the working tree's manifest with the committed one. Where it is skipped, only the exact description above is enforced, which a change that adds a comment and its manifest row passes; the merge gate's worktree on the owner's machine had `origin/main` when this was written (2026-11-20), so the comparison runs there once `main` holds the manifest.
+
+### Accepted risk
+
+- The fingerprint is not a cryptographic hash. It identifies a comment against an accidental or casual substitution; a comment constructed to collide with a deleted one's fingerprint would pass, as would a change that edits `tools/check.lean` itself. Both take a deliberate author, and what they admit is one comment, which is cheap to see in review and to undo.
+- `lines` is determined by the comments' texts except where two comments share a line, so it is recorded and compared with the file, and not with the merge base's manifest.
+
+## Consequences
+
+- Deleting `/--` docstrings removes Lean LSP hover tooltips and `#print` docstrings; module specifications and non-obvious design rationale must live in `docs/` and `docs/adr/`.
+- Any documentation link referencing a removed module comment (such as `README.md`, `.no-mistakes.yaml`, and `docs/*.md`) must be updated in the same change that removes that comment.
+- Once every entry in `tools/comment-ratchet.json` is drained to `[]`, the codebase will carry zero Lean comments and `NO-COMMENTS` enforces a total ban.
