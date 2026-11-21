@@ -6,15 +6,15 @@ Accepted
 
 ## Context
 
-Two verification readers bridge compiled Lean/Lake artifacts into pure proved decision procedures: `LeanIntent/Execution/Code.lean` identifies which compiler-generated IR declarations count as an implementation's compiled code, and `LeanIntent/Required/ModuleName.lean` decodes module names printed by `lake query --json`. Both rely on exact Lean v4.35.0 source properties that must be re-verified on toolchain upgrades (#80).
+Two verification readers bridge compiled Lean/Lake artifacts into pure proved decision procedures: `LeanIntent/Execution/Code.lean` identifies which compiler-generated IR declarations count as an implementation's compiled code, and `LeanIntent/Required/ModuleName.lean` decodes module names printed by `lake query --json`. Both rely on exact Lean v4.36.0 source properties that must be re-verified on toolchain upgrades (#80).
 
 ## Decision
 
 ### Compiled-code allowlist (`LeanIntent/Execution/Code.lean`)
 
 - `isCompiledCodeOf isConst impl d` counts only `impl` itself and declarations `d` not present as constants in the environment (`!isConst d`) whose name is formed by appending `_redArg` to a compiled copy of `impl`.
-- **Lean v4.35.0 compiler provenance**:
-  - `Lean/Compiler/LCNF/ReduceArity.lean` (lines 156–205, specifically lines 172 and 197): when a declaration has unused parameters (such as erased type or proof parameters kept by `ToMono.lean` lines 139 and 393), reduce-arity emits a copy named `<decl>._redArg` and turns `<decl>` into an `@[inline]` wrapper calling it. Line 172 is the single site producing `_redArg` names.
+- **Lean v4.36.0 compiler provenance**:
+  - `Lean/Compiler/LCNF/ReduceArity.lean` (lines 156–205, specifically lines 172 and 197): when a declaration has unused parameters (such as erased type or proof parameters kept by `ToMono.lean` lines 139 and 393), reduce-arity emits a copy named `<decl>._redArg` and turns `<decl>` into an `@[inline]` wrapper calling it. A caller that gives the wrapper all its parameters may then call only the copy, having inlined the wrapper, while one that applies it to fewer keeps a closure of `<decl>` itself, since the simplifier that runs after reduce-arity inlines no partial application (`Lean/Compiler/LCNF/Passes.lean` lines 128–130, `Lean/Compiler/LCNF/Simp/Config.lean` line 31, `Lean/Compiler/LCNF/Simp/InlineCandidate.lean` lines 99–100); both run `<decl>`'s code and both are counted. Line 172 is the single site producing `_redArg` names.
   - Rejecting environment constants (`isCompiledCodeOf_const`) prevents a user declaration named `impl._redArg` from spoofing compiled code.
 - **Deliberately excluded compiler artifacts** (documented remedies live in `docs/execution.md`):
   - Extracted closed terms `c._closed_i` (`Lean/Compiler/LCNF/ExtractClosed.lean`, lines 216–233): cached and shared across unrelated declarations, so reaching one does not establish running `c`.
@@ -24,7 +24,7 @@ Two verification readers bridge compiled Lean/Lake artifacts into pure proved de
 ### Closed-form ASCII module-name decoding (`LeanIntent/Required/ModuleName.lean`)
 
 - `Required.moduleName?` accepts only dot-separated segments where each segment begins with an ASCII letter followed by ASCII letters, digits, `_`, or `'`, and fails on every other string.
-- **Why general decoding of `Lean.Name.toString` is unsafe**: `escapePart` (`Init/Data/ToString/Name.lean`, lines 55–64 at Lean v4.35.0) wraps components containing `.` in `«...»` while leaving components that already contain `»` untouched, so the single-component names `a.b` and `«a.b»` both print as `«a.b»`. A lenient decoder could map a built module name to an unbuilt module and pass with exit `0`.
+- **Why general decoding of `Lean.Name.toString` is unsafe**: `escapePart` (`Init/Data/ToString/Name.lean`, lines 55–64 at Lean v4.36.0) wraps components containing `.` in `«...»` while leaving components that already contain `»` untouched, so the single-component names `a.b` and `«a.b»` both print as `«a.b»`. A lenient decoder could map a built module name to an unbuilt module and pass with exit `0`.
 - Restricting to the closed ASCII form makes decoding provably injective (`moduleName?_inj`), while projects with non-ASCII or escaped module names pass `Lake.Module` names directly via Lake's API instead of `queryModules`.
 
 ## Consequences

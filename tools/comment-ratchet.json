@@ -212,6 +212,7 @@
     "3a837a046649f8be",
     "400611f35c80c3fd",
     "5fdd02b1318b62b9",
+    "6181aeb866937688",
     "65d5ba65e22a5eeb",
     "6e29c9c704c8cb70",
     "70a90a22bc9d156f",
@@ -222,16 +223,15 @@
     "87299aa0f5545785",
     "91710247e503b329",
     "974cc46b05d48f3a",
+    "9e0a949615dc4e66",
     "b752961c5c7777b7",
     "bc988d9984283ece",
-    "bd67f64c80051113",
     "c896c13492feabdc",
     "cbe8a74499110c80",
     "d03cb9979df89e07",
     "d502a2956c9dad95",
     "dd79d88a108c9867",
     "e2eb881b048bbedd",
-    "f936285b0ca80b10",
     "f9ab7d79aead0e0f"
   ]},
   {"file": "LeanIntent/Codec.lean", "comments": 22, "lines": 58, "fingerprints": [
@@ -564,17 +564,18 @@
     "fb16741741888f52",
     "fbc4e6c793d597d9"
   ]},
-  {"file": "LeanIntent/Confirmation/Read.lean", "comments": 17, "lines": 88, "fingerprints": [
+  {"file": "LeanIntent/Confirmation/Read.lean", "comments": 18, "lines": 103, "fingerprints": [
     "12373ff89be3eb54",
     "285531e2d1d771ab",
     "6ac1c797de1212f6",
     "705f0df0b7cce34a",
     "71ad73a39576f7aa",
+    "7bda5ee5bcfe37a3",
+    "82286a82739eaed6",
     "8b530494f25a9d9e",
     "a7f3c7397448d807",
     "ac939ba8d646eeca",
     "b3f6788ed9da2741",
-    "bdc022ae11867001",
     "c2fbb571ceb6d4ce",
     "ceb71380fca278bd",
     "d89166be739a6439",
@@ -808,7 +809,7 @@
     "ef50358de8f01187",
     "f8e6a534c2990ad9"
   ]},
-  {"file": "LeanIntent/Execution/Read.lean", "comments": 10, "lines": 125, "fingerprints": [
+  {"file": "LeanIntent/Execution/Read.lean", "comments": 10, "lines": 136, "fingerprints": [
     "3f836b13c79de2c0",
     "4b58465ee5045fa5",
     "8de3141dc56c37ed",
@@ -817,7 +818,7 @@
     "be6a46bd2a10ee71",
     "c771ddee8a71ed4e",
     "d15ec4ca311b838f",
-    "d5d923afed122d98",
+    "d5f256f12a96f62b",
     "e36006ac26ee9946"
   ]},
   {"file": "LeanIntent/Implementation.lean", "comments": 60, "lines": 170, "fingerprints": [
@@ -1191,7 +1192,7 @@
     "f9250ecc7f64fa22",
     "fd74159df70f095a"
   ]},
-  {"file": "LeanIntent/Required.lean", "comments": 50, "lines": 173, "fingerprints": [
+  {"file": "LeanIntent/Required.lean", "comments": 50, "lines": 174, "fingerprints": [
     "00c9d557175d465f",
     "04151b94f5a94317",
     "0a30154559f3275e",
@@ -1205,7 +1206,6 @@
     "2fe694df2df39c99",
     "3223d90fdc27268f",
     "35b63e9e13898064",
-    "4056a2befc956808",
     "48a0c5d67b66b14d",
     "4b143af260b2df56",
     "4b7f8d0705be5c9f",
@@ -1236,6 +1236,7 @@
     "d0a6e5f0f56d2987",
     "d9ffdf80bc3ea577",
     "dce5c7f27ec99914",
+    "e7d3c4233998b38d",
     "e999958aa826d945",
     "e9a0a47cade8b75f",
     "edd54be5ecbd2b44",
@@ -1243,11 +1244,11 @@
     "ef50358de8f01187",
     "fa91f2a420be47ed"
   ]},
-  {"file": "LeanIntent/Required/Read.lean", "comments": 7, "lines": 119, "fingerprints": [
-    "0476090b1f82802f",
-    "1d8e1894187b1b32",
+  {"file": "LeanIntent/Required/Read.lean", "comments": 7, "lines": 122, "fingerprints": [
+    "0c5111659113e782",
     "4a2c01462fc50cde",
     "6ca092a6a4dc0fe3",
+    "6fbcf9c9d3a4e5ae",
     "bda0979130d928e9",
     "c24a65827eff8199",
     "c84d5d8f1e1fd7dc"

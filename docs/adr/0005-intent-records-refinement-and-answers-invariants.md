@@ -30,7 +30,7 @@ Core modules (`LeanIntent/Record.lean`, `LeanIntent/Refinement.lean`, `LeanInten
 ### Cone exclusion non-vacuity and module-file `import all` (`LeanIntentExamples/Cone.lean`)
 
 - Because no Lean theorem can name Lean's live `Environment`, `LeanIntent.Cone`'s theorems quantify over arbitrary `Name → Option ConstantInfo` lookups, and `LeanIntentExamples/Cone.lean` builds a hand-written lookup to prove non-vacuity on concrete cheat/honest records.
-- The four `import all` imports in `LeanIntentExamples/Cone.lean` correspond to four functions Lean v4.35.0 does not expose to `module` files: `Init.Prelude` (`Lean.Name.beq`), `Lean.Data.Name` (`Lean.Name.isPrefixOf`), `Lean.PrivateName` (`Lean.privateToUserName`), and `Lean.Declaration` (`Lean.ConstantInfo.isAxiom`).
+- The four `import all` imports in `LeanIntentExamples/Cone.lean` correspond to four functions Lean v4.36.0 does not expose to `module` files: `Init.Prelude` (`Lean.Name.beq`), `Lean.Data.Name` (`Lean.Name.isPrefixOf`), `Lean.PrivateName` (`Lean.privateToUserName`), and `Lean.Declaration` (`Lean.ConstantInfo.isAxiom`).
 
 ## Consequences
 

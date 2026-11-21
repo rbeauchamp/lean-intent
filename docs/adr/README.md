@@ -9,7 +9,7 @@ Code comments in `.lean` files are banned under a downward-only per-file ratchet
 | ADR | Title |
 |---|---|
 | [0001](0001-repository-checks-and-trusted-base.md) | Repository checks (`tools/check.lean`, `tools/codes.lean`) and trusted base |
-| [0002](0002-test-listing-and-pinned-lean-tokens.md) | Test listing (`--tests`), subprocess isolation, and pinned Lean v4.35.0 token audit |
+| [0002](0002-test-listing-and-pinned-lean-tokens.md) | Test listing (`--tests`), subprocess isolation, and pinned Lean v4.36.0 token audit |
 | [0003](0003-runtime-process-audit-and-exemptions.md) | Runtime process-call audit (`PROCESS`), `Lean.manualRoot` exemption, and Lake boundary |
 | [0004](0004-ratcheted-ban-on-lean-comments.md) | Ratcheted ban on Lean comments (`NO-COMMENTS`) |
 | [0005](0005-intent-records-refinement-and-answers-invariants.md) | Intent records, refinement transfer limits, answers independence, and cone examples |
