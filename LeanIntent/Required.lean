@@ -68,9 +68,10 @@ The decisions this module makes, each on the owner's behalf:
   declares it as a theorem**, compared with the module names the build lists, never the theorem's
   name. Lean imports two modules that declare one name only where the two declarations have the
   same name, type and universe parameters and are two theorems of the same mutual group, a theorem
-  outside any mutual group and a safe axiom, or two axioms of a type its test takes for a
-  proposition; it then holds one of the two, the theorem where the other is an axiom, and records
-  the name under the first of those modules in import order, as it records under a module the
+  outside any mutual group and a safe axiom, or two axioms, both safe or both unsafe, of a type
+  its test takes for a proposition; it then holds one of the two, the theorem where the other is
+  an axiom, and records the name under the first of those modules in import order, as it records
+  under a module the
   auxiliary names of that module's compiled code (`throwAlreadyImported`, `subsumesInfo` and
   `finalizeImport` in Lean v4.36.0's `src/Lean/Environment.lean`, lines 2433 to 2436, 2633 to 2648
   and 2697 to 2712). So the declaration the environment holds under a name need not be the one the

@@ -33,9 +33,11 @@ file. Where the file being elaborated is not one, Lean imports every module its 
 everything each declares, whatever those modules' own imports say of visibility
 (`importModulesCore` in Lean v4.36.0's `src/Lean/Environment.lean`, lines 2485 to 2487 and 2547,
 with the level `Elab.processHeaderCore` gives it, `src/Lean/Elab/Import.lean`, lines 150 to 159).
-Where it is a `module` file, Lean imports only what each module exports: a private value is absent,
-a theorem is shown as an axiom, and a module reached only through a private import is not loaded at
-all (lines 2489 to 2539, 2613 to 2616). A value of `Required` could then go unread, so the check
+Where it is a `module` file, Lean imports each module at the level the imports that reach it give
+it, and everything the module declares only along a chain of `import all` from the file: below that
+level a private value is absent and a theorem is shown as an axiom, and a module reached only
+through a private import of a module not imported that way is not loaded at all (lines 2489 to
+2539, 2613 to 2616). A value of `Required` could then go unread, so the check
 does not run there (`Environment.header`'s `isModule`, which `finalizeImport` sets at line 2735).
 
 **Every module the build lists must be imported**, or `check` is an error naming the first that is
@@ -207,14 +209,14 @@ deliverable is named by a value of `Required`, each such value names a deliverab
 such a value lists is a theorem declared in a module `built` names
 (`Required.findings_eq_nil_iff`, of the entries as this module reads them).
 
-An error in a `module` file, where Lean imports only what each module exports, so that a value
-could go unread, and an error naming a module of `built` that is not imported. -/
+An error in a `module` file, where Lean need not import everything each module declares, so that a
+value could go unread, and an error naming a module of `built` that is not imported. -/
 def check (built : Array Name) : MetaM Report := do
   let env ← getEnv
   if env.header.isModule then
     throwError "the required-theorems check reads every declaration of every module imported, and \
-      a `module` file imports only what each module exports, so a value could go unread: run the \
-      check from a file that is not a `module` file"
+      a `module` file need not import everything each module declares, so a value could go \
+      unread: run the check from a file that is not a `module` file"
   for m in built do
     unless m == env.mainModule || (env.getModuleIdx? m).isSome do
       throwError "the module {m}, which the build lists, is not imported here, so what it declares \
@@ -226,7 +228,8 @@ def check (built : Array Name) : MetaM Report := do
 
 /-- **The module names a build lists**, read from `out`, what `lake query --json` prints for one or
 more targets `@/<library>:modules`: one line for each target, each a JSON array of the names of the
-modules that library's `leanArts` facet builds, as Lake encodes a name (`ToJson Name`). Each name is
+modules that each built-in facet of that library that compiles its modules builds, `leanArts` and
+`elabArts` among them, as Lake encodes a name (`ToJson Name`). Each name is
 decoded by `Required.moduleName?`, which gives a name only for a string of its closed form, dots
 between stretches that are each an ASCII letter followed by ASCII letters, digits, `_` or `'`, and
 gives distinct names for distinct strings (`Required.moduleName?_inj`). Every other string, such as

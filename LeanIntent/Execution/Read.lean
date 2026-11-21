@@ -48,12 +48,18 @@ The reading relies on these facts about Lean v4.36.0, read from its source:
 * A file outside Lean's module system stores every IR declaration in its `.olean` (`CompilerM.lean`
   83-111, the `else entries` branch), which `importModules` reads as its IR
   (`ImportedModule.irData?`, `Lean/Environment.lean` 2410-2418).
-* A file of the module system keeps only opaque externs in its `.olean`, and the bodies in its `.ir`
-  (`CompilerM.lean` 93-110 and 120-140, `Environment.lean` 2243-2259). `importModules` at its
+* A file of the module system stores every IR declaration, its body included, in its `.ir`
+  (`CompilerM.lean` 120-140, `Environment.lean` 2243-2259). In its `.olean` it keeps each `meta`
+  declaration and each public boxed wrapper of an `extern` declaration as it is, and every other
+  public declaration as an `extern` entry in place of its body: its own where it is one, one
+  naming the symbol a function is exported under, and otherwise an opaque one; a declaration that
+  is neither `meta` nor public is left out (`CompilerM.lean` 93-110). `importModules` at its
   default level, `private`, loads the `.ir` of every module it imports (`Environment.lean` 2472-2479,
   2542-2557 and 2808-2819). Where a module's `.ir.sig` is missing, it reads the `.olean`'s entries
-  as the IR (`Environment.lean` 2458-2464), whose opaque externs have no callees, so the walk can
-  only find fewer reaches; where the `.ir.sig` is present and the `.ir` missing, the import fails.
+  as the IR (`Environment.lean` 2410-2412 and 2458-2464). Each of those is a declaration of the
+  `.ir` with the body it has there or with none, and an `extern` entry has no callees, so the walk
+  can only find fewer reaches; where the `.ir.sig` is present and the `.ir` missing, the import
+  fails.
 * A declaration the environment holds no constant of gets its module index from the IR's
   `extraConstNames` (`CompilerM.lean` 229-233; `Environment.lean` 2225, 2240 and 2710-2712), so
   `Environment.getModuleIdxFor?` attributes it to the module whose IR entries hold it, the lookup
@@ -71,7 +77,12 @@ by the declaration's name followed by `_redArg`, and makes the declaration an `@
 that calls it, checking no attribute first (`Lean/Compiler/LCNF/ReduceArity.lean` 156-205, lines
 172 and 197). The mono phase keeps every parameter, erased type parameters included
 (`Lean/Compiler/LCNF/ToMono.lean` 139 and 393), so a polymorphic implementation, or one taking a
-proof, is called only through `c._redArg`, and calling that runs `c`'s code. Line 172 is the one
+proof, has such a copy. A caller that gives the wrapper all its parameters may call only
+`c._redArg`, having inlined the wrapper, while one that applies it to fewer keeps a closure of `c`
+itself, since the simplifier that runs after reduce-arity leaves `inlinePartial` false and so
+inlines no partial application (`Lean/Compiler/LCNF/Passes.lean` 128-130,
+`Lean/Compiler/LCNF/Simp/Config.lean` 31, `Lean/Compiler/LCNF/Simp/InlineCandidate.lean` 99-100).
+The walk counts both, and calling either runs `c`'s code. Line 172 is the one
 place in Lean's source that makes such a name. The walk counts a declaration as `c`'s copy only
 where the environment holds no constant of its name, so a constant of the project named like it
 is not counted (`Execution.isCompiledCodeOf_const`), and only where its IR is stored.
