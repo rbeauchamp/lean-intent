@@ -25,7 +25,7 @@ Every input to `tools/check.lean` is read through its owning system:
 - Project configuration: Lake's TOML parser (`Lake.Toml.loadToml`) and loader (`Lake.loadPackage` with `configLang? := some .toml`), which loads `lakefile.toml` without resolving dependencies and therefore runs no code of the project.
 - Selected library modules: Lake's `Lake.LeanLib.getModuleArray`, reading each target's globs over the working tree as a build does.
 - Module names, headers, and builds: Lean's `moduleNameOfFileName` and `Parser.parseHeader`, and `lake build --wfail`.
-- Comment inventory: Lean's frontend (`Parser.parseHeader`, `Elab.processHeader`, `Elab.IO.processCommandsIncrementally`), which reads each tracked Lean file in a child process of its own against the built library, and for the earlier manifest Git's merge base of `HEAD` with `--base-ref <ref>` or `origin/main` / `main` ([ADR-0004](0004-ratcheted-ban-on-lean-comments.md)).
+- Comment inventory: Lean's frontend (`Parser.parseHeader`, `Elab.processHeader`, `Elab.IO.processCommandsIncrementally`), which reads each tracked Lean file in a child process of its own against the built library, and for the earlier manifest Git's merge base of `HEAD` with `--base-ref <ref>` or exact refs `refs/remotes/origin/main` / `refs/heads/main` ([ADR-0004](0004-ratcheted-ban-on-lean-comments.md)).
 - Axioms: Lean's `collectAxioms` over the imported environment of the built library modules.
 - Compiled code call graph: Lean's `Lean.IR.findEnvDecl` and `Lean.IR.collectUsedDecls` ([ADR-0003](0003-runtime-process-audit-and-exemptions.md)).
 - Declared-type code attestations: `LeanIntent.CodeAudit.audit` run via `tools/codes.lean` in a subprocess with `LEAN_PATH` set to Lake's library build directory (because `tools/check.lean` is not itself built against the library).
@@ -38,7 +38,7 @@ Every input to `tools/check.lean` is read through its owning system:
 - **`AXIOMS`**: No library module declares an axiom, and every constant declared by a library module depends only on Lean's three axioms (`propext`, `Classical.choice`, `Quot.sound`), ruling out `sorryAx`, `native_decide`, and custom axioms. Fails if the library declares no constants.
 - **`PROCESS`**: Compiled library code reaches no monitored process/environment runtime C function except through the exempted `Lean.manualRoot` ([ADR-0003](0003-runtime-process-audit-and-exemptions.md)).
 - **`CODES`**: Every declared constant across all library modules (worked examples included) passes `LeanIntent.CodeAudit.audit` via `tools/codes.lean`. Fails if no constants are declared.
-- **`NO-COMMENTS`**: Every tracked Lean file holds exactly the comments `tools/comment-ratchet.json` records for it by fingerprint, none where it has no entry, and (unless `--bootstrap` is passed when the verified reachable merge base genuinely lacks that manifest) the manifest records no comment the merge base's does not, failing closed whenever no merge base can be located ([ADR-0004](0004-ratcheted-ban-on-lean-comments.md)).
+- **`NO-COMMENTS`**: `tools/comment-ratchet.json` is a regular file at that exact path in Git's index and the working tree, every tracked Lean file holds exactly the comments it records by fingerprint (none where it has no entry), and (unless `--bootstrap` is passed when the merge base's tree lacks that manifest) the manifest records no comment the merge base's does not, failing closed whenever no merge base can be located ([ADR-0004](0004-ratcheted-ban-on-lean-comments.md)).
 
 ### `tools/codes.lean` exit-code protocol
 

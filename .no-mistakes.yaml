@@ -111,7 +111,7 @@ test:
       lean_files=$(git ls-files -- '*.lean')
       if [ -n "$lean_files" ]; then
         status=0
-        no-mistakes admit --memory 6GiB --limit "none; measured peak 2.95 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests || status=$?
+        no-mistakes admit --memory 6GiB --limit "none; measured peak 3.065 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests || status=$?
         case $status in
           124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 420 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
           137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 420 seconds and did not stop within 30 seconds of TERM" >&2 ;;
@@ -161,7 +161,7 @@ commands:
     esac
     [ "$status" -eq 0 ] || exit "$status"
     mkdir -p .lake
-    no-mistakes admit --memory 6GiB --limit "none; measured peak 2.95 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests > .lake/tests-listing || status=$?
+    no-mistakes admit --memory 6GiB --limit "none; measured peak 3.065 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests > .lake/tests-listing || status=$?
     case $status in
       124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 420 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
       137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 420 seconds and did not stop within 30 seconds of TERM" >&2 ;;
