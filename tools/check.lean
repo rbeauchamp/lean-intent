@@ -485,37 +485,52 @@ def matchesLiteralToken (env : Environment) (token : Syntax) (raw : String) : Bo
     return ((parse (Parser.tokenFn []) raw).bind (·.isLit? k)) == some raw
   | _ => return false
 
-def mayStartComment (raw : String) (next : Char) : Bool :=
-  raw.contains "--" || raw.contains "/-" || (next == '-' && (raw.endsWith "-" || raw.endsWith "/"))
+def containsOpener (raw : String) : Bool :=
+  raw.contains "--" || raw.contains "/-"
 
-def checkToken (env : Environment) (token : Syntax) (raw : String) (next : Char)
+def crossesBoundary (raw : String) (next : Char) : Bool :=
+  next == '-' && (raw.endsWith "-" || raw.endsWith "/")
+
+def matchesBoundarySymbol (ctx : Parser.ParserContextCore) (token : Syntax) : Bool := Id.run do
+  let leaf := match token with
+    | .node _ _ #[arg] => arg
+    | _ => token
+  let .atom (.original _ start _ stop) spelling := leaf | return false
+  let parsed := (Parser.symbolFn spelling).run ctx.toInputContext ctx.toParserModuleContext ctx.tokens
+    { pos := start, cache := Parser.initCacheForInput ctx.inputString }
+  return !parsed.hasError && parsed.stackSize == 1 && parsed.stxStack.back.getTailPos? == some stop
+
+def checkToken (ctx : Parser.ParserContextCore) (token : Syntax) (raw : String) (next : Char)
     (start : String.Pos.Raw) : Except String Unit :=
-  if mayStartComment raw next && !matchesLiteralToken env token raw then
+  if (containsOpener raw || (crossesBoundary raw next && !matchesBoundarySymbol ctx token)) &&
+      !matchesLiteralToken ctx.env token raw then
     .error s!"cannot account for a possible comment in the parser token at byte {start.byteIdx}"
   else .ok ()
 
-theorem checkToken_with_opener (env : Environment) (token : Syntax) (raw : String) (next : Char)
-    (start : String.Pos.Raw) (h : mayStartComment raw next = true) :
-    checkToken env token raw next start = .ok () ↔ matchesLiteralToken env token raw = true := by
-  cases hLit : matchesLiteralToken env token raw <;> simp [checkToken, h, hLit]
+theorem checkToken_ok_iff (ctx : Parser.ParserContextCore) (token : Syntax) (raw : String) (next : Char)
+    (start : String.Pos.Raw) :
+    checkToken ctx token raw next start = .ok () ↔
+      matchesLiteralToken ctx.env token raw = true ∨
+      (containsOpener raw = false ∧ (crossesBoundary raw next = false ∨ matchesBoundarySymbol ctx token = true)) := by
+  simp only [checkToken]
+  split <;> simp_all <;> grind
 
-partial def collectSyntax (env : Environment) (fileMap : FileMap) (prevPos nextPos : String.Pos.Raw) (stx : Syntax)
+partial def collectSyntax (ctx : Parser.ParserContextCore) (prevPos nextPos : String.Pos.Raw) (stx : Syntax)
     (acc : CommentAcc) : Except String CommentAcc := do
-  unless prevPos ≤ nextPos && nextPos ≤ fileMap.source.rawEndPos do
+  unless prevPos ≤ nextPos && nextPos ≤ ctx.endPos do
     throw "Lean's parser returned an invalid command range"
   let (pos, acc) ← walk stx prevPos acc
-  checkSlice fileMap pos nextPos acc
+  checkSlice ctx.fileMap pos nextPos acc
 where
   consume (pos start stop : String.Pos.Raw) (account : CommentAcc → Except String CommentAcc) (acc : CommentAcc) :
       Except String (String.Pos.Raw × CommentAcc) := do
     unless pos ≤ start && start ≤ stop && stop ≤ nextPos do
       throw s!"source range [{start.byteIdx}, {stop.byteIdx}) outside unread bytes [{pos.byteIdx}, {nextPos.byteIdx})"
-    let acc ← checkSlice fileMap pos start acc
+    let acc ← checkSlice ctx.fileMap pos start acc
     return (stop, ← account acc)
   consumeToken (s : Syntax) (pos start stop : String.Pos.Raw) (acc : CommentAcc) :=
     consume pos start stop (fun a => do
-      let raw := start.extract fileMap.source stop
-      checkToken env s raw (stop.get fileMap.source) start
+      checkToken ctx s (ctx.extract start stop) (ctx.get stop) start
       return a) acc
   walk (s : Syntax) (pos : String.Pos.Raw) (acc : CommentAcc) :
       Except String (String.Pos.Raw × CommentAcc) := do
@@ -528,7 +543,7 @@ where
         let some (.original _ start ..) := s.getHeadInfo? | throw "docstring has no original start"
         let some (.original _ _ _ stop) := s.getTailInfo? | throw "docstring has no original end"
         let kind := if k == ``Parser.Command.moduleDoc then "moddoc" else "doc"
-        consume pos start stop (recordSpan fileMap kind start stop) acc
+        consume pos start stop (recordSpan ctx.fileMap kind start stop) acc
       else if k == choiceKind then
         let some first := args[0]? | throw "empty parser choice"
         let (stop, acc) ← walk first pos acc
@@ -567,6 +582,10 @@ unsafe def commentsOfModule (file : String) (mod : Name) : IO (Array Comment) :=
     match step with
     | .ok acc => pure acc
     | .error e => throw <| IO.userError s!"{file}: {e}"
+  let headerEnv ← mkEmptyEnvironment
+  let headerCtx : Parser.ParserContextCore := {
+    toInputContext := inputCtx, env := headerEnv, options := {}, prec := 0
+    tokens := Parser.Module.updateTokens (Parser.getTokenTable headerEnv) }
   let (header, parserState, messages) ← Parser.parseHeader inputCtx
   if messages.hasErrors then
     return ← fail "Lean's parser could not read its header" messages
@@ -574,19 +593,26 @@ unsafe def commentsOfModule (file : String) (mod : Name) : IO (Array Comment) :=
   let (env, messages) ← Elab.processHeader header opts messages inputCtx (mainModule := mod)
   if messages.hasErrors then
     return ← fail "Lean could not process its header" messages
-  let s ← Elab.IO.processCommandsIncrementally inputCtx parserState
-    (Elab.Command.mkState env messages opts) none
+  let mut cmdState := Elab.Command.mkState env messages opts
+  let s ← Elab.IO.processCommandsIncrementally inputCtx parserState cmdState none
   if s.commandState.messages.hasErrors then
     return ← fail "Lean could not elaborate it" s.commandState.messages
-  let mut acc ← scan <| collectSyntax env fileMap ⟨0⟩ parserState.pos header.raw {}
+  let mut acc ← scan <| collectSyntax headerCtx ⟨0⟩ parserState.pos header.raw {}
   let mut snap := s.initialSnap
   let mut prevPos := parserState.pos
   repeat
     let nextPos := snap.parserState.pos
-    acc ← scan <| collectSyntax env fileMap prevPos nextPos snap.stx acc
+    let scope := cmdState.scopes.head!
+    let ctx : Parser.ParserContextCore := {
+      toInputContext := inputCtx, env := cmdState.env, options := scope.opts
+      currNamespace := scope.currNamespace, openDecls := scope.openDecls
+      prec := 0, tokens := Parser.getTokenTable cmdState.env }
+    acc ← scan <| collectSyntax ctx prevPos nextPos snap.stx acc
     prevPos := nextPos
     match snap.nextCmdSnap? with
-    | some next => snap := next.get
+    | some next =>
+      cmdState := snap.elabSnap.resultSnap.get.cmdState
+      snap := next.get
     | none => break
   unless prevPos == endPos do
     throw <| IO.userError s!"{file}: Lean's frontend stopped reading at byte {prevPos.byteIdx}, before the file's end at byte {endPos.byteIdx}, so what follows cannot be read for comments"
