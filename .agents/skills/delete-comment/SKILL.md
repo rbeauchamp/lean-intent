@@ -19,12 +19,12 @@ Config/workflow `#` comments (`.no-mistakes.yaml`, `.github/workflows/check.yml`
 ## Procedure
 
 1. **Inspect the remaining ratchet backlog.**
-   Ensure `.lake/build` exists (`lake build --wfail` if needed), then list remaining files and exact parser-verified comment locations through Lean's own parser:
+   Build the library first (`lake build --wfail`): the inventory reads each file through Lean's frontend against the built library, in a child process per file, three at a time (about a minute for the whole repository). Then list the remaining files, and one file's remaining comments with each one's kind, line range and fingerprint:
    ```sh
    lean --run tools/check.lean --comments
    lean --run tools/check.lean --comments <path/to/File.lean>
    ```
-   Never rely on regexes or ad-hoc grep to count comments; `tools/check.lean --comments` uses the exact same `Lean.Parser` / frontend pass as `NO-COMMENTS`.
+   Never rely on regexes or ad-hoc grep to count comments; `tools/check.lean --comments` reads through the same frontend child processes as `NO-COMMENTS`. Keep the `--comments <file>` output of each file you will touch: it tells which fingerprints the comments you delete have.
 
 2. **Choose a reviewable batch.**
    Pick one file or a small cohesive group of related modules (for example, one feature's modules and worked example) to clear completely to `0` comments in one PR.
@@ -49,12 +49,13 @@ Config/workflow `#` comments (`.no-mistakes.yaml`, `.github/workflows/check.yml`
      - **Action**: verify whether `docs/*.md` or an existing ADR in `docs/adr/` already records the full decision and rationale. Move any non-obvious detail not already documented into a new ADR `docs/adr/NNNN-<slug>.md` (or extend the directly relevant existing ADR), update [docs/adr/README.md](../../../docs/adr/README.md), and delete the comment.
 
 5. **Delete the comments cleanly.**
-   Remove only comment text and redundant consecutive blank lines left behind; change no Lean code semantics in a pure comment-drain PR (fixes for filed Excuse issues land in their own PRs).
+   Remove only comment text and redundant consecutive blank lines left behind; change no Lean code semantics in a pure comment-drain PR (fixes for filed Excuse issues land in their own PRs). Do not edit, reword, re-indent or move a comment you keep: its fingerprint is the hash of its exact text, so `NO-COMMENTS` reads a changed comment as a new one, and a comment that moves to another file as new there.
 
 6. **Tighten `tools/comment-ratchet.json` strictly downward.**
-   - Remove every file whose comment count reached `0`.
-   - If a file was only partially cleaned, lower its `comments` and `lines` values to the exact counts reported by `lean --run tools/check.lean --comments <file>`.
-   - Never raise any ceiling, never add an unlisted file, and never leave a `0/0` entry (`NO-COMMENTS` rejects all three).
+   Each entry records a file's remaining comments by fingerprint: `{"file": ..., "comments": N, "lines": M, "fingerprints": [...]}`, the fingerprints in ascending order, one per comment, repeats kept.
+   - Remove the whole entry of every file whose comment count reached `0`.
+   - For a file only partially cleaned, run `lean --run tools/check.lean --comments <file>` again, delete from its entry the fingerprint of each comment that is gone (one occurrence per deleted comment; the remaining ones stay in order), and set `comments` and `lines` to the counts that command prints. `NO-COMMENTS` names the fingerprints to remove and the counts to set when an entry is not yet tight.
+   - A drain's diff of the manifest only deletes lines and lowers counts. `NO-COMMENTS` refuses a manifest that does not describe the files exactly, and, wherever Git gives a merge base with `origin/main` or `main` that holds the manifest, one that records a file or a fingerprint the merge base's does not. That comparison is skipped, with a note on standard error, in a checkout with no such merge base (a shallow clone, or one with neither ref): there a comment added together with its fingerprint passes, so run the check where `origin/main` is fetched.
 
 7. **Verify with the repository checks.**
    ```sh

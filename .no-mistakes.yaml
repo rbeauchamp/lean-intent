@@ -25,7 +25,10 @@
 # elaborates tools/check.lean against Lean and Lake and runs once per side, peaked at 2.94 and
 # 2.95 GiB under Lean v4.36.0 on 2026-11-20 (down from 4.76 GiB under Lean v4.35.0 on 2026-10-30
 # and 2026-11-05); the 6 GiB bound is kept. Measure again when the library grows or the toolchain
-# changes, and raise a bound before a peak comes within 15% of it.
+# changes, and raise a bound before a peak comes within 15% of it. The comment check (NO-COMMENTS), which the check runs after its build and its
+# audit of codes and before it imports the library for its other audits, reads each tracked Lean
+# file in a child process, three at a time: measured alone on 2026-11-20 over 67 files against a
+# built library, 5.52 and 5.46 GiB in two runs sampled every 0.15 seconds, below the build's peak.
 #
 # Time. Each check also runs under a wall-clock limit, so that a check that stalls fails and gives
 # back its share of the memory budget instead of holding the share and the run until someone stops
@@ -53,7 +56,11 @@
 # 2026-11-05); the listing took 106 seconds after the check and 99 seconds in a clean tree with
 # nothing built (3 * 106 = 318 seconds, below the kept 420-second limit derived from v4.35.0 runs
 # of 90–123 seconds at load 3 to 14). Measure again when the library grows, the toolchain changes
-# or the machine changes, and raise a limit before three times a measured duration passes it.
+# or the machine changes, and raise a limit before three times a measured duration passes it. Those durations of the check predate its comment check (NO-COMMENTS), which
+# measured alone on 2026-11-20 on the same machine, against a built library, took 47 and 49
+# seconds. The check with it has not been measured, so its 1020 seconds are no longer known to be
+# three times its longest run: 325 and 49 seconds together are 374, of which 1020 is 2.7 times.
+# Measure the check again, and raise its limit if three times its duration passes 1020 seconds.
 test:
   instructions: |
     On lean-intent this step is verification. A change's claims are established by machine-checked proof, by derivation and by reading; lean-intent has no running product to drive.
