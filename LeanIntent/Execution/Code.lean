@@ -7,10 +7,14 @@ Lean's compiler makes declarations of its own from a constant's code, which the 
 no constant of. `LeanIntent.Execution.Read` counts exactly one kind of them as an implementation's
 code: the copy that reduce-arity makes of it. Where a declaration `c` has a parameter its body does
 not use, reduce-arity names a copy of `c`'s body over the parameters it uses `c._redArg`, the name
-of `c` followed by the one component `_redArg`, and makes `c` a wrapper that calls it and that
-every caller inlines (Lean v4.35.0, `Lean/Compiler/LCNF/ReduceArity.lean` 156-205, lines 172 and
-197). Calling `c._redArg` runs `c`'s code, so a polymorphic implementation, or one taking a proof,
-whose callers call only that copy, is reached through it. No other declaration the compiler makes is
+of `c` followed by the one component `_redArg`, and makes `c` a wrapper that calls it and that it
+marks `inline` (Lean v4.36.0, `Lean/Compiler/LCNF/ReduceArity.lean` 156-205, lines 172 and 197). A
+caller that gives `c` all its parameters may then call only the copy, having inlined the wrapper,
+while one that applies `c` to fewer keeps a closure of `c` itself, since the simplifier that runs
+after reduce-arity does not inline a partial application (`Lean/Compiler/LCNF/Passes.lean` 128-130,
+`Lean/Compiler/LCNF/Simp/Config.lean` 31, `Lean/Compiler/LCNF/Simp/InlineCandidate.lean` 99-100).
+Calling `c._redArg` runs `c`'s code, so a polymorphic implementation, or one taking a proof, whose
+callers call only that copy, is reached through it. No other declaration the compiler makes is
 counted. A closed term the compiler extracts from a declaration's code is shared with every later
 declaration that holds the same term (`Lean/Compiler/LCNF/ExtractClosed.lean` 216-233), so reaching
 it does not run that code. A lambda lifted out of it is reached only where the code was inlined, and
