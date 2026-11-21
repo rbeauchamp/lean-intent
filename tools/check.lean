@@ -368,29 +368,40 @@ def checkProcess (env : Environment) (roots : Array Name) : Array Rejection := I
         queue := queue.push used
   return errs
 
-structure CommentSpan where
-  startByte : Nat
-  stopByte : Nat
+structure Comment where
   kind : String
   startLine : Nat
   endLine : Nat
+  fingerprint : String
 
 structure CommentAcc where
-  spans : Std.HashMap Nat CommentSpan := {}
+  spans : Std.HashMap Nat (Nat × Comment) := {}
+
+def commentKinds : List String := ["line", "block", "doc", "moddoc"]
+
+def fingerprint (text : String) : String :=
+  let h := text.toUTF8.foldl (fun h b => (h ^^^ b.toUInt64) * 1099511628211)
+    (14695981039346656037 : UInt64)
+  let digits := Nat.toDigits 16 h.toNat
+  String.ofList (List.replicate (16 - digits.length) '0' ++ digits)
+
+def isFingerprint (s : String) : Bool :=
+  s.length == 16 && s.all fun c => c.isDigit || ('a' ≤ c && c ≤ 'f')
 
 def recordSpan (fileMap : FileMap) (kind : String) (startPos stopPos : String.Pos.Raw)
     (acc : CommentAcc) : Except String CommentAcc :=
   let sb := startPos.byteIdx
   let eb := stopPos.byteIdx
   match acc.spans.get? sb with
-  | some prev =>
-    if prev.stopByte == eb && prev.kind == kind then .ok acc
+  | some (prevStop, prev) =>
+    if prevStop == eb && prev.kind == kind then .ok acc
     else .error s!"inconsistent overlapping comment span at byte {sb}"
   | none =>
     let lastPos := if eb > sb then String.Pos.Raw.prev fileMap.source stopPos else stopPos
-    let sl := (fileMap.toPosition startPos).line
-    let el := (fileMap.toPosition lastPos).line
-    .ok { spans := acc.spans.insert sb { startByte := sb, stopByte := eb, kind, startLine := sl, endLine := el } }
+    let text := (⟨fileMap.source, startPos, stopPos⟩ : Substring.Raw).toString
+    .ok { spans := acc.spans.insert sb (eb,
+      { kind, startLine := (fileMap.toPosition startPos).line,
+        endLine := (fileMap.toPosition lastPos).line, fingerprint := fingerprint text }) }
 
 partial def scanTrivia (fileMap : FileMap) (sub : Substring.Raw) (acc : CommentAcc) :
     Except String CommentAcc :=
@@ -445,10 +456,10 @@ where
       else
         .error s!"unexpected non-whitespace character {repr c} at byte {pos.byteIdx} in Lean parser trivia"
 
-def checkSlice (fileMap : FileMap) (input : String) (startPos stopPos : String.Pos.Raw)
+def checkSlice (fileMap : FileMap) (startPos stopPos : String.Pos.Raw)
     (acc : CommentAcc) : Except String CommentAcc :=
   if startPos < stopPos then
-    scanTrivia fileMap ⟨input, startPos, stopPos⟩ acc
+    scanTrivia fileMap ⟨fileMap.source, startPos, stopPos⟩ acc
   else
     .ok acc
 
@@ -494,145 +505,98 @@ partial def walkSyntax (fileMap : FileMap) (stx : Syntax) (acc : CommentAcc) :
     else
       args.foldlM (fun acc arg => walkSyntax fileMap arg acc) acc
 
-def collectCommand (file : String) (fileMap : FileMap) (input : String)
-    (prevPos nextPos : String.Pos.Raw) (stx : Syntax) (acc : CommentAcc) : IO CommentAcc := do
-  if stx.isOfKind ``Parser.Command.exit then
-    throw <| IO.userError s!"{file}: `#exit` is not allowed when checking comments"
-  let step : Except String CommentAcc := do
-    let acc ← match stx.getPos? with
-      | some cpos => checkSlice fileMap input prevPos cpos acc
-      | none => .ok acc
+def collectSyntax (fileMap : FileMap) (prevPos nextPos : String.Pos.Raw) (stx : Syntax)
+    (acc : CommentAcc) : Except String CommentAcc := do
+  match stx.getPos?, stx.getTailPos? with
+  | some startPos, some stopPos =>
+    let acc ← checkSlice fileMap prevPos startPos acc
     let acc ← walkSyntax fileMap stx acc
-    match stx.getTailPos? with
-    | some cend => checkSlice fileMap input cend nextPos acc
-    | none => .ok acc
-  match step with
-  | .ok a => return a
-  | .error e => throw <| IO.userError s!"{file}: {e}"
+    checkSlice fileMap stopPos nextPos acc
+  | _, _ =>
+    let acc ← walkSyntax fileMap stx acc
+    checkSlice fileMap prevPos nextPos acc
 
-inductive FastParseOutcome where
-  | ok (spans : Array CommentSpan)
-  | needsFrontend
-  | failed (msg : String)
+def sourceOrder (acc : CommentAcc) : Array Comment :=
+  (acc.spans.toArray.qsort fun a b => a.1 < b.1).map (·.2.2)
 
-def sortedSpans (acc : CommentAcc) : Array CommentSpan :=
-  (acc.spans.toList.map (·.2)).toArray.qsort fun a b => a.startByte < b.startByte
-
-def distinctCommentLines (spans : Array CommentSpan) : Nat := Id.run do
+def distinctCommentLines (comments : Array Comment) : Nat := Id.run do
   let mut ls : Std.HashSet Nat := {}
-  for sp in spans do
-    for l in [sp.startLine : sp.endLine + 1] do
+  for c in comments do
+    for l in [c.startLine : c.endLine + 1] do
       ls := ls.insert l
   return ls.size
 
-def parseCommentsFast (env : Environment) (file : String) : IO FastParseOutcome := do
+unsafe def commentsOfModule (file : String) (mod : Name) : IO (Array Comment) := do
   let input ← IO.FS.readFile file
   let inputCtx := Parser.mkInputContext input file
-  let (header, mps, messages) ← Parser.parseHeader inputCtx
-  if messages.hasErrors then
-    let shown ← messages.toList.mapM (·.toString)
-    return .failed s!"{file}: Lean's parser could not read its header:\n{String.join shown}"
-  let mut acc : CommentAcc := {}
-  let headerStep : Except String CommentAcc := do
-    match header.raw.getPos? with
-    | some hpos =>
-      let acc ← checkSlice inputCtx.fileMap input ⟨0⟩ hpos acc
-      let acc ← walkSyntax inputCtx.fileMap header.raw acc
-      match header.raw.getTailPos? with
-      | some hend => checkSlice inputCtx.fileMap input hend mps.pos acc
-      | none => .ok acc
-    | none =>
-      checkSlice inputCtx.fileMap input ⟨0⟩ mps.pos acc
-  match headerStep with
-  | .ok a => acc := a
-  | .error e => return .failed s!"{file}: {e}"
-  let pmctx : Parser.ParserModuleContext := { env, options := {} }
-  let mut mps := mps
-  let mut messages := messages
-  repeat
-    let prevPos := mps.pos
-    let (stx, mps', messages') := Parser.parseCommand inputCtx pmctx mps messages
-    if messages'.hasErrors then
-      return .needsFrontend
-    mps := mps'
-    messages := messages'
-    if stx.isOfKind ``Parser.Command.eoi then
-      let eoiStep : Except String CommentAcc := do
-        let acc ← walkSyntax inputCtx.fileMap stx acc
-        checkSlice inputCtx.fileMap input prevPos inputCtx.inputString.rawEndPos acc
-      match eoiStep with
-      | .ok a => acc := a
-      | .error e => return .failed s!"{file}: {e}"
-      break
-    try
-      acc ← collectCommand file inputCtx.fileMap input prevPos mps.pos stx acc
-    catch e =>
-      return .failed (toString e)
-  unless mps.pos == inputCtx.inputString.rawEndPos do
-    return .failed s!"{file}: parser stopped at byte {mps.pos.byteIdx} before EOF {inputCtx.inputString.rawEndPos.byteIdx}"
-  return .ok (sortedSpans acc)
-
-unsafe def parseCommentsViaFrontend (file : String) (mod : Name) : IO (Array CommentSpan) := do
-  let input ← IO.FS.readFile file
-  let inputCtx := Parser.mkInputContext input file
+  let fileMap := inputCtx.fileMap
+  let endPos := fileMap.source.rawEndPos
   let opts := (({} : Options).setBool `Elab.async false).setBool `debug.byAsSorry true
+  let fail (what : String) (messages : MessageLog) : IO (Array Comment) := do
+    let shown ← messages.toList.mapM (·.toString)
+    throw <| IO.userError s!"{file}: {what}, so its comments cannot be read:\n{String.join shown}"
+  let scan (step : Except String CommentAcc) : IO CommentAcc :=
+    match step with
+    | .ok acc => pure acc
+    | .error e => throw <| IO.userError s!"{file}: {e}"
   let (header, parserState, messages) ← Parser.parseHeader inputCtx
   if messages.hasErrors then
-    let shown ← messages.toList.mapM (·.toString)
-    throw <| IO.userError s!"{file}: Lean's parser could not read its header:\n{String.join shown}"
+    return ← fail "Lean's parser could not read its header" messages
   enableInitializersExecution
   let (env, messages) ← Elab.processHeader header opts messages inputCtx (mainModule := mod)
   if messages.hasErrors then
-    let shown ← messages.toList.mapM (·.toString)
-    throw <| IO.userError s!"{file}: Lean could not process its header:\n{String.join shown}"
-  let state := Elab.Command.mkState env messages opts
-  let s ← Elab.IO.processCommandsIncrementally inputCtx parserState state none
+    return ← fail "Lean could not process its header" messages
+  let s ← Elab.IO.processCommandsIncrementally inputCtx parserState
+    (Elab.Command.mkState env messages opts) none
   if s.commandState.messages.hasErrors then
-    let shown ← s.commandState.messages.toList.mapM (·.toString)
-    throw <| IO.userError s!"{file}: Lean could not parse or elaborate it:\n{String.join shown}"
-  let mut acc : CommentAcc := {}
-  let headerStep : Except String CommentAcc := do
-    match header.raw.getPos? with
-    | some hpos =>
-      let acc ← checkSlice inputCtx.fileMap input ⟨0⟩ hpos acc
-      let acc ← walkSyntax inputCtx.fileMap header.raw acc
-      match header.raw.getTailPos? with
-      | some hend => checkSlice inputCtx.fileMap input hend parserState.pos acc
-      | none => .ok acc
-    | none =>
-      checkSlice inputCtx.fileMap input ⟨0⟩ parserState.pos acc
-  match headerStep with
-  | .ok a => acc := a
-  | .error e => throw <| IO.userError s!"{file}: {e}"
+    return ← fail "Lean could not elaborate it" s.commandState.messages
+  let mut acc ← scan <| collectSyntax fileMap ⟨0⟩ parserState.pos header.raw {}
   let mut snap := s.initialSnap
   let mut prevPos := parserState.pos
   repeat
-    let cmd := snap.stx
     let nextPos := snap.parserState.pos
-    if cmd.isOfKind ``Parser.Command.eoi then
-      let eoiStep : Except String CommentAcc := do
-        let acc ← walkSyntax inputCtx.fileMap cmd acc
-        checkSlice inputCtx.fileMap input prevPos inputCtx.inputString.rawEndPos acc
-      match eoiStep with
-      | .ok a => acc := a
-      | .error e => throw <| IO.userError s!"{file}: {e}"
-      prevPos := nextPos
-      break
-    acc ← collectCommand file inputCtx.fileMap input prevPos nextPos cmd acc
+    acc ← scan <| collectSyntax fileMap prevPos nextPos snap.stx acc
     prevPos := nextPos
     match snap.nextCmdSnap? with
     | some next => snap := next.get
     | none => break
-  unless prevPos == inputCtx.inputString.rawEndPos do
-    throw <| IO.userError s!"{file}: frontend stopped at byte {prevPos.byteIdx} before EOF {inputCtx.inputString.rawEndPos.byteIdx}"
-  return sortedSpans acc
+  unless prevPos == endPos do
+    throw <| IO.userError s!"{file}: Lean's frontend stopped reading at byte {prevPos.byteIdx}, before the file's end at byte {endPos.byteIdx}, so what follows cannot be read for comments"
+  return sourceOrder acc
 
-unsafe def fileCommentSpans (env : Environment) (file : String) (mod : Name) :
-    IO (Array CommentSpan) := do
-  match ← parseCommentsFast env file with
-  | .ok spans => return spans
-  | .failed msg => throw <| IO.userError msg
-  | .needsFrontend => parseCommentsViaFrontend file mod
+unsafe def moduleComments (file libDir : String) : IO Unit := do
+  let files ← trackedLeanFiles
+  let mods ← moduleNames files
+  let some mod := (files.zip mods).find? (·.1 == file) |>.map (·.2)
+    | throw <| IO.userError s!"{file} is not a Lean file Git's index lists here"
+  initSearchPath (← findSysroot) [libDir]
+  for c in ← commentsOfModule file mod do
+    IO.println s!"{c.fingerprint} {c.kind} {c.startLine} {c.endLine}"
+
+def fileComments (libDir : System.FilePath) (file : String) : IO (Array Comment) := do
+  let lines ← runSelf #["--comments-module", file, libDir.toString]
+  lines.mapM fun line => do
+    let unread : IO Comment :=
+      throw <| IO.userError s!"{file}: --comments-module printed a line that is not a comment's: {line}"
+    let [fp, kind, startLine, endLine] := line.splitOn " " | unread
+    let (some startLine, some endLine) := (startLine.toNat?, endLine.toNat?) | unread
+    unless isFingerprint fp && commentKinds.contains kind do
+      return ← unread
+    return { kind, startLine, endLine, fingerprint := fp }
+
+def commentReaders : Nat := 3
+
+def projectComments (libDir : System.FilePath) (files : Array String) :
+    IO (Array (Array Comment)) := do
+  let readers ← (Array.range commentReaders).mapM fun k => IO.asTask (prio := .dedicated) <|
+    ((Array.range files.size).filter (· % commentReaders == k)).mapM fun i =>
+      fileComments libDir files[i]!
+  let parts ← readers.mapM fun reader => do IO.ofExcept (← IO.wait reader)
+  return (Array.range files.size).map fun i => parts[i % commentReaders]![i / commentReaders]!
+
+structure RatchetEntry where
+  lines : Nat
+  fingerprints : Array String
 
 def parsePosNat (j : Json) (ctx : String) : IO Nat := do
   match j with
@@ -642,139 +606,137 @@ def parsePosNat (j : Json) (ctx : String) : IO Nat := do
     throw <| IO.userError s!"{ctx}: expected a positive integer, got {j}"
   | _ => throw <| IO.userError s!"{ctx}: expected a positive integer, got {j}"
 
-def loadRatchet : IO (Std.HashMap String (Nat × Nat)) := do
-  let raw ← IO.FS.readFile ratchetFile
+def parseRatchet (source raw : String) : IO (Std.HashMap String RatchetEntry) := do
   let json ← match Json.parse raw with
     | .ok j => pure j
-    | .error e => throw <| IO.userError s!"{ratchetFile}: invalid JSON: {e}"
+    | .error e => throw <| IO.userError s!"{source}: invalid JSON: {e}"
   let .arr entries := json
-    | throw <| IO.userError s!"{ratchetFile}: top-level JSON value must be an array"
-  let mut map : Std.HashMap String (Nat × Nat) := {}
+    | throw <| IO.userError s!"{source}: top-level JSON value must be an array"
+  let mut map : Std.HashMap String RatchetEntry := {}
   for idx in [0 : entries.size] do
-    let entry := entries[idx]!
-    let .obj kvs := entry
-      | throw <| IO.userError s!"{ratchetFile}[{idx}]: entry must be a JSON object"
+    let entry := s!"{source}[{idx}]"
+    let .obj kvs := entries[idx]!
+      | throw <| IO.userError s!"{entry}: entry must be a JSON object"
     let keys := kvs.toList.map (·.1)
-    unless keys.length == 3 && keys.contains "file" && keys.contains "comments" && keys.contains "lines" do
-      throw <| IO.userError s!"{ratchetFile}[{idx}]: entry must have exact keys file, comments, lines"
+    unless keys.length == 4 && ["file", "comments", "lines", "fingerprints"].all keys.contains do
+      throw <| IO.userError s!"{entry}: entry must have exactly the keys file, comments, lines, fingerprints"
     let some (.str file) := kvs.get? "file"
-      | throw <| IO.userError s!"{ratchetFile}[{idx}]: file must be a string"
+      | throw <| IO.userError s!"{entry}: file must be a string"
     if file.isEmpty then
-      throw <| IO.userError s!"{ratchetFile}[{idx}]: file must not be empty"
+      throw <| IO.userError s!"{entry}: file must not be empty"
     if map.contains file then
-      throw <| IO.userError s!"{ratchetFile}[{idx}]: duplicate entry for {file}"
+      throw <| IO.userError s!"{entry}: duplicate entry for {file}"
     let some cJson := kvs.get? "comments"
-      | throw <| IO.userError s!"{ratchetFile}[{idx}]: missing comments"
+      | throw <| IO.userError s!"{entry}: missing comments"
     let some lJson := kvs.get? "lines"
-      | throw <| IO.userError s!"{ratchetFile}[{idx}]: missing lines"
-    let comments ← parsePosNat cJson s!"{ratchetFile}[{idx}].comments ({file})"
-    let lines ← parsePosNat lJson s!"{ratchetFile}[{idx}].lines ({file})"
-    map := map.insert file (comments, lines)
+      | throw <| IO.userError s!"{entry}: missing lines"
+    let some (.arr fpJson) := kvs.get? "fingerprints"
+      | throw <| IO.userError s!"{entry}: fingerprints must be an array"
+    let comments ← parsePosNat cJson s!"{entry}.comments ({file})"
+    let lines ← parsePosNat lJson s!"{entry}.lines ({file})"
+    let fingerprints ← fpJson.mapM fun j =>
+      match j with
+      | .str fp =>
+        if isFingerprint fp then pure fp
+        else throw <| IO.userError s!"{entry}.fingerprints ({file}): {fp} is not 16 lowercase hexadecimal digits"
+      | _ => throw <| IO.userError s!"{entry}.fingerprints ({file}): expected a string, got {j}"
+    unless fingerprints.size == comments do
+      throw <| IO.userError s!"{entry} ({file}): comments is {comments}, but fingerprints holds {fingerprints.size}"
+    for i in [1 : fingerprints.size] do
+      if fingerprints[i]! < fingerprints[i - 1]! then
+        throw <| IO.userError s!"{entry}.fingerprints ({file}): not in ascending order at {fingerprints[i]!}"
+    map := map.insert file { lines, fingerprints }
   return map
 
-unsafe def loadParserEnv (libDir : System.FilePath) (libMods : Array Name) : IO Environment := do
-  initSearchPath (← findSysroot) [libDir]
-  enableInitializersExecution
-  importModules ((libMods ++ #[`Lean, `Lake]).map fun m => { module := m }) {} (loadExts := true)
+def missingFrom (xs ys : Array String) : Array String := Id.run do
+  let mut out : Array String := #[]
+  let mut j := 0
+  for x in xs do
+    while j < ys.size && ys[j]! < x do
+      j := j + 1
+    if j < ys.size && ys[j]! == x then
+      j := j + 1
+    else
+      out := out.push x
+  return out
 
-unsafe def checkComments (libDir : System.FilePath) (libMods : Array Name)
-    (allFiles : Array String) : IO (Array Rejection) := do
+def baseRatchet : IO (Option (String × Std.HashMap String RatchetEntry)) := do
+  for ref in ["origin/main", "main"] do
+    let known ← IO.Process.output
+      { cmd := "git", args := #["rev-parse", "--verify", "--quiet", ref ++ "^{commit}"] }
+    unless known.exitCode == 0 do
+      continue
+    let merge ← IO.Process.output { cmd := "git", args := #["merge-base", "HEAD", ref] }
+    if merge.exitCode == 1 then
+      continue
+    unless merge.exitCode == 0 do
+      throw <| IO.userError s!"git merge-base HEAD {ref} failed:\n{merge.stderr}"
+    let base := merge.stdout.trimAscii.toString
+    let listed ← git #["ls-tree", "--full-tree", "--name-only", base, "--", ratchetFile]
+    if listed.trimAscii.toString.isEmpty then
+      return none
+    let source := s!"{base}:{ratchetFile}"
+    return some (base, ← parseRatchet source (← git #["show", source]))
+  return none
+
+def checkComments (libDir : System.FilePath) (allFiles : Array String) :
+    IO (Array Rejection) := do
   let reject (message : String) : Rejection := { rule := "NO-COMMENTS", message }
   if allFiles.isEmpty then
     return #[reject "Git's index lists no Lean file"]
-  let ratchet ← loadRatchet
+  let ratchet ← parseRatchet ratchetFile (← IO.FS.readFile ratchetFile)
   let mut errs : Array Rejection := #[]
   for (f, _) in ratchet.toList do
     unless allFiles.contains f do
-      errs := errs.push (reject s!"{ratchetFile} lists {f}, which is not a tracked Lean file")
-  let allMods ← moduleNames allFiles
-  let env ← loadParserEnv libDir libMods
-  for (f, m) in allFiles.zip allMods do
-    let spans ← fileCommentSpans env f m
-    let actualComments := spans.size
-    let actualLines := distinctCommentLines spans
-    match ratchet.get? f with
-    | none =>
-      if actualComments > 0 || actualLines > 0 then
-        errs := errs.push (reject s!"{f} has {actualComments} comment(s) across {actualLines} line(s), and is not in {ratchetFile}")
-    | some (maxComments, maxLines) =>
-      if actualComments == 0 && actualLines == 0 then
-        errs := errs.push (reject s!"{f} now has 0 comments; remove it from {ratchetFile} to lock in the ratchet")
-      else if actualComments > maxComments || actualLines > maxLines then
-        errs := errs.push (reject s!"{f} has {actualComments} comment(s) across {actualLines} line(s), exceeding its ratchet limit of {maxComments} comment(s) across {maxLines} line(s) in {ratchetFile}")
-      else if actualComments < maxComments || actualLines < maxLines then
-        errs := errs.push (reject s!"{f} now has {actualComments} comment(s) across {actualLines} line(s), below its ratchet limit of {maxComments} comment(s) across {maxLines} line(s); tighten {ratchetFile} to lock in the reduction")
+      errs := errs.push (reject s!"{ratchetFile} lists {f}, which is not a Lean file Git's index lists")
+  if let some (base, accepted) ← baseRatchet then
+    for (f, entry) in ratchet.toList do
+      let added := missingFrom entry.fingerprints ((accepted.get? f).elim #[] (·.fingerprints))
+      unless added.isEmpty do
+        errs := errs.push (reject s!"{ratchetFile} records for {f} {added.size} comment(s) that its copy at the merge base {base} does not record for that file, with the fingerprint(s) {" ".intercalate added.toList}; a file gains no comment")
+  else
+    IO.eprintln s!"NO-COMMENTS: no merge base of HEAD with origin/main or main holds {ratchetFile}, so its entries were compared with no earlier copy"
+  for (f, comments) in allFiles.zip (← projectComments libDir allFiles) do
+    let actual := (comments.map (·.fingerprint)).qsort (· < ·)
+    let lines := distinctCommentLines comments
+    let entry := ratchet.getD f { lines := 0, fingerprints := #[] }
+    let added := missingFrom actual entry.fingerprints
+    let gone := missingFrom entry.fingerprints actual
+    unless added.isEmpty do
+      let shown := (comments.filter (added.contains ·.fingerprint)).map fun c =>
+        s!"{c.kind} L{c.startLine}-L{c.endLine} {c.fingerprint}"
+      errs := errs.push (reject s!"{f} has {added.size} comment(s) that {ratchetFile} does not record for it, among: {", ".intercalate shown.toList}; a comment may be neither added nor edited, so delete them")
+    unless gone.isEmpty do
+      let fix := if actual.isEmpty then "remove its entry"
+        else s!"set its comments to {actual.size} and its lines to {lines}, and remove the fingerprint(s) {" ".intercalate gone.toList}"
+      errs := errs.push (reject s!"{f} no longer has {gone.size} comment(s) that {ratchetFile} records for it; {fix}")
+    if added.isEmpty && gone.isEmpty && lines != entry.lines then
+      errs := errs.push (reject s!"{f} has its comments across {lines} line(s), not the {entry.lines} that {ratchetFile} records; set its lines to {lines}")
   return errs
 
-unsafe def listComments (target? : Option String) (asJson : Bool := false) : IO Unit := do
+def listComments (target? : Option String) : IO Unit := do
   let allFiles ← trackedLeanFiles
   if allFiles.isEmpty then
     throw <| IO.userError "the project tracks no Lean file"
-  let pkg ← loadConfig
-  let libFiles ← libraryFiles
-  let libMods ← moduleNames libFiles
-  let allMods ← moduleNames allFiles
-  let env ← loadParserEnv pkg.leanLibDir libMods
+  let libDir := (← loadConfig).leanLibDir
   match target? with
   | some file =>
-    let some mod := (allFiles.zip allMods).find? (·.1 == file) |>.map (·.2)
-      | throw <| IO.userError s!"{file} is not a Lean file Git's index lists here"
-    let spans ← fileCommentSpans env file mod
-    let lines := distinctCommentLines spans
-    IO.println s!"{file}: {spans.size} comment(s), {lines} line(s)"
-    for sp in spans do
-      IO.println s!"  {sp.kind} L{sp.startLine}-L{sp.endLine}"
+    let comments ← fileComments libDir file
+    IO.println s!"{file}: {comments.size} comment(s), {distinctCommentLines comments} line(s)"
+    for c in comments do
+      IO.println s!"  {c.kind} L{c.startLine}-L{c.endLine} {c.fingerprint}"
   | none =>
-    let mut rows : Array (String × Nat × Nat) := #[]
+    let mut files := 0
     let mut totComments := 0
     let mut totLines := 0
-    for (f, m) in allFiles.zip allMods do
-      let spans ← fileCommentSpans env f m
-      let c := spans.size
-      let l := distinctCommentLines spans
-      if c > 0 then
-        rows := rows.push (f, c, l)
-        totComments := totComments + c
-        totLines := totLines + l
-    if asJson then
-      IO.println "["
-      for idx in [0 : rows.size] do
-        let (f, c, l) := rows[idx]!
-        let comma := if idx + 1 < rows.size then "," else ""
-        IO.println s!"  \{\"file\": {Json.str f}, \"comments\": {c}, \"lines\": {l}}{comma}"
-      IO.println "]"
-    else
-      for (f, c, l) in rows do
-        IO.println s!"{f}: {c} comment(s), {l} line(s)"
-      IO.println s!"total: {rows.size}/{allFiles.size} files with comments, {totComments} comment(s), {totLines} line(s)"
-
-def checkCommentsSubprocess : IO (Array Rejection) := do
-  let top := System.FilePath.mk (← git #["rev-parse", "--show-toplevel"]).trimAscii.toString
-  let script := top / "tools" / "check.lean"
-  let o ← IO.Process.output { cmd := "lean", args := #["--run", script.toString, "--check-comments"] }
-  match o.exitCode with
-  | 0 => return #[]
-  | 1 =>
-    let lines := ((o.stdout.splitOn "\n").filter (· ≠ "")).toArray
-    if lines.isEmpty then
-      return #[{ rule := "NO-COMMENTS", message :=
-        s!"tools/check.lean --check-comments exited with status 1 and printed no reason; its standard error:\n{o.stderr}" }]
-    return lines.map fun l => { rule := "NO-COMMENTS", message := l }
-  | c => throw <| IO.userError s!"tools/check.lean --check-comments could not run (status {c}):\n{o.stdout}{o.stderr}"
-
-unsafe def runCheckCommentsMain : IO UInt32 := do
-  try
-    let pkg ← loadConfig
-    let libFiles ← libraryFiles
-    let libMods ← moduleNames libFiles
-    let allFiles ← trackedLeanFiles
-    let errs ← checkComments pkg.leanLibDir libMods allFiles
-    for e in errs do
-      IO.println e.message
-    return if errs.isEmpty then 0 else 1
-  catch e =>
-    try IO.eprintln s!"tools/check.lean --check-comments could not run: {e}" catch _ => pure ()
-    return 2
+    for (f, comments) in allFiles.zip (← projectComments libDir allFiles) do
+      unless comments.isEmpty do
+        let lines := distinctCommentLines comments
+        IO.println s!"{f}: {comments.size} comment(s), {lines} line(s)"
+        files := files + 1
+        totComments := totComments + comments.size
+        totLines := totLines + lines
+    IO.println s!"total: {files}/{allFiles.size} files with comments, {totComments} comment(s), {totLines} line(s)"
 
 def check : IO (Array Rejection) := do
   let config ← checkConfig
@@ -796,7 +758,7 @@ def check : IO (Array Rejection) := do
   unless built.isEmpty do
     return built
   let codes ← checkCodes pkg.leanLibDir mods
-  let commentErrs ← checkCommentsSubprocess
+  let commentErrs ← checkComments pkg.leanLibDir allFiles
   initSearchPath (← findSysroot) [pkg.leanLibDir]
   let env ← importModules (mods.map fun m => { module := m }) {}
   let idxs := mods.filterMap env.getModuleIdx?
@@ -825,20 +787,18 @@ public unsafe def main (args : List String) : IO UInt32 := do
   | ["--tests-module", file, out] =>
     Check.moduleTests file out
     return 0
-  | ["--check-comments"] =>
-    Check.runCheckCommentsMain
+  | ["--comments-module", file, libDir] =>
+    Check.moduleComments file libDir
+    return 0
   | ["--comments"] =>
-    Check.listComments none false
+    Check.listComments none
     return 0
   | ["--comments", file] =>
-    Check.listComments (some file) false
-    return 0
-  | ["--comments-json"] =>
-    Check.listComments none true
+    Check.listComments (some file)
     return 0
   | [] =>
     let errs ← Check.check
     for e in errs do
       IO.println s!"[{e.rule}] {e.message}"
     return if errs.isEmpty then 0 else 1
-  | _ => throw <| IO.userError "usage: lean --run tools/check.lean [--tests | --tests-module <file> <out> | --check-comments | --comments [<file>] | --comments-json]"
+  | _ => throw <| IO.userError "usage: lean --run tools/check.lean [--tests | --tests-module <file> <out> | --comments [<file>] | --comments-module <file> <libDir>]"

@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-`lean-intent` promises that compiled library code computes its outputs purely from Lean's environment and inputs without spawning subprocesses or inspecting the host process's environment, executable path, working directory, user, or hostname, so that checkers enforcing no-process-spawning policies can safely call the library.
+`lean-intent` promises that compiled library code calls none of the runtime functions `PROCESS` monitors (`processQueries`): those that start a process, and those that tell a process its environment variables, executable path, working directory, home or temporary directory, user, hostname, or operating system. So a text the library computes takes nothing from those, and a checker that refuses a process start can call the library. The promise is not that the library is pure or reads nothing else: `PROCESS` monitors no filesystem function, and the library reads the filesystem, for example `IO.FS.realPath` and `System.FilePath.pathExists` in `LeanIntent/Render/Text.lean` (`realOLean?`, `leanLibDir`), which resolve Lean's own library directory from the process's search path.
 
 ## Decision
 

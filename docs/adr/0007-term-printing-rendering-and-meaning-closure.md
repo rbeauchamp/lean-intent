@@ -16,7 +16,7 @@ The term-printing and rendering stack (`LeanIntent/Print/Printable.lean`, `LeanI
 
 ### Binder canonicalization and metadata erasure (`LeanIntent/Print/Canon.lean`)
 
-- Lean generates macro-scoped binder names (`a✝`) that surface syntax cannot write, and terms can shadow earlier binders or collide with root names of constants referenced in the body. `canon` turns unused default `∀` binders into `.anonymous` (printed as arrows), preserves clean non-colliding names, and falls back to fresh names (`x`, `x_1`, `x_2`, ...).
+- Lean generates macro-scoped binder names (`a✝`) that surface syntax cannot write, and terms can shadow earlier binders or collide with root names of constants referenced in the body. `canon` renames only the binders it must. A binder keeps its name when that name is one component the printer can write and neither an enclosing binder nor the first component of a constant in the term has it (`keeps`), so `∀ n : Nat, True` keeps `n` although its body does not use it. Only a binder that cannot keep its name (macro-scoped, shadowing, or colliding with a constant's root) is changed: a `∀` binder with the default annotation whose body does not use its variable becomes `.anonymous` and is printed as an arrow, and any other takes its name without macro scopes when that can be kept, and else the first of `x`, `x_1`, `x_2`, ... that can (`pick`).
 - `Expr.mdata` is stripped before printing because Lean's kernel treats `Expr.mdata data e` as definitionally equal to `e` and ignores binder names; `eraseNames_canon` proves canonicalization changes nothing else.
 
 ### Meaning closure (`LeanIntent/Print/Meaning.lean`)
