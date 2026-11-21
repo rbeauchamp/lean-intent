@@ -4,10 +4,11 @@
 # repository checks on every change.
 #
 # Security & merge-base hardening: runs with read-only contents permissions, persist-credentials:
-# false, full Git history (fetch-depth: 0 plus ensuring refs/remotes/origin/main exists so
-# NO-COMMENTS merge-base verification succeeds on both pull_request and push events), a
-# commit-SHA-pinned checkout action, and SHA-256 verification of the Lean release archive matching
-# lean-toolchain (without running an unverified curl | sh installer).
+# false, full Git history (fetch-depth: 0) with explicit `--base-ref` on pull_request
+# (`github.event.pull_request.base.sha`) and push (`github.event.before`) events for NO-COMMENTS
+# merge-base verification, a commit-SHA-pinned checkout action, and SHA-256 verification of the
+# Lean release archive paired with the exact pin in lean-toolchain (without running an unverified
+# curl | sh installer).
 name: check
 
 on:
@@ -27,26 +28,24 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Ensure origin/main exists for NO-COMMENTS merge-base check
-        run: |
-          set -euo pipefail
-          if ! git rev-parse --verify --quiet refs/remotes/origin/main^{commit} >/dev/null; then
-            git fetch --no-tags origin main:refs/remotes/origin/main
-          fi
       - name: Install Lean matching lean-toolchain with SHA-256 verification
+        shell: bash
         run: |
           set -euo pipefail
-          v="$(sed -n 's/^leanprover\/lean4:v//p' lean-toolchain | tr -d '\r\n')"
-          if [ -z "$v" ]; then
-            echo "::error::Unexpected lean-toolchain content"
+          expected_pin="leanprover/lean4:v4.36.0"
+          version="4.36.0"
+          sha256="92a996be487b48e1c2f2985be6b150490475c94d02f5a5e26665a9dab780902a"
+          if ! printf '%s\n' "$expected_pin" | cmp -s lean-toolchain - \
+             && ! printf '%s' "$expected_pin" | cmp -s lean-toolchain -; then
+            echo "::error::lean-toolchain does not match pinned release $expected_pin"
             exit 1
           fi
           curl -sSfL --proto '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --retry-delay 2 \
             -o "$RUNNER_TEMP/lean.zip" \
-            "https://github.com/leanprover/lean4/releases/download/v$v/lean-$v-linux.zip"
-          echo "92a996be487b48e1c2f2985be6b150490475c94d02f5a5e26665a9dab780902a  $RUNNER_TEMP/lean.zip" | sha256sum --check --strict
+            "https://github.com/leanprover/lean4/releases/download/v${version}/lean-${version}-linux.zip"
+          echo "${sha256}  $RUNNER_TEMP/lean.zip" | sha256sum --check --strict
           unzip -q "$RUNNER_TEMP/lean.zip" -d "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/lean-$v-linux/bin" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/lean-${version}-linux/bin" >> "$GITHUB_PATH"
       # LAKE-CONFIG, LEAN-BUILD, LEAN-MODULE, AXIOMS, PROCESS, CODES and NO-COMMENTS: no other
       # package is required, every library module builds with no error and no warning, every Lean
       # file is a `module` file, every declaration rests only on Lean's axioms, the library's
@@ -54,9 +53,39 @@ jobs:
       # declared type's code other than the one its deriving handler writes, and every tracked Lean
       # file obeys the comment ratchet in tools/comment-ratchet.json.
       - name: Build the library and audit its axioms
-        run: lean --run tools/check.lean
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request)
+              if [ -z "$PR_BASE_SHA" ]; then
+                echo "::error::Missing pull_request.base.sha for NO-COMMENTS --base-ref"
+                exit 1
+              fi
+              lean --run tools/check.lean --base-ref "$PR_BASE_SHA"
+              ;;
+            push)
+              if [ -z "$PUSH_BEFORE_SHA" ]; then
+                echo "::error::Missing push before SHA for NO-COMMENTS --base-ref"
+                exit 1
+              fi
+              lean --run tools/check.lean --base-ref "$PUSH_BEFORE_SHA"
+              ;;
+            workflow_dispatch)
+              lean --run tools/check.lean
+              ;;
+            *)
+              echo "::error::Unsupported GitHub Actions event: $EVENT_NAME"
+              exit 1
+              ;;
+          esac
       # The repository establishes its claims by proof, so its listing of tests is empty.
       - name: Check that the repository has no tests
+        shell: bash
         run: |
           set -euo pipefail
           lean --run tools/check.lean --tests > "$RUNNER_TEMP/tests"

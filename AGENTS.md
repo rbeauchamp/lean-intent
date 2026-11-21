@@ -6,7 +6,7 @@ Each part says whose it is: what the owner said, what the repository's own files
 
 ## The merge gate
 
-From the repository's files and its rules on GitHub. Every change lands through a pull request: `main` refuses a direct push, a force-push and a commit without a verified signature. Both [`.github/workflows/check.yml`](.github/workflows/check.yml) (CI on pull requests and pushes to `main`) and the local no-mistakes pipeline (configured in [`.no-mistakes.yaml`](.no-mistakes.yaml)) run `lean --run tools/check.lean` and verify that `lean --run tools/check.lean --tests` prints nothing.
+From the repository's files and its rules on GitHub. Every change lands through a pull request: `main` refuses a direct push, a force-push, and a commit without a verified signature, and requires the GitHub Actions `lean` check from [`.github/workflows/check.yml`](.github/workflows/check.yml) (with the branch up to date). Both [`.github/workflows/check.yml`](.github/workflows/check.yml) (CI on pull requests and pushes to `main`) and the local no-mistakes pipeline (configured in [`.no-mistakes.yaml`](.no-mistakes.yaml)) run `lean --run tools/check.lean` and verify that `lean --run tools/check.lean --tests` prints nothing.
 
 ## In a cloud session
 
