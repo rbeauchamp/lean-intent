@@ -893,42 +893,227 @@ theorem missingFrom_both_isEmpty_iff (xs ys : SortedFingerprints) :
   · intro h
     exact ⟨fun a => Nat.le_of_eq (h a), fun a => Nat.le_of_eq (h a).symm⟩
 
-def baseRatchet : IO (Option (String × Std.HashMap String RatchetEntry)) := do
-  for ref in ["origin/main", "main"] do
-    let known ← IO.Process.output
-      { cmd := "git", args := #["rev-parse", "--verify", "--quiet", ref ++ "^{commit}"] }
-    unless known.exitCode == 0 do
-      continue
-    let merge ← IO.Process.output { cmd := "git", args := #["merge-base", "HEAD", ref] }
-    if merge.exitCode == 1 then
-      continue
-    unless merge.exitCode == 0 do
-      throw <| IO.userError s!"git merge-base HEAD {ref} failed:\n{merge.stderr}"
-    let base := merge.stdout.trimAscii.toString
-    let listed ← git #["ls-tree", "--full-tree", "--name-only", base, "--", ratchetFile]
-    if listed.trimAscii.toString.isEmpty then
-      return none
-    let source := s!"{base}:{ratchetFile}"
-    return some (base, ← parseRatchet source (← git #["show", source]))
-  return none
+structure BaseRef where
+  value : String
+  nonEmpty : value ≠ ""
+  notFlag : !value.startsWith "-" = true
 
-def checkComments (libDir : System.FilePath) (allFiles : Array String) :
+def BaseRef.parse (raw : String) : Except String BaseRef :=
+  if h1 : raw = "" then
+    .error s!"invalid --base-ref value: {raw.quote}"
+  else if h2 : raw.startsWith "-" then
+    .error s!"invalid --base-ref value: {raw.quote}"
+  else
+    .ok ⟨raw, h1, by simp [h2]⟩
+
+structure CheckOpts where
+  baseRef? : Option BaseRef := none
+  bootstrap : Bool := false
+
+def isRegularGitMode (mode : String) : Bool :=
+  mode == "100644" || mode == "100755"
+
+inductive GitRatchetEntry where
+  | absent
+  | regular (oid : String)
+  | invalid (detail : String)
+
+def parseGitRatchetHeader (isTree : Bool) (expectedPath path : String) (fields : List String) :
+    Option String :=
+  match isTree, fields with
+  | true, [mode, "blob", oid] =>
+    if path == expectedPath && isRegularGitMode mode && oid != "" then some oid else none
+  | false, [mode, oid, "0"] =>
+    if path == expectedPath && isRegularGitMode mode && oid != "" then some oid else none
+  | _, _ => none
+
+def parseGitRatchetEntry (isTree : Bool) (expectedPath raw : String) : GitRatchetEntry :=
+  match raw.splitOn "\x00" with
+  | [""] => .absent
+  | [entry, ""] =>
+    match entry.splitOn "\t" with
+    | [header, path] =>
+      match parseGitRatchetHeader isTree expectedPath path (header.splitOn " ") with
+      | some oid => .regular oid
+      | none => .invalid entry
+    | _ => .invalid entry
+  | _ => .invalid (raw.replace "\x00" "; ")
+
+theorem parseGitRatchetHeader_eq_some_iff (isTree : Bool) (expectedPath path oid : String)
+    (fields : List String) :
+    parseGitRatchetHeader isTree expectedPath path fields = some oid ↔
+      path = expectedPath ∧
+      oid ≠ "" ∧
+      ∃ mode, (mode = "100644" ∨ mode = "100755") ∧
+        ((isTree = true ∧ fields = [mode, "blob", oid]) ∨
+         (isTree = false ∧ fields = [mode, oid, "0"])) := by
+  unfold parseGitRatchetHeader isRegularGitMode
+  constructor
+  · intro h
+    split at h
+    · split at h
+      · rename_i mode _ hc
+        simp only [Option.some.injEq] at h
+        subst h
+        simp only [Bool.and_eq_true, Bool.or_eq_true, beq_iff_eq, bne_iff_ne] at hc
+        exact ⟨hc.1.1, hc.2, mode, hc.1.2, Or.inl ⟨rfl, rfl⟩⟩
+      · cases h
+    · split at h
+      · rename_i mode _ hc
+        simp only [Option.some.injEq] at h
+        subst h
+        simp only [Bool.and_eq_true, Bool.or_eq_true, beq_iff_eq, bne_iff_ne] at hc
+        exact ⟨hc.1.1, hc.2, mode, hc.1.2, Or.inr ⟨rfl, rfl⟩⟩
+      · cases h
+    · cases h
+  · rintro ⟨rfl, hoid, mode, hmode, ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩⟩
+    · rcases hmode with rfl | rfl <;> simp [hoid]
+    · rcases hmode with rfl | rfl <;> simp [hoid]
+
+theorem parseGitRatchetEntry_regular_iff (isTree : Bool) (expectedPath raw oid : String) :
+    parseGitRatchetEntry isTree expectedPath raw = .regular oid ↔
+      ∃ entry header mode,
+        raw.splitOn "\x00" = [entry, ""] ∧
+        entry.splitOn "\t" = [header, expectedPath] ∧
+        (mode = "100644" ∨ mode = "100755") ∧
+        oid ≠ "" ∧
+        ((isTree = true ∧ header.splitOn " " = [mode, "blob", oid]) ∨
+         (isTree = false ∧ header.splitOn " " = [mode, oid, "0"])) := by
+  unfold parseGitRatchetEntry
+  constructor
+  · intro h
+    split at h
+    · cases h
+    · rename_i entry hr
+      split at h
+      · rename_i header path ht
+        split at h
+        · rename_i oid' hh
+          cases h
+          have ⟨hp, hoid, mode, hmode, hf⟩ :=
+            (parseGitRatchetHeader_eq_some_iff isTree expectedPath path oid (header.splitOn " ")).mp hh
+          subst hp
+          exact ⟨entry, header, mode, hr, ht, hmode, hoid, hf⟩
+        · cases h
+      · cases h
+    · cases h
+  · rintro ⟨entry, header, mode, hr, ht, hmode, hoid, hf⟩
+    have hh :=
+      (parseGitRatchetHeader_eq_some_iff isTree expectedPath expectedPath oid (header.splitOn " ")).mpr
+        ⟨rfl, hoid, mode, hmode, hf⟩
+    simp [hr, ht, hh]
+
+def checkWorkingTreeRegularFile (path : String) : IO (Option String) := do
+  let comps := path.splitOn "/"
+  if comps.any (fun c => c.isEmpty || c == "." || c == "..") then
+    return some s!"{path} is not a normalized relative path"
+  match comps with
+  | [] => return some s!"{path} is not a normalized relative path"
+  | first :: rest => walk first rest ""
+where
+  walk (seg : String) (rest : List String) (cur : String) : IO (Option String) := do
+    let dir : System.FilePath := if cur.isEmpty then "." else cur
+    let entries ← try dir.readDir catch _ => return some s!"cannot list directory {dir} for {path}"
+    unless entries.any (·.fileName == seg) do
+      return some s!"{path} does not exist in the working tree with that exact spelling"
+    let next := if cur.isEmpty then seg else s!"{cur}/{seg}"
+    let info ← try System.FilePath.symlinkMetadata next catch _ =>
+      return some s!"cannot inspect {next} in the working tree"
+    match rest with
+    | [] =>
+      unless info.type == .file do
+        return some s!"{path} is not a regular file in the working tree"
+      return none
+    | nextSeg :: tl =>
+      unless info.type == .dir do
+        return some s!"{next} is not a directory in the working tree"
+      walk nextSeg tl next
+
+def checkCandidateRatchetFile : IO (Option String) := do
+  let staged ← git #["ls-files", "--stage", "-z", "--full-name", "--", ratchetFile]
+  match parseGitRatchetEntry false ratchetFile staged with
+  | .absent =>
+    return some s!"{ratchetFile} is not tracked at that exact path in Git's index"
+  | .invalid detail =>
+    return some s!"{ratchetFile} is not a regular staged file at that exact path in Git's index ({detail})"
+  | .regular _ =>
+    checkWorkingTreeRegularFile ratchetFile
+
+def defaultBaseRefs : List String :=
+  ["refs/remotes/origin/main", "refs/heads/main"]
+
+def resolveCommit (ref : String) : IO (Option String) := do
+  let known ← IO.Process.output
+    { cmd := "git", args := #["rev-parse", "--verify", "--quiet", "--end-of-options", ref ++ "^{commit}"] }
+  if known.exitCode == 0 then
+    return some known.stdout.trimAscii.toString
+  else if known.exitCode == 1 then
+    return none
+  else
+    throw <| IO.userError s!"NO-COMMENTS: git rev-parse for {ref} failed:\n{known.stderr}"
+
+def exactRefExists (fullRef : String) : IO Bool := do
+  let res ← IO.Process.output
+    { cmd := "git", args := #["show-ref", "--verify", "--quiet", "--", fullRef] }
+  if res.exitCode == 0 then
+    return true
+  else if res.exitCode == 1 then
+    return false
+  else
+    throw <| IO.userError s!"NO-COMMENTS: git show-ref for {fullRef} failed:\n{res.stderr}"
+
+def resolveBaseRef (baseRef? : Option BaseRef) : IO (String × String) := do
+  match baseRef? with
+  | some ref =>
+    let some sha ← resolveCommit ref.value
+      | throw <| IO.userError s!"NO-COMMENTS: base ref {ref.value} is not a known commit"
+    return (ref.value, sha)
+  | none =>
+    for ref in defaultBaseRefs do
+      if ← exactRefExists ref then
+        let some sha ← resolveCommit ref
+          | throw <| IO.userError s!"NO-COMMENTS: default base ref {ref} does not name a commit"
+        return (ref, sha)
+    throw <| IO.userError "NO-COMMENTS: neither refs/remotes/origin/main nor refs/heads/main names a commit; fetch the base branch or pass --base-ref <ref>"
+
+def baseRatchet (opts : CheckOpts) :
+    IO (Option (String × Std.HashMap String RatchetEntry)) := do
+  let (ref, refSha) ← resolveBaseRef opts.baseRef?
+  let merge ← IO.Process.output { cmd := "git", args := #["merge-base", "HEAD", refSha] }
+  if merge.exitCode == 1 then
+    throw <| IO.userError s!"NO-COMMENTS: Git found no merge base of HEAD with {ref} ({refSha}); fetch full history or pass --base-ref <ref>"
+  unless merge.exitCode == 0 do
+    throw <| IO.userError s!"git merge-base HEAD {ref} failed:\n{merge.stderr}"
+  let base := merge.stdout.trimAscii.toString
+  let listed ← git #["ls-tree", "--full-tree", "-z", base, "--", ratchetFile]
+  match parseGitRatchetEntry true ratchetFile listed with
+  | .absent =>
+    if opts.bootstrap then
+      return none
+    throw <| IO.userError s!"NO-COMMENTS: merge base {base} (with {ref}) does not hold {ratchetFile}; pass --bootstrap only when introducing {ratchetFile}"
+  | .invalid detail =>
+    throw <| IO.userError s!"NO-COMMENTS: {base}:{ratchetFile} is not a regular file in Git ({detail})"
+  | .regular oid =>
+    let source := s!"{base}:{ratchetFile}"
+    return some (base, ← parseRatchet source (← git #["cat-file", "blob", oid]))
+
+def checkComments (libDir : System.FilePath) (allFiles : Array String) (opts : CheckOpts) :
     IO (Array Rejection) := do
   let reject (message : String) : Rejection := { rule := "NO-COMMENTS", message }
   if allFiles.isEmpty then
     return #[reject "Git's index lists no Lean file"]
+  if let some err ← checkCandidateRatchetFile then
+    return #[reject err]
   let ratchet ← parseRatchet ratchetFile (← IO.FS.readFile ratchetFile)
   let mut errs : Array Rejection := #[]
   for (f, _) in ratchet.toList do
     unless allFiles.contains f do
       errs := errs.push (reject s!"{ratchetFile} lists {f}, which is not a Lean file Git's index lists")
-  if let some (base, accepted) ← baseRatchet then
+  if let some (base, accepted) ← baseRatchet opts then
     for (f, entry) in ratchet.toList do
       let added := missingFrom entry.fingerprints ((accepted.get? f).elim .empty (·.fingerprints))
       unless added.isEmpty do
         errs := errs.push (reject s!"{ratchetFile} records for {f} {added.size} comment(s) that its copy at the merge base {base} does not record for that file, with the fingerprint(s) {" ".intercalate added.toList}; a file gains no comment")
-  else
-    IO.eprintln s!"NO-COMMENTS: no merge base of HEAD with origin/main or main holds {ratchetFile}, so its entries were compared with no earlier copy"
   for (f, comments) in allFiles.zip (← projectComments libDir allFiles) do
     let actual := sortFingerprints (comments.map (·.fingerprint))
     let lines := distinctCommentLines comments
@@ -971,7 +1156,7 @@ def listComments (target? : Option String) : IO Unit := do
         totLines := totLines + lines
     IO.println s!"total: {files}/{allFiles.size} files with comments, {totComments} comment(s), {totLines} line(s)"
 
-def check : IO (Array Rejection) := do
+def check (opts : CheckOpts) : IO (Array Rejection) := do
   let config ← checkConfig
   unless config.isEmpty do
     return config
@@ -991,7 +1176,7 @@ def check : IO (Array Rejection) := do
   unless built.isEmpty do
     return built
   let codes ← checkCodes pkg.leanLibDir mods
-  let commentErrs ← checkComments pkg.leanLibDir allFiles
+  let commentErrs ← checkComments pkg.leanLibDir allFiles opts
   initSearchPath (← findSysroot) [pkg.leanLibDir]
   let env ← importModules (mods.map fun m => { module := m }) {}
   let idxs := mods.filterMap env.getModuleIdx?
@@ -1008,6 +1193,28 @@ def check : IO (Array Rejection) := do
   if audited == 0 then
     errs := errs.push { rule := "AXIOMS", message := "the library's modules declare no constant" }
   return errs ++ checkProcess env compiled ++ codes ++ commentErrs
+
+def checkUsage : String :=
+  "usage: lean --run tools/check.lean [--base-ref <ref>] [--bootstrap] | --tests | --tests-module <file> <out> | --comments [<file>] | --comments-module <file> <toolDir> <libDir>"
+
+def parseCheckArgs (args : List String) : Except String CheckOpts :=
+  go args {}
+where
+  go (rest : List String) (opts : CheckOpts) : Except String CheckOpts := do
+    match rest with
+    | [] => return opts
+    | "--bootstrap" :: tl =>
+      if opts.bootstrap then
+        throw "duplicate --bootstrap option"
+      go tl { opts with bootstrap := true }
+    | "--base-ref" :: ref :: tl =>
+      if opts.baseRef?.isSome then
+        throw "duplicate --base-ref option"
+      go tl { opts with baseRef? := some (← BaseRef.parse ref) }
+    | ["--base-ref"] =>
+      throw "missing value after --base-ref"
+    | arg :: _ =>
+      throw s!"unknown option or argument {arg.quote}\n{checkUsage}"
 
 end Check
 
@@ -1029,9 +1236,11 @@ public unsafe def main (args : List String) : IO UInt32 := do
   | ["--comments", file] =>
     Check.listComments (some file)
     return 0
-  | [] =>
-    let errs ← Check.check
+  | _ =>
+    let opts ← match Check.parseCheckArgs args with
+      | .ok o => pure o
+      | .error e => throw <| IO.userError e
+    let errs ← Check.check opts
     for e in errs do
       IO.println s!"[{e.rule}] {e.message}"
     return if errs.isEmpty then 0 else 1
-  | _ => throw <| IO.userError "usage: lean --run tools/check.lean [--tests | --tests-module <file> <out> | --comments [<file>] | --comments-module <file> <toolDir> <libDir>]"

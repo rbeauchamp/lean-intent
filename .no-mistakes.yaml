@@ -32,8 +32,12 @@
 # same machine, the check with it peaked at 5.63 GiB, 140 seconds into a run in an already-built
 # tree, sampled every 0.2 seconds (measured alone under Lean v4.35.0 over 67 files against a built
 # library, it had peaked at 5.52 and 5.46 GiB), which is below the 9 GiB bound by more than 15%.
-# The check with it has not been measured with an empty artifact cache; the build's own peak there,
-# 4.55 GiB, comes before the comment check starts.
+# The check with it was measured on 2026-11-21 under Lean v4.36.0 in a clean tree with an empty
+# artifact cache (no `.lake` directory, empty `LAKE_CACHE_DIR`, `LAKE_ARTIFACT_CACHE` unset),
+# sampled every 0.1 seconds: `tools/check.lean` peaked at 5.523 GiB (5,790,928 KiB, 154.3 seconds
+# in across 4 processes during the readers), and `--tests` peaked at 3.065 GiB (3,213,552 KiB) in
+# the unbuilt clean tree and 3.059 GiB (3,207,232 KiB) after the build, all well below the kept
+# 9 GiB and 6 GiB bounds with > 15% margin.
 #
 # Time. Each check also runs under a wall-clock limit, so that a check that stalls fails and gives
 # back its share of the memory budget instead of holding the share and the run until someone stops
@@ -68,9 +72,13 @@
 # worktree whose earlier build was made under Lean v4.35.0: the check took 331 seconds on its
 # first run there and 313 seconds when run again in the built tree, at a load average of 4 to 7
 # (3 * 331 = 993 seconds, below the 1020-second limit), and the listing then took 130 seconds
-# (3 * 130 = 390 seconds, below the 420-second limit). Neither was measured with it in a clean
-# tree with an empty artifact cache; measure both there, and raise a limit that three times the
-# duration passes.
+# (3 * 130 = 390 seconds, below the 420-second limit). Measured on 2026-11-21 under Lean v4.36.0 on
+# the same machine through `no-mistakes admit` in a clean tree with no `.lake` directory and an
+# empty artifact cache (load average 2.42 to 5.09): `lean --run tools/check.lean` took 330.65
+# seconds (3 * 330.65 = 991.95 seconds, below the kept 1020-second limit), and `lean --run
+# tools/check.lean --tests` took 125.28 seconds in the clean unbuilt tree and 126.07 seconds after
+# the build (3 * 126.07 = 378.21 seconds, below the kept 420-second limit), so neither limit needed
+# raising.
 test:
   instructions: |
     On lean-intent this step is verification. A change's claims are established by machine-checked proof, by derivation and by reading; lean-intent has no running product to drive.
@@ -103,7 +111,7 @@ test:
       lean_files=$(git ls-files -- '*.lean')
       if [ -n "$lean_files" ]; then
         status=0
-        no-mistakes admit --memory 6GiB --limit "none; measured peak 2.95 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests || status=$?
+        no-mistakes admit --memory 6GiB --limit "none; measured peak 3.065 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests || status=$?
         case $status in
           124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 420 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
           137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 420 seconds and did not stop within 30 seconds of TERM" >&2 ;;
@@ -153,7 +161,7 @@ commands:
     esac
     [ "$status" -eq 0 ] || exit "$status"
     mkdir -p .lake
-    no-mistakes admit --memory 6GiB --limit "none; measured peak 2.95 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests > .lake/tests-listing || status=$?
+    no-mistakes admit --memory 6GiB --limit "none; measured peak 3.065 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests > .lake/tests-listing || status=$?
     case $status in
       124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 420 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
       137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 420 seconds and did not stop within 30 seconds of TERM" >&2 ;;
