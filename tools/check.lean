@@ -684,9 +684,61 @@ def projectComments (libDir : System.FilePath) (allFiles : Array String)
     let parts ← results.mapM IO.ofExcept
     return (Array.range files.size).map fun i => parts[i % commentReaders]![i / commentReaders]!
 
+structure SortedFingerprints where
+  values : Array String
+  sorted : values.toList.Pairwise (· ≤ ·)
+
+def SortedFingerprints.empty : SortedFingerprints :=
+  ⟨#[], .nil⟩
+
+def firstOutOfOrder : List String → Option String
+  | [] | [_] => none
+  | a :: b :: rest => if b < a then some b else firstOutOfOrder (b :: rest)
+
+theorem firstOutOfOrder_eq_none_iff :
+    ∀ l : List String, firstOutOfOrder l = none ↔ l.Pairwise (· ≤ ·)
+  | [] => by simp [firstOutOfOrder]
+  | [_] => by simp [firstOutOfOrder]
+  | a :: b :: rest => by
+    constructor
+    · intro h
+      unfold firstOutOfOrder at h
+      split at h
+      · cases h
+      · rename_i hba
+        have hab : a ≤ b := Std.not_lt.mp hba
+        have htail := (firstOutOfOrder_eq_none_iff (b :: rest)).mp h
+        have ⟨hb, _⟩ := List.pairwise_cons.mp htail
+        refine List.pairwise_cons.mpr ⟨?_, htail⟩
+        intro z hz
+        rcases List.mem_cons.mp hz with rfl | hz
+        · exact hab
+        · exact Std.le_trans hab (hb z hz)
+    · intro h
+      have ⟨ha, htail⟩ := List.pairwise_cons.mp h
+      have hab : a ≤ b := ha b List.mem_cons_self
+      have hnba : ¬(b < a) := Std.not_lt.mpr hab
+      simp [firstOutOfOrder, hnba, (firstOutOfOrder_eq_none_iff (b :: rest)).mpr htail]
+
+def sortFingerprints (xs : Array String) : SortedFingerprints :=
+  ⟨(xs.toList.mergeSort (fun a b => decide (a ≤ b))).toArray, by
+    simpa only [decide_eq_true_eq] using
+      List.pairwise_mergeSort
+        (le := fun a b : String => decide (a ≤ b))
+        (fun _ _ _ h1 h2 => decide_eq_true (Std.le_trans (of_decide_eq_true h1) (of_decide_eq_true h2)))
+        (fun a b => by
+          by_cases h : a < b
+          · simp [(Std.lt_iff_le_and_ne.mp h).1]
+          · simp [Std.not_lt.mp h])
+        xs.toList⟩
+
+theorem sortFingerprints_count (xs : Array String) (a : String) :
+    (sortFingerprints xs).values.toList.count a = xs.toList.count a :=
+  (List.mergeSort_perm xs.toList (fun a b => decide (a ≤ b))).count_eq a
+
 structure RatchetEntry where
   lines : Nat
-  fingerprints : Array String
+  fingerprints : SortedFingerprints
 
 def parsePosNat (j : Json) (ctx : String) : IO Nat := do
   match j with
@@ -732,10 +784,14 @@ def parseRatchet (source raw : String) : IO (Std.HashMap String RatchetEntry) :=
       | _ => throw <| IO.userError s!"{entry}.fingerprints ({file}): expected a string, got {j}"
     unless fingerprints.size == comments do
       throw <| IO.userError s!"{entry} ({file}): comments is {comments}, but fingerprints holds {fingerprints.size}"
-    for i in [1 : fingerprints.size] do
-      if fingerprints[i]! < fingerprints[i - 1]! then
-        throw <| IO.userError s!"{entry}.fingerprints ({file}): not in ascending order at {fingerprints[i]!}"
-    map := map.insert file { lines, fingerprints }
+    match h : firstOutOfOrder fingerprints.toList with
+    | some bad =>
+      throw <| IO.userError s!"{entry}.fingerprints ({file}): not in ascending order at {bad}"
+    | none =>
+      map := map.insert file {
+        lines,
+        fingerprints := ⟨fingerprints, (firstOutOfOrder_eq_none_iff fingerprints.toList).mp h⟩
+      }
   return map
 
 def missingFromListAux (acc : List String) : List String → List String → List String
@@ -747,8 +803,8 @@ def missingFromListAux (acc : List String) : List String → List String → Lis
     else missingFromListAux (x :: acc) xs (y :: ys)
 termination_by xs ys => xs.length + ys.length
 
-def missingFrom (xs ys : Array String) : Array String :=
-  (missingFromListAux [] xs.toList ys.toList).toArray
+def missingFrom (xs ys : SortedFingerprints) : Array String :=
+  (missingFromListAux [] xs.values.toList ys.values.toList).toArray
 
 theorem count_eq_zero_of_lt_all {l : List String} {a : String} (h : ∀ z ∈ l, a < z) :
     l.count a = 0 :=
@@ -802,31 +858,40 @@ theorem missingFromListAux_count (acc xs ys : List String)
         · simp [List.count_cons_of_ne hax]
 termination_by xs.length + ys.length
 
-theorem missingFrom_count (xs ys : Array String)
-    (hxs : xs.toList.Pairwise (· ≤ ·)) (hys : ys.toList.Pairwise (· ≤ ·)) (a : String) :
-    (missingFrom xs ys).toList.count a = xs.toList.count a - ys.toList.count a := by
-  simp [missingFrom, missingFromListAux_count [] xs.toList ys.toList hxs hys a]
+theorem missingFrom_count (xs ys : SortedFingerprints) (a : String) :
+    (missingFrom xs ys).toList.count a = xs.values.toList.count a - ys.values.toList.count a := by
+  simp [missingFrom, missingFromListAux_count [] xs.values.toList ys.values.toList xs.sorted ys.sorted a]
 
-theorem missingFrom_isEmpty_iff (xs ys : Array String)
-    (hxs : xs.toList.Pairwise (· ≤ ·)) (hys : ys.toList.Pairwise (· ≤ ·)) :
-    (missingFrom xs ys).isEmpty = true ↔ ∀ a, xs.toList.count a ≤ ys.toList.count a := by
+theorem missingFrom_isEmpty_iff (xs ys : SortedFingerprints) :
+    (missingFrom xs ys).isEmpty = true ↔
+      ∀ a, xs.values.toList.count a ≤ ys.values.toList.count a := by
   have hiff : (missingFrom xs ys).isEmpty = true ↔ (missingFrom xs ys).toList = [] := by
     cases h : missingFrom xs ys with
     | mk l => simp [Array.isEmpty, List.length_eq_zero_iff]
   rw [hiff]
   constructor
   · intro hnil a
-    have hcnt := missingFrom_count xs ys hxs hys a
+    have hcnt := missingFrom_count xs ys a
     rw [hnil, List.count_nil] at hcnt
     omega
   · intro h
     cases hl : (missingFrom xs ys).toList with
     | nil => rfl
     | cons a rest =>
-      have hcnt := missingFrom_count xs ys hxs hys a
+      have hcnt := missingFrom_count xs ys a
       rw [hl, List.count_cons_self] at hcnt
       have := h a
       omega
+
+theorem missingFrom_both_isEmpty_iff (xs ys : SortedFingerprints) :
+    ((missingFrom xs ys).isEmpty && (missingFrom ys xs).isEmpty) = true ↔
+      ∀ a, xs.values.toList.count a = ys.values.toList.count a := by
+  simp only [Bool.and_eq_true, missingFrom_isEmpty_iff]
+  constructor
+  · intro ⟨h1, h2⟩ a
+    exact Nat.le_antisymm (h1 a) (h2 a)
+  · intro h
+    exact ⟨fun a => Nat.le_of_eq (h a), fun a => Nat.le_of_eq (h a).symm⟩
 
 def baseRatchet : IO (Option (String × Std.HashMap String RatchetEntry)) := do
   for ref in ["origin/main", "main"] do
@@ -859,15 +924,15 @@ def checkComments (libDir : System.FilePath) (allFiles : Array String) :
       errs := errs.push (reject s!"{ratchetFile} lists {f}, which is not a Lean file Git's index lists")
   if let some (base, accepted) ← baseRatchet then
     for (f, entry) in ratchet.toList do
-      let added := missingFrom entry.fingerprints ((accepted.get? f).elim #[] (·.fingerprints))
+      let added := missingFrom entry.fingerprints ((accepted.get? f).elim .empty (·.fingerprints))
       unless added.isEmpty do
         errs := errs.push (reject s!"{ratchetFile} records for {f} {added.size} comment(s) that its copy at the merge base {base} does not record for that file, with the fingerprint(s) {" ".intercalate added.toList}; a file gains no comment")
   else
     IO.eprintln s!"NO-COMMENTS: no merge base of HEAD with origin/main or main holds {ratchetFile}, so its entries were compared with no earlier copy"
   for (f, comments) in allFiles.zip (← projectComments libDir allFiles) do
-    let actual := (comments.map (·.fingerprint)).qsort (· < ·)
+    let actual := sortFingerprints (comments.map (·.fingerprint))
     let lines := distinctCommentLines comments
-    let entry := ratchet.getD f { lines := 0, fingerprints := #[] }
+    let entry := ratchet.getD f { lines := 0, fingerprints := .empty }
     let added := missingFrom actual entry.fingerprints
     let gone := missingFrom entry.fingerprints actual
     unless added.isEmpty do
@@ -875,8 +940,8 @@ def checkComments (libDir : System.FilePath) (allFiles : Array String) :
         s!"{c.kind} L{c.startLine}-L{c.endLine} {c.fingerprint}"
       errs := errs.push (reject s!"{f} has {added.size} comment(s) that {ratchetFile} does not record for it, among: {", ".intercalate shown.toList}; a comment may be neither added nor edited, so delete them")
     unless gone.isEmpty do
-      let fix := if actual.isEmpty then "remove its entry"
-        else s!"set its comments to {actual.size} and its lines to {lines}, and remove the fingerprint(s) {" ".intercalate gone.toList}"
+      let fix := if actual.values.isEmpty then "remove its entry"
+        else s!"set its comments to {actual.values.size} and its lines to {lines}, and remove the fingerprint(s) {" ".intercalate gone.toList}"
       errs := errs.push (reject s!"{f} no longer has {gone.size} comment(s) that {ratchetFile} records for it; {fix}")
     if added.isEmpty && gone.isEmpty && lines != entry.lines then
       errs := errs.push (reject s!"{f} has its comments across {lines} line(s), not the {entry.lines} that {ratchetFile} records; set its lines to {lines}")
