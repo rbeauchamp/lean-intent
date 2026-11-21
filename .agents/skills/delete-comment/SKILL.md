@@ -31,11 +31,12 @@ Config/workflow `#` comments (`.no-mistakes.yaml`, `.github/workflows/check.yml`
 
 3. **Check open issues and doc cross-references first.**
    - List open issues (`gh issue list --state open --limit 50`) so you do not file duplicates for known defects.
-   - Check whether `README.md`, `AGENTS.md`, `.no-mistakes.yaml`, or `docs/*.md` explicitly cite any module comment you are about to delete:
+   - Check whether `README.md`, `AGENTS.md`, `.no-mistakes.yaml`, `.github/`, `docs/*.md`, or the published skills under `skills/` rely on any comment you are about to delete. A reliance need not use the word "comment": a document or skill that says a file "describes" or "states" something, or that hands the file itself to a reader, relies on that file's comments. So search for the word, and for each file of the batch by its file name and its module name, and read every hit:
      ```sh
-     git grep -n -i "comment" -- README.md AGENTS.md .no-mistakes.yaml docs/
+     git grep -n -i -e "comment" -e "docstring" -- README.md AGENTS.md .no-mistakes.yaml .github/ docs/ skills/
+     git grep -n -e "<File>.lean" -e "<Module.Name>" -- README.md AGENTS.md .no-mistakes.yaml .github/ docs/ skills/
      ```
-     Whenever a document cites a module comment (e.g., `docs/execution.md` citing `LeanIntent/Execution/Read.lean`, `docs/implementation.md` citing `LeanIntent/Implementation/Read.lean`, `docs/required-theorems.md` citing `LeanIntent/Required/Read.lean`), migrate the cited content into that doc or an ADR in `docs/adr/` and update every citation in the same PR so no statement becomes false.
+     Whenever a document or skill relies on a comment (e.g., `docs/execution.md` citing `LeanIntent/Execution/Read.lean`, `docs/implementation.md` citing `LeanIntent/Implementation/Read.lean`, `docs/required-theorems.md` citing `LeanIntent/Required/Read.lean`), migrate the cited content into that doc or an ADR in `docs/adr/` and update every citation in the same PR so no statement becomes false.
 
 4. **Read every target file in full and categorize every comment.**
    Read the actual surrounding Lean code before classifying each comment into exactly one category:
