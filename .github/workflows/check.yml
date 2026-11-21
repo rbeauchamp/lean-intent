@@ -1,11 +1,19 @@
-# Runs the repository's checks (tools/check.lean) on GitHub's machines when someone starts it by
-# hand. lean-intent has no CI: the local no-mistakes validation, whose Test step runs the same
-# checks (.no-mistakes.yaml, `commands.test`), is its merge gate, so no pull request or push starts
-# this workflow. A cloud session cannot run that validation; AGENTS.md says when one has started
-# this workflow by hand in its place.
+# Runs the repository's checks (tools/check.lean and empty tools/check.lean --tests) on GitHub's
+# machines for every pull request, every push to main, and manual workflow_dispatch runs. Together
+# with the local no-mistakes validation (.no-mistakes.yaml, `commands.test`), this enforces all
+# repository checks on every change.
+#
+# Security & merge-base hardening: runs with read-only contents permissions, persist-credentials:
+# false, full Git history (fetch-depth: 0 plus ensuring refs/remotes/origin/main exists so
+# NO-COMMENTS merge-base verification succeeds on both pull_request and push events), a
+# commit-SHA-pinned checkout action, and SHA-256 verification of the Lean release archive matching
+# lean-toolchain (without running an unverified curl | sh installer).
 name: check
 
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -18,10 +26,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Install elan (v4.2.4); lean-toolchain selects Lean
+          persist-credentials: false
+      - name: Ensure origin/main exists for NO-COMMENTS merge-base check
         run: |
-          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/227caca133724d5516bee25c2aeb3e609478f2d8/elan-init.sh | sh -s -- -y --default-toolchain none
-          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          set -euo pipefail
+          if ! git rev-parse --verify --quiet refs/remotes/origin/main^{commit} >/dev/null; then
+            git fetch --no-tags origin main:refs/remotes/origin/main
+          fi
+      - name: Install Lean matching lean-toolchain with SHA-256 verification
+        run: |
+          set -euo pipefail
+          v="$(sed -n 's/^leanprover\/lean4:v//p' lean-toolchain | tr -d '\r\n')"
+          if [ -z "$v" ]; then
+            echo "::error::Unexpected lean-toolchain content"
+            exit 1
+          fi
+          curl -sSfL --proto '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --retry-delay 2 \
+            -o "$RUNNER_TEMP/lean.zip" \
+            "https://github.com/leanprover/lean4/releases/download/v$v/lean-$v-linux.zip"
+          echo "92a996be487b48e1c2f2985be6b150490475c94d02f5a5e26665a9dab780902a  $RUNNER_TEMP/lean.zip" | sha256sum --check --strict
+          unzip -q "$RUNNER_TEMP/lean.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/lean-$v-linux/bin" >> "$GITHUB_PATH"
       # LAKE-CONFIG, LEAN-BUILD, LEAN-MODULE, AXIOMS, PROCESS, CODES and NO-COMMENTS: no other
       # package is required, every library module builds with no error and no warning, every Lean
       # file is a `module` file, every declaration rests only on Lean's axioms, the library's

@@ -6,7 +6,7 @@ Each part says whose it is: what the owner said, what the repository's own files
 
 ## The merge gate
 
-From the repository's files and its rules on GitHub. Every change lands through a pull request: `main` refuses a direct push, a force-push and a commit without a verified signature. The merge gate is the no-mistakes pipeline, configured in [`.no-mistakes.yaml`](.no-mistakes.yaml): the validation it runs on the owner's machine before a pull request opens. lean-intent has no CI.
+From the repository's files and its rules on GitHub. Every change lands through a pull request: `main` refuses a direct push, a force-push and a commit without a verified signature. Both [`.github/workflows/check.yml`](.github/workflows/check.yml) (CI on pull requests and pushes to `main`) and the local no-mistakes pipeline (configured in [`.no-mistakes.yaml`](.no-mistakes.yaml)) run `lean --run tools/check.lean` and verify that `lean --run tools/check.lean --tests` prints nothing.
 
 ## In a cloud session
 
@@ -36,7 +36,7 @@ The owner had given the session word to rewrite and rebase the four branches tha
 The next session should do the same for every pull request it opens or changes, before it calls it ready, unless the owner says otherwise:
 
 1. **The repository's check, from a fresh checkout that holds no `.lake` directory.** `lean --run tools/check.lean` must exit with status 0, and `lean --run tools/check.lean --tests` must exit with status 0 and print nothing to standard output. Run both whatever the change touches, as the pipeline does.
-2. **The `check` workflow on GitHub's machines.** [`.github/workflows/check.yml`](.github/workflows/check.yml) runs the same two commands and starts only by hand. Start it on the pull request's branch; GitHub records its result against the commit it ran on.
+2. **The `check` workflow on GitHub's machines.** [`.github/workflows/check.yml`](.github/workflows/check.yml) runs the same two commands automatically on pull requests and pushes to `main`, and can also be started manually with `workflow_dispatch`; GitHub records its result against the commit it ran on.
 3. **The description says what was done.** Under Accepted risk, the pull request's description says that the pipeline did not run and what stood in its place: the commit checked, the two commands with their results and the workflow run, as #68's does, and, since the owner's instruction, who reviewed and what was left unchecked. A result goes into the description once it has been observed, not before. Where the commit checked is the one that carries the description, the result cannot be in it: record it where the owner will read it, and say in the description where. For #70 that was #75.
 4. **The owner decides the merge.** Merge a pull request only when the owner asks for that pull request to be merged. If the owner asks while something here is not done or has failed, because the review has not reported, a step is still running or failed on the commit that would land, or `main` has moved since, say in the reply which, and merge only if the owner, told so, still asks. Write it into the description, under Accepted risk, before the merge: the description becomes the commit, and nothing written afterwards reaches it. What a review finds after such a merge goes to the owner when it reports.
 
@@ -63,4 +63,4 @@ Observed on 2026-11-17 and 2026-11-18, and what the session did about it:
 
 ## Building in a cloud environment
 
-Observed on 2026-11-17. Lean comes from elan, which reads [`lean-toolchain`](lean-toolchain). A cloud environment needs elan installed, by the pinned installer the `check` workflow uses, which GitHub serves, and network access to `release.lean-lang.org` and `releases.lean-lang.org`, where elan finds and downloads the toolchain. The check and the listing together took about eighteen minutes from a fresh checkout on a four-core cloud machine, and eleven to thirteen on GitHub's.
+Observed on 2026-11-17 (updated 2026-11-21). [`lean-toolchain`](lean-toolchain) pins the Lean release (`v4.36.0`). [`.github/workflows/check.yml`](.github/workflows/check.yml) installs the SHA-256-verified Linux release archive matching [`lean-toolchain`](lean-toolchain) directly from GitHub Releases; a cloud environment using `elan` instead needs network access to `release.lean-lang.org` and `releases.lean-lang.org`. The check and the listing together took about eighteen minutes from a fresh checkout on a four-core cloud machine, and eleven to thirteen on GitHub's.

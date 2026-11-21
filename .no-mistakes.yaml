@@ -119,13 +119,12 @@ test:
         exit "$status"
       fi
 
-# The merge gate. lean-intent has no CI: on 2026-10-28 the owner made the validation no-mistakes
-# runs before a pull request opens the repository's merge gate, in place of GitHub Actions, so the
-# checks CI ran on GitHub's machines run on the owner's machine instead. `no_ci` declares that a
-# pull request with no checks has nothing pending; a check the forge does report is still waited
-# on. no-mistakes honours `commands`, `no_ci` and `build_outputs` only from the copy of this file
-# on the default branch.
-no_ci: true
+# The merge gate. On 2026-10-28 the owner temporarily set `no_ci: true` so local no-mistakes
+# validation acted as the sole merge gate without PR-triggered CI. On 2026-11-21 the owner enabled
+# PR-triggered GitHub Actions CI in `.github/workflows/check.yml` (`pull_request` and `push` to
+# `main`) and superseded `no_ci: true`; `no_ci: true` is therefore removed so pull requests wait for
+# CI alongside local `commands.test` validation. no-mistakes honours `commands`, `no_ci` and
+# `build_outputs` only from the copy of this file on the default branch.
 
 # The Test step runs this command first, in the run's own checkout of the change it validates, and
 # parks when it exits with any status but 0. It runs every check the repository has, never a part

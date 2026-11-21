@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability privately
+    url: https://github.com/rbeauchamp/lean-intent/security/advisories/new
+    about: Use GitHub private vulnerability reporting for soundness, check/audit bypass, or security flaws (see SECURITY.md).
+  - name: Contributor guide
+    url: https://github.com/rbeauchamp/lean-intent/blob/main/CONTRIBUTING.md
+    about: See CONTRIBUTING.md and README.md for build checks, Lean module/comment/zero-test rules, and PR conventions.
