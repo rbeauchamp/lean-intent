@@ -32,8 +32,10 @@ def trackedLeanFiles : IO (Array String) := do
   let out ← git #["ls-files", "-z", "--", "*.lean"]
   return ((out.splitOn "\x00").filter (· ≠ "")).toArray
 
+def isToolFile (file : String) : Bool := file.startsWith "tools/"
+
 def libraryFiles : IO (Array String) :=
-  return (← trackedLeanFiles).filter (!·.startsWith "tools/")
+  return (← trackedLeanFiles).filter (!isToolFile ·)
 
 def moduleNames (files : Array String) : IO (Array Name) := do
   let cwd ← IO.currentDir
@@ -463,58 +465,45 @@ def checkSlice (fileMap : FileMap) (startPos stopPos : String.Pos.Raw)
   else
     .ok acc
 
-def checkLeading (fileMap : FileMap) (info : SourceInfo) (acc : CommentAcc) :
-    Except String CommentAcc :=
-  match info with
-  | .original leading _ _ _ =>
-    if leading.startPos < leading.stopPos then scanTrivia fileMap leading acc else .ok acc
-  | _ => .ok acc
-
-def checkTrailing (fileMap : FileMap) (info : SourceInfo) (acc : CommentAcc) :
-    Except String CommentAcc :=
-  match info with
-  | .original _ _ trailing _ =>
-    if trailing.startPos < trailing.stopPos then scanTrivia fileMap trailing acc else .ok acc
-  | _ => .ok acc
-
-def checkInfo (fileMap : FileMap) (info : SourceInfo) (acc : CommentAcc) :
-    Except String CommentAcc := do
-  let acc ← checkLeading fileMap info acc
-  checkTrailing fileMap info acc
-
-partial def walkSyntax (fileMap : FileMap) (stx : Syntax) (acc : CommentAcc) :
-    Except String CommentAcc := do
-  match stx with
-  | .missing => return acc
-  | .atom info _ => checkInfo fileMap info acc
-  | .ident info _ _ _ => checkInfo fileMap info acc
-  | .node info k args =>
-    let acc ← checkInfo fileMap info acc
-    if k == ``Parser.Command.docComment || k == ``Parser.Command.plainDocComment ||
-       k == ``Parser.Command.moduleDoc then
-      let kind := if k == ``Parser.Command.moduleDoc then "moddoc" else "doc"
-      let acc ← match stx.getPos?, stx.getTailPos? with
-        | some s, some e => recordSpan fileMap kind s e acc
-        | _, _ => .error s!"{kind} node has no source position"
-      let acc ← match stx.getHeadInfo? with
-        | some head => checkLeading fileMap head acc
-        | none => .ok acc
-      match stx.getTailInfo? with
-      | some tail => checkTrailing fileMap tail acc
-      | none => .ok acc
-    else
-      args.foldlM (fun acc arg => walkSyntax fileMap arg acc) acc
-
-def collectSyntax (fileMap : FileMap) (prevPos nextPos : String.Pos.Raw) (stx : Syntax)
+partial def collectSyntax (fileMap : FileMap) (prevPos nextPos : String.Pos.Raw) (stx : Syntax)
     (acc : CommentAcc) : Except String CommentAcc := do
-  match stx.getPos?, stx.getTailPos? with
-  | some startPos, some stopPos =>
-    let acc ← checkSlice fileMap prevPos startPos acc
-    let acc ← walkSyntax fileMap stx acc
-    checkSlice fileMap stopPos nextPos acc
-  | _, _ =>
-    let acc ← walkSyntax fileMap stx acc
-    checkSlice fileMap prevPos nextPos acc
+  unless prevPos ≤ nextPos && nextPos ≤ fileMap.source.rawEndPos do
+    throw "Lean's parser returned an invalid command range"
+  let (pos, acc) ← walk stx prevPos acc
+  checkSlice fileMap pos nextPos acc
+where
+  consume (pos start stop : String.Pos.Raw) (kind : Option String) (acc : CommentAcc) :
+      Except String (String.Pos.Raw × CommentAcc) := do
+    unless pos ≤ start && start ≤ stop && stop ≤ nextPos do
+      throw s!"source range [{start.byteIdx}, {stop.byteIdx}) outside unread bytes [{pos.byteIdx}, {nextPos.byteIdx})"
+    let acc ← checkSlice fileMap pos start acc
+    let acc ← match kind with
+      | some k => recordSpan fileMap k start stop acc
+      | none => pure acc
+    return (stop, acc)
+  walk (s : Syntax) (pos : String.Pos.Raw) (acc : CommentAcc) :
+      Except String (String.Pos.Raw × CommentAcc) := do
+    match s with
+    | .atom (.original _ start _ stop) _ | .ident (.original _ start _ stop) .. =>
+      consume pos start stop none acc
+    | .node _ k args =>
+      if k == ``Parser.Command.docComment || k == ``Parser.Command.plainDocComment ||
+          k == ``Parser.Command.moduleDoc then
+        let some (.original _ start ..) := s.getHeadInfo? | throw "docstring has no original start"
+        let some (.original _ _ _ stop) := s.getTailInfo? | throw "docstring has no original end"
+        consume pos start stop (some (if k == ``Parser.Command.moduleDoc then "moddoc" else "doc")) acc
+      else if k == choiceKind then
+        let some first := args[0]? | throw "empty parser choice"
+        let (stop, acc) ← walk first pos acc
+        let mut acc := acc
+        for alt in args[1...*] do
+          let (altStop, altAcc) ← walk alt pos acc
+          unless altStop == stop do throw "parser alternatives cover different source ranges"
+          acc := altAcc
+        return (stop, acc)
+      else
+        args.foldlM (fun (p, a) arg => walk arg p a) (pos, acc)
+    | _ => return (pos, acc)
 
 def sourceOrder (acc : CommentAcc) : Array Comment :=
   (acc.spans.toArray.qsort fun a b => a.1 < b.1).map (·.2.2)
@@ -564,17 +553,17 @@ unsafe def commentsOfModule (file : String) (mod : Name) : IO (Array Comment) :=
     throw <| IO.userError s!"{file}: Lean's frontend stopped reading at byte {prevPos.byteIdx}, before the file's end at byte {endPos.byteIdx}, so what follows cannot be read for comments"
   return sourceOrder acc
 
-unsafe def moduleComments (file libDir : String) : IO Unit := do
+unsafe def moduleComments (file : String) (dirs : SearchPath) : IO Unit := do
   let files ← trackedLeanFiles
   let mods ← moduleNames files
   let some mod := (files.zip mods).find? (·.1 == file) |>.map (·.2)
     | throw <| IO.userError s!"{file} is not a Lean file Git's index lists here"
-  initSearchPath (← findSysroot) [libDir]
+  initSearchPath (← findSysroot) dirs
   for c in ← commentsOfModule file mod do
     IO.println s!"{c.fingerprint} {c.kind} {c.startLine} {c.endLine}"
 
-def fileComments (libDir : System.FilePath) (file : String) : IO (Array Comment) := do
-  let lines ← runSelf #["--comments-module", file, libDir.toString]
+def fileComments (toolDir libDir : System.FilePath) (file : String) : IO (Array Comment) := do
+  let lines ← runSelf #["--comments-module", file, toolDir.toString, libDir.toString]
   lines.mapM fun line => do
     let unread : IO Comment :=
       throw <| IO.userError s!"{file}: --comments-module printed a line that is not a comment's: {line}"
@@ -586,13 +575,43 @@ def fileComments (libDir : System.FilePath) (file : String) : IO (Array Comment)
 
 def commentReaders : Nat := 3
 
-def projectComments (libDir : System.FilePath) (files : Array String) :
+partial def prepareToolImports (tools : Std.HashMap Name String) (out : System.FilePath)
+    (searchPath : SearchPath) (imports : Array Name) (visiting : List Name := []) : IO Unit := do
+  for mod in imports do
+    let some file := tools.get? mod | continue
+    if visiting.contains mod then
+      throw <| IO.userError s!"{file}: cycle in tracked tool imports"
+    let olean := modToFilePath out mod "olean"
+    if ← olean.pathExists then continue
+    prepareToolImports tools out searchPath (← importsOf file) (mod :: visiting)
+    if let some dir := olean.parent then IO.FS.createDirAll dir
+    let result ← IO.Process.output {
+      cmd := "lean", args := #["-o", olean.toString, file],
+      env := #[("LEAN_PATH", some searchPath.toString)] }
+    unless result.exitCode == 0 do
+      throw <| IO.userError s!"{file}: could not build imported tool:\n{result.stdout}{result.stderr}"
+
+def projectComments (libDir : System.FilePath) (allFiles : Array String)
+    (target? : Option String := none) :
     IO (Array (Array Comment)) := do
-  let readers ← (Array.range commentReaders).mapM fun k => IO.asTask (prio := .dedicated) <|
-    ((Array.range files.size).filter (· % commentReaders == k)).mapM fun i =>
-      fileComments libDir files[i]!
-  let parts ← readers.mapM fun reader => do IO.ofExcept (← IO.wait reader)
-  return (Array.range files.size).map fun i => parts[i % commentReaders]![i / commentReaders]!
+  let files ← match target? with
+    | none => pure allFiles
+    | some file => do
+      unless allFiles.contains file do
+        throw <| IO.userError s!"{file} is not a Lean file Git's index lists here"
+      pure #[file]
+  let toolFiles := allFiles.filter isToolFile
+  let tools := Std.HashMap.ofList (((← moduleNames toolFiles).zip toolFiles).toList)
+  IO.FS.withTempDir fun out => do
+    let libPath := libDir :: (← addSearchPathFromEnv [])
+    for file in files do
+      prepareToolImports tools out (out :: libPath) (← importsOf file)
+    let readers ← (Array.range commentReaders).mapM fun k => IO.asTask (prio := .dedicated) <|
+      ((Array.range files.size).filter (· % commentReaders == k)).mapM fun i =>
+        fileComments out libDir files[i]!
+    let results ← readers.mapM fun reader => do pure (← IO.wait reader)
+    let parts ← results.mapM IO.ofExcept
+    return (Array.range files.size).map fun i => parts[i % commentReaders]![i / commentReaders]!
 
 structure RatchetEntry where
   lines : Nat
@@ -721,7 +740,7 @@ def listComments (target? : Option String) : IO Unit := do
   let libDir := (← loadConfig).leanLibDir
   match target? with
   | some file =>
-    let comments ← fileComments libDir file
+    let comments := (← projectComments libDir allFiles (some file))[0]!
     IO.println s!"{file}: {comments.size} comment(s), {distinctCommentLines comments} line(s)"
     for c in comments do
       IO.println s!"  {c.kind} L{c.startLine}-L{c.endLine} {c.fingerprint}"
@@ -787,8 +806,8 @@ public unsafe def main (args : List String) : IO UInt32 := do
   | ["--tests-module", file, out] =>
     Check.moduleTests file out
     return 0
-  | ["--comments-module", file, libDir] =>
-    Check.moduleComments file libDir
+  | "--comments-module" :: file :: dir :: dirs =>
+    Check.moduleComments file ((dir :: dirs).map System.FilePath.mk)
     return 0
   | ["--comments"] =>
     Check.listComments none
@@ -801,4 +820,4 @@ public unsafe def main (args : List String) : IO UInt32 := do
     for e in errs do
       IO.println s!"[{e.rule}] {e.message}"
     return if errs.isEmpty then 0 else 1
-  | _ => throw <| IO.userError "usage: lean --run tools/check.lean [--tests | --tests-module <file> <out> | --comments [<file>] | --comments-module <file> <libDir>]"
+  | _ => throw <| IO.userError "usage: lean --run tools/check.lean [--tests | --tests-module <file> <out> | --comments [<file>] | --comments-module <file> <searchDir>...]"
