@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Core modules (`LeanIntent/Record.lean`, `LeanIntent/Refinement.lean`, `LeanIntent/Answers.lean`, `LeanIntent/Explain.lean`, `LeanIntent/Generic.lean`, `LeanIntent/Progress.lean`, `LeanIntent/Confirmation/Read.lean`) and worked examples (`LeanIntentExamples/Sorting.lean`, `LeanIntentExamples/Transfer.lean`, `LeanIntentExamples/Answers.lean`, `LeanIntentExamples/Cone.lean`) held non-obvious semantic and specification invariants in comments that go beyond what their Lean types alone display.
+Core modules (`LeanIntent/Record.lean`, `LeanIntent/Refinement.lean`, `LeanIntent/Answers.lean`, `LeanIntent/Explain.lean`, `LeanIntent/Generic.lean`, `LeanIntent/Progress.lean`, `LeanIntent/Confirmation/Read.lean`) and worked examples (`LeanIntentExamples/Sorting.lean`, `LeanIntentExamples/Transfer.lean`, `LeanIntentExamples/Answers.lean`, `LeanIntentExamples/Cone.lean`) held non-obvious semantic and specification invariants in comments removed in Wave 1 that go beyond what their Lean types alone display.
 
 ## Decision
 
@@ -34,4 +34,4 @@ Core modules (`LeanIntent/Record.lean`, `LeanIntent/Refinement.lean`, `LeanInten
 
 ## Consequences
 
-- Each invariant above stays documented beside `docs/intent-record.md`, `docs/refinement.md`, `docs/answers.md`, and `docs/cone-exclusion.md` without cluttering `.lean` files.
+- In Wave 1, `Record.lean`, `Refinement.lean`, `Answers.lean`, `Explain.lean`, `Generic.lean`, `Progress.lean`, and `LeanIntentExamples/` (`Sorting.lean`, `Transfer.lean`, `Answers.lean`, `Cone.lean`) are cleared to zero comments and `undeclaredIn`'s docstring is removed from `Confirmation/Read.lean`, with each invariant above documented here beside `docs/intent-record.md`, `docs/refinement.md`, `docs/answers.md`, and `docs/cone-exclusion.md`. Remaining docstrings in `Confirmation/Read.lean` stay tracked in `tools/comment-ratchet.json` for a later drain wave.

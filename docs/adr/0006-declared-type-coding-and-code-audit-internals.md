@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-The declared-type coding pipeline spans `LeanIntent/Codes.lean`, `LeanIntent/Clocks.lean`, `LeanIntent/Declared.lean`, `LeanIntent/Declared/Handler.lean`, and `LeanIntent/CodeAudit.lean`. Several non-obvious module-system, kernel-reduction, security, and performance decisions were previously carried only in inline `--` comments and stale docstrings.
+The declared-type coding pipeline spans `LeanIntent/Codes.lean`, `LeanIntent/Clocks.lean`, `LeanIntent/Declared.lean`, `LeanIntent/Declared/Handler.lean`, and `LeanIntent/CodeAudit.lean`. Several non-obvious module-system, kernel-reduction, security, and performance decisions were carried in inline `--` comments, drained comments from `Declared.lean`, and docstrings scheduled for removal.
 
 ## Decision
 
@@ -41,4 +41,4 @@ The declared-type coding pipeline spans `LeanIntent/Codes.lean`, `LeanIntent/Clo
 
 ## Consequences
 
-- Each non-obvious kernel/MetaM invariant and performance choice is preserved here while inline `--` comments and stale pre-#50/#55 docstrings are deleted from `Declared/Handler.lean`, `CodeAudit.lean`, `Codes.lean`, and `Clocks.lean`.
+- In Wave 1, `Declared.lean` is cleared to zero comments and inline `--` comments and stale pre-#50/#55 docstrings are deleted from `Declared/Handler.lean`, `CodeAudit.lean`, `Codes.lean`, and `Clocks.lean`, preserving each non-obvious kernel/MetaM invariant and performance choice here; the remaining docstrings in those four files stay tracked in `tools/comment-ratchet.json` for later drain waves.

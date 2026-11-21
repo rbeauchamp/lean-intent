@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-The term-printing and rendering stack (`LeanIntent/Print/Printable.lean`, `LeanIntent/Print/Canon.lean`, `LeanIntent/Print/Meaning.lean`, `LeanIntent/Render.lean`, `LeanIntent/Render/Text.lean`) relies on several non-obvious proof-architecture and MetaM environment invariants that were previously recorded in comments.
+The term-printing and rendering stack (`LeanIntent/Print/Printable.lean`, `LeanIntent/Print/Canon.lean`, `LeanIntent/Print/Meaning.lean`, `LeanIntent/Render.lean`, `LeanIntent/Render/Text.lean`) relies on several non-obvious proof-architecture and MetaM environment invariants recorded in comments removed in Wave 1 (all comments from `Print/Printable.lean`, `Print/Canon.lean`, `Print/Meaning.lean`, and `Render.lean`, plus the plain `--` comments and `elaboratesTo` docstring from `Render/Text.lean`).
 
 ## Decision
 
@@ -34,4 +34,4 @@ The term-printing and rendering stack (`LeanIntent/Print/Printable.lean`, `LeanI
 
 ## Consequences
 
-- Printing, canonicalization, and rendering internals are documented in one place alongside `docs/rendering.md`, without inline comments in `Print/` or `Render/Text.lean`.
+- In Wave 1, `Print/Printable.lean`, `Print/Canon.lean`, `Print/Meaning.lean`, and `Render.lean` are cleared to zero comments, and the plain `--` comments and `elaboratesTo` docstring are removed from `Render/Text.lean`, with these decisions documented here alongside `docs/rendering.md`. Remaining docstrings in `Print.lean`, `Print/RoundTrip.lean`, `Print/Term.lean`, `Print/Token.lean`, and `Render/Text.lean` (including `Render/Text.lean`'s module docstring) stay tracked in `tools/comment-ratchet.json` for later drain waves.

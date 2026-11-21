@@ -738,17 +738,95 @@ def parseRatchet (source raw : String) : IO (Std.HashMap String RatchetEntry) :=
     map := map.insert file { lines, fingerprints }
   return map
 
-def missingFrom (xs ys : Array String) : Array String := Id.run do
-  let mut out : Array String := #[]
-  let mut j := 0
-  for x in xs do
-    while j < ys.size && ys[j]! < x do
-      j := j + 1
-    if j < ys.size && ys[j]! == x then
-      j := j + 1
-    else
-      out := out.push x
-  return out
+def missingFromListAux (acc : List String) : List String → List String → List String
+  | [], _ => acc.reverse
+  | xs, [] => acc.reverse ++ xs
+  | x :: xs, y :: ys =>
+    if y < x then missingFromListAux acc (x :: xs) ys
+    else if y == x then missingFromListAux acc xs ys
+    else missingFromListAux (x :: acc) xs (y :: ys)
+termination_by xs ys => xs.length + ys.length
+
+def missingFrom (xs ys : Array String) : Array String :=
+  (missingFromListAux [] xs.toList ys.toList).toArray
+
+theorem count_eq_zero_of_lt_all {l : List String} {a : String} (h : ∀ z ∈ l, a < z) :
+    l.count a = 0 :=
+  List.count_eq_zero.mpr fun hm => Std.lt_irrefl (h a hm)
+
+theorem missingFromListAux_count (acc xs ys : List String)
+    (hxs : xs.Pairwise (· ≤ ·)) (hys : ys.Pairwise (· ≤ ·)) (a : String) :
+    (missingFromListAux acc xs ys).count a = acc.count a + (xs.count a - ys.count a) := by
+  match xs, ys with
+  | [], _ =>
+    simp [missingFromListAux]
+  | x :: xs, [] =>
+    simp [missingFromListAux]
+  | x :: xs, y :: ys =>
+    rw [missingFromListAux]
+    have ⟨hx, hxs'⟩ := List.pairwise_cons.mp hxs
+    have ⟨hy, hys'⟩ := List.pairwise_cons.mp hys
+    split
+    · rename_i hyx
+      rw [missingFromListAux_count acc (x :: xs) ys hxs hys' a]
+      by_cases hay : y = a
+      · subst hay
+        have h0 : (x :: xs).count y = 0 := count_eq_zero_of_lt_all fun z hz => by
+          rcases List.mem_cons.mp hz with rfl | hz
+          · exact hyx
+          · exact Std.lt_of_lt_of_le hyx (hx z hz)
+        simp [h0]
+      · simp [List.count_cons_of_ne hay]
+    · rename_i hnyx
+      split
+      · rename_i heq
+        have hyx : y = x := eq_of_beq heq
+        subst hyx
+        rw [missingFromListAux_count acc xs ys hxs' hys' a]
+        by_cases hax : y = a
+        · subst hax
+          simp
+        · simp [List.count_cons_of_ne hax]
+      · rename_i hneq
+        have hne : x ≠ y := fun h => hneq (beq_iff_eq.mpr h.symm)
+        have hxy : x < y := Std.lt_iff_le_and_ne.mpr ⟨Std.not_lt.mp hnyx, hne⟩
+        rw [missingFromListAux_count (x :: acc) xs (y :: ys) hxs' hys a]
+        by_cases hax : x = a
+        · subst hax
+          have h0 : (y :: ys).count x = 0 := count_eq_zero_of_lt_all fun z hz => by
+            rcases List.mem_cons.mp hz with rfl | hz
+            · exact hxy
+            · exact Std.lt_of_lt_of_le hxy (hy z hz)
+          simp [h0]
+          omega
+        · simp [List.count_cons_of_ne hax]
+termination_by xs.length + ys.length
+
+theorem missingFrom_count (xs ys : Array String)
+    (hxs : xs.toList.Pairwise (· ≤ ·)) (hys : ys.toList.Pairwise (· ≤ ·)) (a : String) :
+    (missingFrom xs ys).toList.count a = xs.toList.count a - ys.toList.count a := by
+  simp [missingFrom, missingFromListAux_count [] xs.toList ys.toList hxs hys a]
+
+theorem missingFrom_isEmpty_iff (xs ys : Array String)
+    (hxs : xs.toList.Pairwise (· ≤ ·)) (hys : ys.toList.Pairwise (· ≤ ·)) :
+    (missingFrom xs ys).isEmpty = true ↔ ∀ a, xs.toList.count a ≤ ys.toList.count a := by
+  have hiff : (missingFrom xs ys).isEmpty = true ↔ (missingFrom xs ys).toList = [] := by
+    cases h : missingFrom xs ys with
+    | mk l => simp [Array.isEmpty, List.length_eq_zero_iff]
+  rw [hiff]
+  constructor
+  · intro hnil a
+    have hcnt := missingFrom_count xs ys hxs hys a
+    rw [hnil, List.count_nil] at hcnt
+    omega
+  · intro h
+    cases hl : (missingFrom xs ys).toList with
+    | nil => rfl
+    | cons a rest =>
+      have hcnt := missingFrom_count xs ys hxs hys a
+      rw [hl, List.count_cons_self] at hcnt
+      have := h a
+      omega
 
 def baseRatchet : IO (Option (String × Std.HashMap String RatchetEntry)) := do
   for ref in ["origin/main", "main"] do
