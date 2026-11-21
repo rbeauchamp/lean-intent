@@ -23,7 +23,7 @@ The term-printing and rendering stack (`LeanIntent/Print/Printable.lean`, `LeanI
 
 - `meaning` reuses `LeanIntent.Cone.RefersTo` / `declRefs` directly rather than duplicating dependency rules: theorem proofs, opaque constant values, and mutual blocks of definitions/theorems/opaques are excluded because Lean's kernel ignores them.
 - `refsVia` substitutes a recursive definition's unfolding equation (plus its type) for its compiled body so collected definitions reflect what the rendered equation mentions.
-- `ctor_mem`, `induct_mem`, `block_mem`, and `meaning_unknown` establish completeness for constructors, inductives, recursor blocks, and unknown-name refusals. Replacing the hardcoded `2 ^ 64` worklist fuel and O(n) membership scan in `collect` is tracked in #88.
+- `ctor_mem`, `induct_mem`, and `block_mem` prove that when `meaning` succeeds (`.ok out`), every unstopped constructor (`stop k = false`) of an included inductive, the unstopped inductive (`stop v.induct = false`) of an included constructor, and every unstopped member (`stop i = false`) of an included recursor's mutual block is in `out`; `meaning_unknown` proves the one-way soundness of an unknown-name refusal (any name reported in `.error (.unknown c)` is reachable and missing in `lookup`, while `collect` returns the first missing name it encounters immediately). Replacing the hardcoded `2 ^ 64` worklist fuel and O(n) membership scan in `collect` is tracked in #88.
 
 ### Rendering MetaM invariants (`LeanIntent/Render/Text.lean`)
 

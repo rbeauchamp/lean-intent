@@ -43,7 +43,7 @@ Config/workflow `#` comments (`.no-mistakes.yaml`, `.github/workflows/check.yml`
    - **Tautology**: simply repeats what is already visible from the code, types, names, or theorem statements (including trivial field/constructor docstrings and `/-! ## ... -/` section dividers).
      - **Action**: delete the comment.
    - **Stale**: references nonexistent or renamed symbols, removed modules, outdated Lean behavior, or claims that contradict the code.
-     - **Action**: delete the comment. If the stale claim also appears in `docs/*.md`, correct it there too; if it masked a real code defect, file an issue.
+     - **Action**: delete the comment. If the stale claim also appears in `docs/*.md`, correct it there too.
    - **Excuse**: rationalizes a hacky, fragile, arbitrary, or corner-cutting implementation (magic bounds, silent skips, stringly-typed sentinels, unnecessary `import all`, workarounds) instead of fixing it properly.
      - **Action**: delete the comment AND file a GitHub issue (`gh issue create --label bug` or `--label enhancement`, writing one line per paragraph and list item with no hard wrapping, citing exact file/lines, failed property, contract, and assumption), unless an open issue already tracks the exact defect (in which case reference it in your report).
    - **Decision Record**: documents an important, non-obvious architectural, semantic, security, performance, or Trusted Computing Base (TCB) decision not visible from reading the code alone (including source-verified Lean toolchain facts needed for upgrades).

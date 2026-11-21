@@ -495,7 +495,7 @@ def containsOpener (raw : String) : Bool :=
 def crossesBoundary (raw : String) (next : Char) : Bool :=
   next == '-' && (raw.endsWith "-" || raw.endsWith "/")
 
-def matchesBoundarySymbol (ctx : Parser.ParserContextCore) (token : Syntax) : Bool := Id.run do
+def matchesRegisteredSymbol (ctx : Parser.ParserContextCore) (token : Syntax) : Bool := Id.run do
   let leaf := match token with
     | .node _ _ #[arg] => arg
     | _ => token
@@ -506,8 +506,9 @@ def matchesBoundarySymbol (ctx : Parser.ParserContextCore) (token : Syntax) : Bo
 
 def checkToken (ctx : Parser.ParserContextCore) (token : Syntax) (raw : String) (next : Char)
     (start : String.Pos.Raw) : Except String Unit :=
-  if (containsOpener raw || (crossesBoundary raw next && !matchesBoundarySymbol ctx token)) &&
-      !matchesLiteralToken ctx.env token raw then
+  if (containsOpener raw || crossesBoundary raw next) &&
+      !matchesLiteralToken ctx.env token raw &&
+      !matchesRegisteredSymbol ctx token then
     .error s!"cannot account for a possible comment in the parser token at byte {start.byteIdx}"
   else .ok ()
 
@@ -515,7 +516,8 @@ theorem checkToken_ok_iff (ctx : Parser.ParserContextCore) (token : Syntax) (raw
     (start : String.Pos.Raw) :
     checkToken ctx token raw next start = .ok () ↔
       matchesLiteralToken ctx.env token raw = true ∨
-      (containsOpener raw = false ∧ (crossesBoundary raw next = false ∨ matchesBoundarySymbol ctx token = true)) := by
+      matchesRegisteredSymbol ctx token = true ∨
+      (containsOpener raw = false ∧ crossesBoundary raw next = false) := by
   simp only [checkToken]
   split <;> simp_all <;> grind
 
@@ -622,12 +624,12 @@ unsafe def commentsOfModule (file : String) (mod : Name) : IO (Array Comment) :=
     throw <| IO.userError s!"{file}: Lean's frontend stopped reading at byte {prevPos.byteIdx}, before the file's end at byte {endPos.byteIdx}, so what follows cannot be read for comments"
   return sourceOrder acc
 
-unsafe def moduleComments (file : String) (dirs : SearchPath) : IO Unit := do
+unsafe def moduleComments (file : String) (toolDir libDir : System.FilePath) : IO Unit := do
   let files ← trackedLeanFiles
   let mods ← moduleNames files
   let some mod := (files.zip mods).find? (·.1 == file) |>.map (·.2)
     | throw <| IO.userError s!"{file} is not a Lean file Git's index lists here"
-  initSearchPath (← findSysroot) dirs
+  initSearchPath (← findSysroot) [toolDir, libDir]
   for c in ← commentsOfModule file mod do
     IO.println s!"{c.fingerprint} {c.kind} {c.startLine} {c.endLine}"
 
@@ -875,8 +877,8 @@ public unsafe def main (args : List String) : IO UInt32 := do
   | ["--tests-module", file, out] =>
     Check.moduleTests file out
     return 0
-  | "--comments-module" :: file :: dir :: dirs =>
-    Check.moduleComments file ((dir :: dirs).map System.FilePath.mk)
+  | ["--comments-module", file, toolDir, libDir] =>
+    Check.moduleComments file toolDir libDir
     return 0
   | ["--comments"] =>
     Check.listComments none
@@ -889,4 +891,4 @@ public unsafe def main (args : List String) : IO UInt32 := do
     for e in errs do
       IO.println s!"[{e.rule}] {e.message}"
     return if errs.isEmpty then 0 else 1
-  | _ => throw <| IO.userError "usage: lean --run tools/check.lean [--tests | --tests-module <file> <out> | --comments [<file>] | --comments-module <file> <searchDir>...]"
+  | _ => throw <| IO.userError "usage: lean --run tools/check.lean [--tests | --tests-module <file> <out> | --comments [<file>] | --comments-module <file> <toolDir> <libDir>]"
