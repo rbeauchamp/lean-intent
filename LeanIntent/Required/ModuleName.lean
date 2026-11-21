@@ -23,7 +23,7 @@ name for any other:
   refused, and so is one with an empty stretch or a stretch that starts with a digit, `_` or `'`
   (`moduleName?_isPart`).
 
-That the name given is the name Lean printed is argued from Lean's source at v4.35.0, not proved
+That the name given is the name Lean printed is argued from Lean's source at v4.36.0, not proved
 here: `LeanIntent.Required.Read`'s module comment sets the argument out with the lines it reads.
 -/
 

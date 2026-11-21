@@ -38,7 +38,7 @@ it reads the code the build stored.
 
 ## The IR the build stored
 
-The reading relies on these facts about Lean v4.35.0, read from its source:
+The reading relies on these facts about Lean v4.36.0, read from its source:
 
 * `IR.findEnvDecl` (`Lean/Compiler/IR/CompilerM.lean` 142-143) looks a declaration up by its module
   index, in that module's IR entries first and then in its `.olean` entries
@@ -46,20 +46,20 @@ The reading relies on these facts about Lean v4.35.0, read from its source:
   extension's own state is empty (its `addImportedFn`, `CompilerM.lean` 85), so only what the
   modules stored is found.
 * A file outside Lean's module system stores every IR declaration in its `.olean` (`CompilerM.lean`
-  83-110, the `else entries` branch), which `importModules` reads as its IR
-  (`ImportedModule.irData?`, `Lean/Environment.lean` 2046-2054).
+  83-111, the `else entries` branch), which `importModules` reads as its IR
+  (`ImportedModule.irData?`, `Lean/Environment.lean` 2410-2418).
 * A file of the module system keeps only opaque externs in its `.olean`, and the bodies in its `.ir`
-  (`CompilerM.lean` 91-107 and 112-140, `Environment.lean` 1902-1917). `importModules` at its
-  default level, `private`, loads the `.ir` of every module it imports (`Environment.lean` 2108-2115
-  and 2178-2193). Where a module's `.ir.sig` is missing, it reads the `.olean`'s entries as the IR
-  (`Environment.lean` 2094-2100), whose opaque externs have no callees, so the walk can only find
-  fewer reaches; where the `.ir.sig` is present and the `.ir` missing, the import fails.
+  (`CompilerM.lean` 93-110 and 120-140, `Environment.lean` 2243-2259). `importModules` at its
+  default level, `private`, loads the `.ir` of every module it imports (`Environment.lean` 2472-2479,
+  2542-2557 and 2808-2819). Where a module's `.ir.sig` is missing, it reads the `.olean`'s entries
+  as the IR (`Environment.lean` 2458-2464), whose opaque externs have no callees, so the walk can
+  only find fewer reaches; where the `.ir.sig` is present and the `.ir` missing, the import fails.
 * A declaration the environment holds no constant of gets its module index from the IR's
-  `extraConstNames` (`CompilerM.lean` 229-233; `Environment.lean` 1884, 1899 and 2346-2348), so
+  `extraConstNames` (`CompilerM.lean` 229-233; `Environment.lean` 2225, 2240 and 2710-2712), so
   `Environment.getModuleIdxFor?` attributes it to the module whose IR entries hold it, the lookup
-  `findEnvDecl` makes. `Environment.contains` (`Environment.lean` 1146-1147) reads constants only.
+  `findEnvDecl` makes. `Environment.contains` (`Environment.lean` 1306-1307) reads constants only.
 * The IR's syntax is closed: `IR.Expr` (`Lean/Compiler/IR/Basic.lean` 177-206), `IR.Alt` and
-  `IR.FnBody` (214-245) and `IR.Decl` (352-355). `bodyRefs` and `irRefs` match every constructor
+  `IR.FnBody` (214-246) and `IR.Decl` (354-357). `bodyRefs` and `irRefs` match every constructor
   without a wildcard, so a constructor a later toolchain adds fails the build of this module.
 
 ## The implementation's compiled code
@@ -100,7 +100,7 @@ What it trusts: that the IR the build stored is the IR it emitted as C, both wri
 `lean` run, and that the C compiler and Lean's runtime run that code; that an IR body calls only
 declarations of modules its own module's imports reach, on which pruning rests; and that a
 declaration the environment holds no constant of, named as reduce-arity names its copy of `c`, is
-that copy, read at Lean v4.35.0 (`ReduceArity.lean` 172) and to be read again at each upgrade of the
+that copy, read at Lean v4.36.0 (`ReduceArity.lean` 172) and to be read again at each upgrade of the
 toolchain. Also trusted: the kernel's reduction, as `LeanIntent.Implementation.Read` trusts it; that
 the executables given are the project's, each with the root module Lake builds it from; and that the
 modules given are all the project's, as the other readers trust. An executable whose root module

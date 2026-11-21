@@ -81,9 +81,9 @@ theorem proofSafe_iff (ci : ConstantInfo) : proofSafe ci = true ↔
   | defnInfo v => cases h : v.safety <;> simp [proofSafe, h]
   | _ => simp [proofSafe]
 
-/-- The name of the imported module at index `i`, read directly from `header.modules` without
-allocating `header.moduleNames` (`header.modules.map (·.module)` in Lean v4.35.0's
-`src/Lean/Environment.lean`, lines 182 to 183). -/
+/-- The name of the imported module at index `i`, read directly from `header.modules` (in Lean
+v4.36.0's `src/Lean/Environment.lean`, line 165, `header.moduleNames` is a field initialized to
+`modules.map (·.module)`). -/
 @[expose] def moduleName? (header : EnvironmentHeader) (i : Nat) : Option Name :=
   header.modules[i]?.map (·.module)
 
@@ -98,12 +98,12 @@ and a safe declaration cannot refer to one, as Lean's kernel refuses
 (`type_checker::infer_constant`).
 
 A constant is of the module Lean records for its name (`Environment.const2ModIdx`), and of the
-current one when Lean records none. Lean v4.35.0 records a module for a name only from that
+current one when Lean records none. Lean v4.36.0 records a module for a name only from that
 module's `constNames` and from the `extraConstNames` of the data it reads as the module's IR
-(`finalizeImport`, `src/Lean/Environment.lean`, lines 2333 to 2348), which is the module's own data
+(`finalizeImport`, `src/Lean/Environment.lean`, lines 2697 to 2712), which is the module's own data
 or its `.ir`, whose `extraConstNames` are the names of the IR declarations it stores
-(`ImportedModule.irData?`, lines 2046 to 2054; `mkIRData`, lines 1892 to 1900 and `src/LeanIR.lean`,
-lines 32 to 48). So the names read for a module given are its data's `constNames` and
+(`ImportedModule.irData?`, lines 2410 to 2418; `mkIRData`, lines 2233 to 2241 and `src/LeanIR.lean`,
+lines 41 to 57). So the names read for a module given are its data's `constNames` and
 `extraConstNames` and its stored IR declarations' names, each kept only where Lean records that
 module for it, and each constant is found once. An environment that reads a module's `.ir.sig` as
 its IR, which only Lean's `leanir` makes, is outside this account. -/

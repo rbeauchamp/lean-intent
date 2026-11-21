@@ -311,15 +311,13 @@ partial def nodes (stx : Syntax) (acc : Array Syntax) : Array Syntax :=
 
 
 /-- The Lean release whose elaborators `testTokens`, `otherTokens` and `nativeConfig` describe. They
-were read from Lean 4.34.1 and again from 4.35.0: 4.35.0's token table, with `Lean`, `Lake` and
-`Std` imported, holds the same 29 tokens that start with `#` and a letter as 4.34.1's; and the
-declarations of its modules under `Lean.Elab`, `Lean.Meta`, `Std` and `Lake` that use
-`evalTerm`, `evalExpr`, `evalConst` or `Meta.nativeEqTrue` differ from 4.34.1's only by one
-declaration moved to another module, by the configuration of the `constructor` tactic, which Lean
-evaluates to its value, and by the removal of `Meta.reduceBoolNative`, which served
-`Lean.reduceBool`, a constant 4.35.0 no longer has. The listing refuses to run under any other
+were read from Lean 4.34.1, from 4.35.0 and again from 4.36.0: 4.36.0's token table, with `Lean`,
+`Lake` and `Std` imported, holds the same 29 tokens that start with `#` and a letter as 4.35.0's;
+the declarations of its modules under `Lean.Elab`, `Lean.Meta`, `Std` and `Lake` that use
+`evalTerm`, `evalExpr`, `evalConst` or `Meta.nativeEqTrue` are unchanged from 4.35.0's; and
+`DecideConfig` and `decide`'s elaborator are unchanged. The listing refuses to run under any other
 release, whose elaborators they may not describe. -/
-def testsLean : String := "4.35.0"
+def testsLean : String := "4.36.0"
 
 /-- The tokens of the commands, terms and tactics of the pinned Lean whose verdict comes from
 running code on inputs the file chooses, rather than from Lean's elaborator and kernel checking
@@ -555,7 +553,7 @@ def boundQueries : List (Name × String) :=
 
 /-- The C functions of Lean's runtime that `PROCESS` refuses: those of `boundQueries`, and libuv's
 that say the same or what user and host the process runs as (`Std.Internal.UV.System`, read at Lean
-v4.35.0 by a search of every `extern` attribute for names holding `spawn`, `exec`, `fork`, `system`,
+v4.36.0 by a search of every `extern` attribute for names holding `spawn`, `exec`, `fork`, `system`,
 `getenv`, `environ`, `app_path`, `exe`, `current_dir`, `cwd`, `homedir`, `tmpdir`, `passwd`,
 `hostname` or `uname`). -/
 def processQueries : List String :=

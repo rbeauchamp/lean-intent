@@ -8,7 +8,7 @@ no constant of. `LeanIntent.Execution.Read` counts exactly one kind of them as a
 code: the copy that reduce-arity makes of it. Where a declaration `c` has a parameter its body does
 not use, reduce-arity names a copy of `c`'s body over the parameters it uses `c._redArg`, the name
 of `c` followed by the one component `_redArg`, and makes `c` a wrapper that calls it and that
-every caller inlines (Lean v4.35.0, `Lean/Compiler/LCNF/ReduceArity.lean` 156-205, lines 172 and
+every caller inlines (Lean v4.36.0, `Lean/Compiler/LCNF/ReduceArity.lean` 156-205, lines 172 and
 197). Calling `c._redArg` runs `c`'s code, so a polymorphic implementation, or one taking a proof,
 whose callers call only that copy, is reached through it. No other declaration the compiler makes is
 counted. A closed term the compiler extracts from a declaration's code is shared with every later

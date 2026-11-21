@@ -16,7 +16,7 @@ environment, that a declaration depends on no such attestation.
 
 * **What a declaration depends on** (`DependsOn`): what cone exclusion follows (`Cone.RefersTo`),
   and also a theorem's proof and an opaque constant's value, where an attestation can be written.
-  It holds everything Lean's `collectAxioms` follows at v4.35.0 (`Lean.Util.CollectAxioms`: a
+  It holds everything Lean's `collectAxioms` follows at v4.36.0 (`Lean.Util.CollectAxioms`: a
   declaration's type, the value of a definition, theorem or opaque constant, and an inductive
   type's constructors). `depRefs` lists it (`mem_depRefs`).
 * **Where an attestation can be** (`Follows`): a declaration whose module is the one that declares
@@ -81,7 +81,7 @@ What the theorems do not reach, and what is trusted:
   private constructor is the only rule that concludes it, and none of the three axioms proves a
   proposition without a proof of one equivalent to it.
 * That the declarations Lean generates for `Ty.Stands` that name the constructor are those
-  `generatedBy` lists, as observed of Lean v4.35.0. A release that generates another would make the
+  `generatedBy` lists, as observed of Lean v4.36.0. A release that generates another would make the
   audit refuse every declaration that reaches it, not accept one it should refuse.
 * That a declaration in a module that does not import the one declaring `Ty.Stands` cannot name the
   constructor, which follows from Lean's kernel checking each declaration in the environment of its
@@ -257,7 +257,7 @@ is a declaration of the module `env` is elaborating, which has no module index. 
   | some i => mods.contains i.toNat
   | none => true
 
-/-- The declarations Lean v4.35.0 generates for the inductive proposition `stands`, whose
+/-- The declarations Lean v4.36.0 generates for the inductive proposition `stands`, whose
 constructors take proofs of it, that name its constructors in their statements or values: its
 recursor `stands.rec`, `stands.casesOn` and `stands.recOn`, and the inductive type `stands.below`
 with its constructors, recursor and `casesOn`. A declaration counts only when the module that

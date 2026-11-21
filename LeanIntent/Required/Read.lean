@@ -24,19 +24,19 @@ read so:
 | the values that name required theorems | every such constant whose type so reduces to `LeanIntent.Required _` |
 | the deliverable such a value names | the second argument of that type, `d` of `@Required W d`, where it is a constant once its metadata is removed (`Expr.consumeMData`), and otherwise none |
 | what such a value lists | its value, reduced by `Render.readWhnf` through the kernel to `Required.mk`'s application, that application's third argument reduced to a list (`Render.listElems`), and each element reduced to `Proof.mk`'s application, whose second argument, the proof, is read as the value holds it: a constant once its metadata is removed, and otherwise a term; where Lean's elaborator abstracted a proof term into an auxiliary theorem of the value's own module, the value holds that theorem's constant, which is read as that theorem |
-| whether a listed constant is a theorem | the declaration of its name in the data of the module the environment records for it (`ownDeclaration`), a theorem exactly when that declaration is `ConstantInfo.thmInfo` with the type and universe parameters of the declaration the environment holds, which the value's entry was checked against; the environment's map of constants does not decide it, since Lean puts a later module's theorem there over an earlier module's axiom of the same type (`subsumesInfo` and `finalizeImport` in Lean v4.35.0's `src/Lean/Environment.lean`, lines 2269 to 2284 and 2333 to 2345) |
-| the module that declares a constant | for a deliverable, a value recording an implementation or a value of `Required`, the module in whose own data it was found, with an error where the environment holds another declaration under its name (`sameDeclaration`); for a listed constant, the module the environment records for the name (`Environment.getModuleIdxFor?`), the first in import order to declare it, provided that module's own data declares the name, and otherwise an error naming both, as where the module holds the name only as an auxiliary name of its compiled code (`const2ModIdx.insertIfNew`, lines 2345 and 2348 of the same file); a constant with no module index is declared in the file being elaborated |
+| whether a listed constant is a theorem | the declaration of its name in the data of the module the environment records for it (`ownDeclaration`), a theorem exactly when that declaration is `ConstantInfo.thmInfo` with the type and universe parameters of the declaration the environment holds, which the value's entry was checked against; the environment's map of constants does not decide it, since Lean puts a later module's theorem there over an earlier module's axiom of the same type (`subsumesInfo` and `finalizeImport` in Lean v4.36.0's `src/Lean/Environment.lean`, lines 2633 to 2648 and 2697 to 2709) |
+| the module that declares a constant | for a deliverable, a value recording an implementation or a value of `Required`, the module in whose own data it was found, with an error where the environment holds another declaration under its name (`sameDeclaration`); for a listed constant, the module the environment records for the name (`Environment.getModuleIdxFor?`), the first in import order to declare it, provided that module's own data declares the name, and otherwise an error naming both, as where the module holds the name only as an auxiliary name of its compiled code (`const2ModIdx.insertIfNew`, lines 2709 and 2712 of the same file); a constant with no module index is declared in the file being elaborated |
 | the module names the build lists | given by the caller; `queryModules` reads them from what `lake query --json` prints for `@/<library>:modules`, each line a JSON array of names, read by Lean's JSON parser, and each name decoded by `Required.moduleName?`, which gives a name only for a string of its closed form and for which distinct strings give distinct names (`Required.moduleName?_inj`); every other string is an error naming it |
 
 **Every module is read in full, or the check refuses to run.** `check` is an error in a `module`
 file. Where the file being elaborated is not one, Lean imports every module its imports reach, with
 everything each declares, whatever those modules' own imports say of visibility
-(`importModulesCore` in Lean v4.35.0's `src/Lean/Environment.lean`, lines 2121 to 2123 and 2183,
+(`importModulesCore` in Lean v4.36.0's `src/Lean/Environment.lean`, lines 2485 to 2487 and 2547,
 with the level `Elab.processHeaderCore` gives it, `src/Lean/Elab/Import.lean`, lines 150 to 159).
 Where it is a `module` file, Lean imports only what each module exports: a private value is absent,
 a theorem is shown as an axiom, and a module reached only through a private import is not loaded at
-all (lines 2125 to 2175, 2249 to 2252). A value of `Required` could then go unread, so the check
-does not run there (`Environment.header`'s `isModule`, which `finalizeImport` sets at line 2370).
+all (lines 2489 to 2539, 2613 to 2616). A value of `Required` could then go unread, so the check
+does not run there (`Environment.header`'s `isModule`, which `finalizeImport` sets at line 2735).
 
 **Every module the build lists must be imported**, or `check` is an error naming the first that is
 not: a deliverable in a module that is not imported would not be asked about.
@@ -49,7 +49,7 @@ declaration cannot refer to an unsafe or partial one, which Lean's kernel refuse
 
 ## Why the name `queryModules` gives is the name Lake printed
 
-Argued from Lean's source at v4.35.0, not proved here. Lake prints a module's name as Lean's
+Argued from Lean's source at v4.36.0, not proved here. Lake prints a module's name as Lean's
 `ToJson Name` writes it, the string `Name.toString` gives with its defaults
 (`src/Lean/Data/Json/FromToJson/Basic.lean`, lines 186 to 187; `src/Init/Data/ToString/Name.lean`,
 lines 123 to 127). Take a name `n` that Lean prints as a string `s` that `Required.moduleName?`

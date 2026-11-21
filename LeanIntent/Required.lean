@@ -72,8 +72,8 @@ The decisions this module makes, each on the owner's behalf:
   proposition; it then holds one of the two, the theorem where the other is an axiom, and records
   the name under the first of those modules in import order, as it records under a module the
   auxiliary names of that module's compiled code (`throwAlreadyImported`, `subsumesInfo` and
-  `finalizeImport` in Lean v4.35.0's `src/Lean/Environment.lean`, lines 2069 to 2072, 2269 to 2284
-  and 2333 to 2348). So the declaration the environment holds under a name need not be the one the
+  `finalizeImport` in Lean v4.36.0's `src/Lean/Environment.lean`, lines 2433 to 2436, 2633 to 2648
+  and 2697 to 2712). So the declaration the environment holds under a name need not be the one the
   recorded module made, and the reader takes each declaration from the recorded module's own data
   (`LeanIntent.Required.Read.ownDeclaration`): a name that module declares as an axiom is refused
   as not a theorem, whatever a module imported later proves under it, and a name that module does

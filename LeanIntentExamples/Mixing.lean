@@ -331,7 +331,12 @@ one place. These are 288 evaluations at a few words each. -/
 theorem table (i j : Place) : ∀ k : Fin 32,
     (∀ x ∈ probes, addDifference i j (candidate k) x = addDifference i j (candidate k) 0) →
       i = j ∧ candidate k = 0 := by
-  cases i <;> cases j <;> decide +kernel
+  have h : ∀ k : Fin 32,
+      probes.all (fun x => addDifference i j (candidate k) x == addDifference i j (candidate k) 0) = true →
+        i = j ∧ candidate k = 0 := by
+    cases i <;> cases j <;> decide +kernel
+  intro k hk
+  exact h k (List.all_eq_true.mpr fun x hx => beq_iff_eq.mpr (hk x hx))
 
 /-- Under addition, a difference that is constant means the same place and no shift. -/
 theorem rigid_add (i j : Place) (d : UInt64)
