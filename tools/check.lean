@@ -893,26 +893,74 @@ theorem missingFrom_both_isEmpty_iff (xs ys : SortedFingerprints) :
   · intro h
     exact ⟨fun a => Nat.le_of_eq (h a), fun a => Nat.le_of_eq (h a).symm⟩
 
-def baseRatchet : IO (Option (String × Std.HashMap String RatchetEntry)) := do
-  for ref in ["origin/main", "main"] do
-    let known ← IO.Process.output
-      { cmd := "git", args := #["rev-parse", "--verify", "--quiet", ref ++ "^{commit}"] }
-    unless known.exitCode == 0 do
-      continue
-    let merge ← IO.Process.output { cmd := "git", args := #["merge-base", "HEAD", ref] }
-    if merge.exitCode == 1 then
-      continue
-    unless merge.exitCode == 0 do
-      throw <| IO.userError s!"git merge-base HEAD {ref} failed:\n{merge.stderr}"
-    let base := merge.stdout.trimAscii.toString
-    let listed ← git #["ls-tree", "--full-tree", "--name-only", base, "--", ratchetFile]
-    if listed.trimAscii.toString.isEmpty then
-      return none
-    let source := s!"{base}:{ratchetFile}"
-    return some (base, ← parseRatchet source (← git #["show", source]))
-  return none
+def isHexOid (s : String) : Bool :=
+  s.length ≥ 40 && s.all fun c => c.isDigit || ('a' ≤ c && c ≤ 'f')
 
-def checkComments (libDir : System.FilePath) (allFiles : Array String) :
+def resolveBaseRef (baseRef? : Option String) : IO (String × String) := do
+  let lookup (ref : String) : IO (Option (String × String)) := do
+    if ref.isEmpty || ref.startsWith "-" then
+      throw <| IO.userError s!"NO-COMMENTS: invalid base ref {ref.quote}"
+    let known ← IO.Process.output
+      { cmd := "git", args := #["rev-parse", "--verify", "--quiet", "--end-of-options", ref ++ "^{commit}"] }
+    if known.exitCode == 0 then
+      let sha := known.stdout.trimAscii.toString
+      unless isHexOid sha do
+        throw <| IO.userError s!"NO-COMMENTS: git rev-parse returned an unexpected commit for {ref}: {sha.quote}"
+      return some (ref, sha)
+    else if known.exitCode == 1 then
+      return none
+    else
+      throw <| IO.userError s!"NO-COMMENTS: git rev-parse for {ref} failed:\n{known.stderr}"
+  match baseRef? with
+  | some ref =>
+    let some resolved ← lookup ref
+      | throw <| IO.userError s!"NO-COMMENTS: base ref {ref} is not a known commit"
+    return resolved
+  | none =>
+    for ref in ["origin/main", "main"] do
+      if let some resolved ← lookup ref then
+        return resolved
+    throw <| IO.userError "NO-COMMENTS: neither origin/main nor main names a commit; fetch the base branch or pass --base-ref <ref>"
+
+def verifyCommitReachable (sha label : String) : IO Unit := do
+  unless isHexOid sha do
+    throw <| IO.userError s!"NO-COMMENTS: invalid {label} commit {sha.quote}"
+  let checkCommit ← IO.Process.output
+    { cmd := "git", args := #["cat-file", "-e", sha ++ "^{commit}"] }
+  unless checkCommit.exitCode == 0 do
+    throw <| IO.userError s!"NO-COMMENTS: {label} commit {sha} is unreachable or missing in Git:\n{checkCommit.stderr}"
+  let checkTree ← IO.Process.output
+    { cmd := "git", args := #["cat-file", "-e", sha ++ "^{tree}"] }
+  unless checkTree.exitCode == 0 do
+    throw <| IO.userError s!"NO-COMMENTS: tree for {label} commit {sha} is unreachable or missing in Git:\n{checkTree.stderr}"
+
+def baseRatchet (baseRef? : Option String) (bootstrap : Bool) :
+    IO (Option (String × Std.HashMap String RatchetEntry)) := do
+  let (ref, refSha) ← resolveBaseRef baseRef?
+  verifyCommitReachable refSha s!"base ref {ref}"
+  let merge ← IO.Process.output { cmd := "git", args := #["merge-base", "HEAD", refSha] }
+  if merge.exitCode == 1 then
+    throw <| IO.userError s!"NO-COMMENTS: Git found no merge base of HEAD with {ref} ({refSha}); fetch full history or pass --base-ref <ref>"
+  unless merge.exitCode == 0 do
+    throw <| IO.userError s!"git merge-base HEAD {ref} failed:\n{merge.stderr}"
+  let base := merge.stdout.trimAscii.toString
+  verifyCommitReachable base "merge base"
+  discard <| git #["merge-base", "--is-ancestor", base, "HEAD"]
+  discard <| git #["merge-base", "--is-ancestor", base, refSha]
+  let listed ← git #["ls-tree", "--full-tree", base, "--", ratchetFile]
+  let treeEntry := listed.trimAscii.toString
+  if treeEntry.isEmpty then
+    if bootstrap then
+      return none
+    throw <| IO.userError s!"NO-COMMENTS: merge base {base} (with {ref}) does not hold {ratchetFile}; pass --bootstrap only when introducing {ratchetFile}"
+  unless !treeEntry.contains '\n' &&
+      (treeEntry.startsWith "100644 blob " || treeEntry.startsWith "100755 blob ") do
+    throw <| IO.userError s!"NO-COMMENTS: {base}:{ratchetFile} is not a regular file in Git ({treeEntry})"
+  let source := s!"{base}:{ratchetFile}"
+  return some (base, ← parseRatchet source (← git #["cat-file", "blob", source]))
+
+def checkComments (libDir : System.FilePath) (allFiles : Array String)
+    (baseRef? : Option String) (bootstrap : Bool) :
     IO (Array Rejection) := do
   let reject (message : String) : Rejection := { rule := "NO-COMMENTS", message }
   if allFiles.isEmpty then
@@ -922,13 +970,11 @@ def checkComments (libDir : System.FilePath) (allFiles : Array String) :
   for (f, _) in ratchet.toList do
     unless allFiles.contains f do
       errs := errs.push (reject s!"{ratchetFile} lists {f}, which is not a Lean file Git's index lists")
-  if let some (base, accepted) ← baseRatchet then
+  if let some (base, accepted) ← baseRatchet baseRef? bootstrap then
     for (f, entry) in ratchet.toList do
       let added := missingFrom entry.fingerprints ((accepted.get? f).elim .empty (·.fingerprints))
       unless added.isEmpty do
         errs := errs.push (reject s!"{ratchetFile} records for {f} {added.size} comment(s) that its copy at the merge base {base} does not record for that file, with the fingerprint(s) {" ".intercalate added.toList}; a file gains no comment")
-  else
-    IO.eprintln s!"NO-COMMENTS: no merge base of HEAD with origin/main or main holds {ratchetFile}, so its entries were compared with no earlier copy"
   for (f, comments) in allFiles.zip (← projectComments libDir allFiles) do
     let actual := sortFingerprints (comments.map (·.fingerprint))
     let lines := distinctCommentLines comments
@@ -971,7 +1017,7 @@ def listComments (target? : Option String) : IO Unit := do
         totLines := totLines + lines
     IO.println s!"total: {files}/{allFiles.size} files with comments, {totComments} comment(s), {totLines} line(s)"
 
-def check : IO (Array Rejection) := do
+def check (baseRef? : Option String := none) (bootstrap : Bool := false) : IO (Array Rejection) := do
   let config ← checkConfig
   unless config.isEmpty do
     return config
@@ -991,7 +1037,7 @@ def check : IO (Array Rejection) := do
   unless built.isEmpty do
     return built
   let codes ← checkCodes pkg.leanLibDir mods
-  let commentErrs ← checkComments pkg.leanLibDir allFiles
+  let commentErrs ← checkComments pkg.leanLibDir allFiles baseRef? bootstrap
   initSearchPath (← findSysroot) [pkg.leanLibDir]
   let env ← importModules (mods.map fun m => { module := m }) {}
   let idxs := mods.filterMap env.getModuleIdx?
@@ -1008,6 +1054,39 @@ def check : IO (Array Rejection) := do
   if audited == 0 then
     errs := errs.push { rule := "AXIOMS", message := "the library's modules declare no constant" }
   return errs ++ checkProcess env compiled ++ codes ++ commentErrs
+
+structure CheckOpts where
+  baseRef? : Option String := none
+  bootstrap : Bool := false
+
+def checkUsage : String :=
+  "usage: lean --run tools/check.lean [--base-ref <ref>] [--bootstrap] | --tests | --tests-module <file> <out> | --comments [<file>] | --comments-module <file> <toolDir> <libDir>"
+
+def parseCheckArgs (args : List String) : Except String CheckOpts :=
+  go args {}
+where
+  setBaseRef (opts : CheckOpts) (ref : String) : Except String CheckOpts := do
+    if opts.baseRef?.isSome then
+      throw "duplicate --base-ref option"
+    if ref.isEmpty || ref.startsWith "-" then
+      throw s!"invalid --base-ref value: {ref.quote}"
+    return { opts with baseRef? := some ref }
+  go (rest : List String) (opts : CheckOpts) : Except String CheckOpts := do
+    match rest with
+    | [] => return opts
+    | "--bootstrap" :: tl =>
+      if opts.bootstrap then
+        throw "duplicate --bootstrap option"
+      go tl { opts with bootstrap := true }
+    | "--base-ref" :: ref :: tl =>
+      go tl (← setBaseRef opts ref)
+    | ["--base-ref"] =>
+      throw "missing value after --base-ref"
+    | arg :: tl =>
+      if arg.startsWith "--base-ref=" then
+        go tl (← setBaseRef opts (arg.drop 11).toString)
+      else
+        throw s!"unknown option or argument {arg.quote}\n{checkUsage}"
 
 end Check
 
@@ -1027,11 +1106,15 @@ public unsafe def main (args : List String) : IO UInt32 := do
     Check.listComments none
     return 0
   | ["--comments", file] =>
+    if file.startsWith "-" then
+      throw <| IO.userError Check.checkUsage
     Check.listComments (some file)
     return 0
-  | [] =>
-    let errs ← Check.check
+  | _ =>
+    let opts ← match Check.parseCheckArgs args with
+      | .ok o => pure o
+      | .error e => throw <| IO.userError e
+    let errs ← Check.check opts.baseRef? opts.bootstrap
     for e in errs do
       IO.println s!"[{e.rule}] {e.message}"
     return if errs.isEmpty then 0 else 1
-  | _ => throw <| IO.userError "usage: lean --run tools/check.lean [--tests | --tests-module <file> <out> | --comments [<file>] | --comments-module <file> <toolDir> <libDir>]"
