@@ -78,8 +78,12 @@ group that has none (`Ty.inhabited`), and one whose recursive constructors build
 values because a type of its group they need has none (`Ty.grows`, `Ty.growsAt`), though it may
 have values, with a base constructor of its own or without one, as `I` of the mutual group
 `I | mk (o : O)`, `O | o0 | back (i : I) (c : C)`, `C | mkc (c : C)`, whose one value is `mk o0`
-(`docs/degenerate-subjects.md` states why); a recursive field that is a function whose arguments
-depend on a field or on one another; a type whose values are
+(`docs/degenerate-subjects.md` states why); a recursive type whose values hold a
+`LeanIntent.Clock` that is itself a type of its group, through a nested occurrence such as a
+constructor `mk (c : Clock T)` of `T`, since the code names the types of a group only by their
+number and the trivial-witness check reads or refuses a clock by the name in its code
+(`reachedClock?`; `docs/trivial-witnesses.md`, the section on clocks); a recursive field that is a
+function whose arguments depend on a field or on one another; a type whose values are
 constrained by proofs, indices or value parameters (an inductive family with indices, a group with
 a type nested through an inductive family with indices, a parameter that is not a type of `Type`, a
 field that depends on an earlier field or whose type is not a type of `Type`, such as a proof), from
@@ -402,6 +406,41 @@ has a value. -/
   if (group[i]?.map (·.2.any GCtor.isBase)).getD false then some i
   else (List.range group.size).find? fun l => seen[l]?.getD false && group[l]!.2.any GCtor.isBase
 
+/-- The name of the type `LeanIntent.Clock`, with which a project declares a part of its subject's
+arguments its clock and which the trivial-witness check recognizes by the name in its code
+(`LeanIntent.Clocks`, which imports this module and proves the name its own,
+`Clock.codeName_eq_clockName`). -/
+@[expose] def clockName : Name := `LeanIntent.Clock
+
+/-- Whether `s`, a type of a recursive group as the recursor's motive presents it, is a
+`LeanIntent.Clock`: that type applied to its parameter. Lean's kernel takes as a nested occurrence
+only an application whose head is the constant of an inductive type (`is_nested_inductive_app` of
+its `src/kernel/inductive.cpp`, at v4.35.0), so the head is read as it stands. -/
+@[expose] def isClockSort (s : Expr) : Bool := s.getAppFn.isConstOf clockName
+
+/-- The first type of the group, in the order of the recursor's motives, that `seen` marks and that
+is a `LeanIntent.Clock` (`isClockSort`). -/
+@[expose] def reachedClock? (group : Array (Expr × Array GCtor)) (seen : Array Bool) : Option Expr :=
+  (List.range group.size).findSome? fun l =>
+    if seen[l]?.getD false && isClockSort group[l]!.1 then some group[l]!.1 else none
+
+/-- `reachedClock?` finds none exactly when no type of the group that `seen` marks is a
+`LeanIntent.Clock`. -/
+theorem reachedClock?_eq_none_iff (group : Array (Expr × Array GCtor)) (seen : Array Bool) :
+    reachedClock? group seen = none ↔
+      ∀ l, l < group.size → seen[l]?.getD false = true → isClockSort group[l]!.1 = false := by
+  simp only [reachedClock?, List.findSome?_eq_none_iff, List.mem_range]
+  constructor
+  · intro h l hl hs
+    have hn := h l hl
+    cases hc : isClockSort group[l]!.1
+    · rfl
+    · simp [hs, hc] at hn
+  · intro h l hl
+    cases hs : seen[l]?.getD false
+    · simp
+    · simp [h l hl hs]
+
 /-- The representation of the `i`-th type of the recursive group `group`, `Ty.mu b g r i` where the
 type is its own root (`rootOf`) and otherwise `Ty.muAt b g r j i` for its root `j`, as its base `b`,
 data and arguments `g`, recursive fields `r` and root `j`: `b` the representation of the
@@ -415,7 +454,12 @@ the chain of `ref l` for each recursive field, `l` the type of the group it hold
 argument's code is the one `codeOf` gives for its type. Refuses a type that reaches no type of its
 group with a constructor of the first kind, or that its root's base values do not reach
 (`Ty.inhabited`), since then it has no value, and a type that does not grow (`Ty.grows`,
-`Ty.growsAt`). -/
+`Ty.growsAt`). Refuses also a type that reaches a type of its group that is a `LeanIntent.Clock`
+(`reachedClock?`), such as `T` with a constructor `mk (c : Clock T)`: the representation names the
+types of the group only by their number, so that clock, which the type's values hold, would lose the
+name by which the trivial-witness check reads or refuses a clock. Every other type whose values a
+value of the type holds is a field's or an argument's, whose code `codeOf` gives and which keeps the
+names inside it, or a type of the group that is not a `LeanIntent.Clock`. -/
 @[expose] def recCodeWith {m : Type → Type} [Monad m] [MonadError m] [MonadEnv m] [MonadLCtx m]
     (indVal : InductiveVal) (group : Array (Expr × Array GCtor)) (i : Nat)
     (codeOf : Expr → m Expr) : m (Expr × Expr × Expr × Nat) := do
@@ -435,6 +479,10 @@ group with a constructor of the first kind, or that its root's base values do no
       | .ref l _ => some (mkApp (mkConst ``Ty.ref) (toExpr l))
   let some seen := reached group i
     | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: which types of its group it reaches was not settled"
+  -- A code names the types of a group only by their number, so a `LeanIntent.Clock` among those the
+  -- type reaches would lose its name, by which the trivial-witness check reads or refuses a clock.
+  if let some s := reachedClock? group seen then
+    throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: its values hold values of `{s}`, a `LeanIntent.Clock` that is a type of its recursive group. A code names the types of a group only by their number, so the trivial-witness check could neither read this clock nor refuse it. Hold the clock outside the recursive group, where the check's clock parts reach it"
   let some root := rootOf group seen i
     | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: it has no value, since each constructor of each type of its group that it reaches has a field that holds a value of a type of the group"
   let bases := group[root]!.2.toList.filter GCtor.isBase

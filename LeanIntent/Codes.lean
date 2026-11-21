@@ -40,6 +40,13 @@ denotes, which is isomorphic to the type of the field's arguments, not in genera
 the group does not grow, so that it may have finitely many values, it denotes its base values alone;
 the deriving handler refuses such a type. `Ty.ref` denotes the unit type.
 
+A group's types are in the code only by their number, so the code does not say which type each is,
+while a field's or an argument's type is there by its own code, which names the declared types
+inside it. So a check that decides something from a declared type's name in a code, as the
+trivial-witness check does for `LeanIntent.Clock` (`LeanIntent.Clocks`), needs the deriving handler
+to refuse a recursive type whose values hold that type as a type of its group, as it does for
+`LeanIntent.Clock` (`Declared.reachedClock?`).
+
 A recursive type with no constructor whose fields hold no value of a type of its group has no base
 of its own. Its representation is `Ty.muAt b g r j i`, the `i`-th type of its group with the base
 `b` of the group's `j`-th type, its *root*, and `g` and `r` as above with the root's other
