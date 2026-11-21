@@ -80,11 +80,12 @@ test:
   # run, or when the listing reaches its limit.
   # That program prints one line for each command whose verdict comes from running code on chosen
   # inputs, read through Lean's frontend, and fails rather than printing nothing when it cannot
-  # read a file; docs/adr/0002-test-listing-and-pinned-lean-tokens.md says what it lists and what it does not. The guard asks Git the
-  # question that program asks for its own list of files, `git ls-files -- '*.lean'`, so it skips
-  # the listing only where that list is empty, which the program refuses; and `set -e` ends the
-  # command with a status other than 0, never an empty listing, when Git cannot answer. A head with
-  # no Lean file still fails the Test command below, which runs tools/check.lean first.
+  # read a file; docs/adr/0002-test-listing-and-pinned-lean-tokens.md says what it lists and what it
+  # does not. The guard asks Git the question that program asks for its own list of files,
+  # `git ls-files -- '*.lean'`, so it skips the listing only where that list is empty, which the
+  # program refuses; and `set -e` ends the command with a status other than 0, never an empty
+  # listing, when Git cannot answer. A head with no Lean file still fails the Test command below,
+  # which runs tools/check.lean first.
   tests_as_evidence:
     policy: forbid
     list_command: |
