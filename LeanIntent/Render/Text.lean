@@ -774,7 +774,8 @@ def definitions (R : Reader) (roots : List Name) (shown : NameSet) : MetaM Strin
     let eqn := fun c => match found.find? c with
       | some (_, t) => some t
       | none => if (recursionKind env c).isSome then some (.sort .zero) else none
-    let out ← match meaning lookup eqn stop roots with
+    let bound := env.constants.map₂.foldl (fun k _ _ => k + 1) env.constants.map₁.size + 1
+    let out ← match meaning lookup eqn stop bound roots with
       | .ok out => pure out
       | .error (.unknown c) => throwError "cannot print {c}: it has no declaration here"
       | .error .fuel => throwError "cannot print the definitions: there are too many"
