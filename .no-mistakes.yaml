@@ -185,17 +185,20 @@ commands:
       exit 1
     fi
 
-# The outputs a run starts from: Lake's artifact cache, written by the repository's checks run
-# once on a fresh checkout of the run's base commit. no-mistakes stores the directory only when
-# the command exits 0, and the checks exit 0 only when `lake build --wfail` built every library
-# module, each from source since the checkout and the cache start empty, with no warning. Each run
-# gets a private copy, used only while lean-toolchain is unchanged, and Lake takes an output from
-# it only for a module whose input hash (its source, its imports' outputs, its options and the
-# toolchain) is the one that output was built from. no-mistakes does not admit this build against
-# the machine's heavy-work budget, so the command admits itself, and it runs the checks under the
-# limit the paragraph on time above derives. LAKE_RESTORE_ARTIFACTS has Lake put any output it
-# takes from the cache in .lake/build too, where the axiom audit reads it; the Test command needs
-# no such setting, because Lake restores every output it takes from a cache it only reads.
+# The outputs a run starts from: Lake's artifact cache (together with the SHA-256-keyed
+# `no-comments` binary staged under `.lake/cache/no-comments/<sha256>/no-comments`, which misses
+# cleanly on `tools/no-comments.pin` updates because the path includes the digest), written by the
+# repository's checks run once on a fresh checkout of the run's base commit. no-mistakes stores
+# the directory only when the command exits 0, and the checks exit 0 only when `lake build --wfail`
+# built every library module, each from source since the checkout and the cache start empty, with
+# no warning. Each run gets a private copy, used only while lean-toolchain is unchanged, and Lake
+# takes an output from it only for a module whose input hash (its source, its imports' outputs,
+# its options and the toolchain) is the one that output was built from. no-mistakes does not admit
+# this build against the machine's heavy-work budget, so the command admits itself, and it runs
+# the checks under the limit the paragraph on time above derives. LAKE_RESTORE_ARTIFACTS has Lake
+# put any output it takes from the cache in .lake/build too, where the axiom audit reads it; the
+# Test command needs no such setting, because Lake restores every output it takes from a cache it
+# only reads.
 build_outputs:
   command: |
     status=0

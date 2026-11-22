@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-`lean-intent` establishes its claims about itself by machine-checked theorems rather than tests, and enforces repository-wide invariants through one check program (`tools/check.lean`) paired with a helper executable (`tools/codes.lean`). Every input must be read through the system that owns it rather than by parsing source text by hand.
+`lean-intent` establishes its claims about itself by machine-checked theorems rather than tests, and enforces repository-wide invariants through one check program (`tools/check.lean`) paired with a helper script (`tools/codes.lean`) and the pinned `no-comments` CLI (`tools/no-comments.pin`, `.no-comments.json`). Every input must be read through the system that owns it rather than by parsing source text by hand.
 
 ## Decision
 
