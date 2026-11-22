@@ -4,6 +4,7 @@ public import LeanIntent.Degenerate
 public import LeanIntent.Cone
 public import Lean.Elab.Deriving.Basic
 public import Lean.Elab.Deriving.Util
+import Lean.Meta.Eqns
 
 /-!
 # The codes of the types a project declares
@@ -513,13 +514,53 @@ writes it: each value paired with the chain after it, and the last with the unit
       (denoteE (chainCode (fs.map (·.1)))) v (chainExpr fs)
 
 def builtinHeads : MetaM (Array Name) := do
+  let kernelWhnf (e : Expr) : MetaM Expr := do
+    match Kernel.whnf (← getEnv) (← getLCtx) e with
+    | .ok w => return w
+    | .error ex =>
+      throwError "LeanIntent.HasCode: kernel reduction failed: {ex.toMessageData (← getOptions)}"
+  let inductiveHead? (w : Expr) : MetaM (Option Name) := do
+    if let .const h _ := w.getAppFn then
+      if ← isInductive h then
+        return some h
+    return none
   let mut heads := #[]
   for (ind, den) in [(``Ty, ``Ty.denote), (``Atom, ``Atom.denote)] do
     for c in (← getConstInfoInduct ind).ctors do
-      let (args, _, _) ← forallMetaTelescope (← inferType (mkConst c))
-      if let .const h _ := (← whnf (mkApp (mkConst den) (mkAppN (mkConst c) args))).getAppFn then
-        if ← isInductive h then
-          heads := heads.push h
+      let newHeads ← forallTelescope (← inferType (mkConst c)) fun args _ => do
+        let e := mkApp (mkConst den) (mkAppN (mkConst c) args)
+        let w ← kernelWhnf e
+        if let some h ← inductiveHead? w then
+          return #[h]
+        else if c == ``Ty.decl then
+          let some rep := args[2]?
+            | throwError "LeanIntent.HasCode: unexpected arity for `{.ofConstName c}`"
+          let nilNat := mkApp (mkConst ``List.nil [Level.zero]) (mkConst ``Nat)
+          let expected := mkAppN (mkConst ``Ty.den) #[rep, nilNat]
+          if Kernel.isDefEq (← getEnv) (← getLCtx) w expected matches .ok true then
+            return #[]
+        else if c == ``Ty.atom then
+          let some k := args[0]?
+            | throwError "LeanIntent.HasCode: unexpected arity for `{.ofConstName c}`"
+          let expected := mkApp (mkConst ``Atom.denote) k
+          if Kernel.isDefEq (← getEnv) (← getLCtx) w expected matches .ok true then
+            return #[]
+        else if c == ``Ty.arrow && w.isForall then
+          return #[]
+        else if c == ``Ty.muAt && w.isAppOfArity ``Bool.rec 4 then
+          let ka := w.getAppArgs
+          let some fBr := ka[1]?
+            | throwError "LeanIntent.HasCode: missing false branch for `{.ofConstName c}`"
+          let some tBr := ka[2]?
+            | throwError "LeanIntent.HasCode: missing true branch for `{.ofConstName c}`"
+          let mut brHeads := #[]
+          for br in [tBr, fBr] do
+            let some h ← lambdaTelescope br fun _ body => do inductiveHead? (← kernelWhnf body)
+              | throwError "LeanIntent.HasCode: non-inductive branch for `{.ofConstName c}`: `{br}`"
+            brHeads := brHeads.push h
+          return brHeads
+        throwError "LeanIntent.HasCode: unrecognized built-in denotation for `{.ofConstName c}`: `{w}`"
+      heads := heads ++ newHeads
   return heads
 
 /-- Whether `f`, a map from the `i`-th type of the recursive group `group` (as `readGroup` reads it)
@@ -756,7 +797,7 @@ def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String ×
           return ← fail "Lean's kernel does not find its code to be the one the declaration fixes"
         let instOf (t : Expr) : MetaM (Option Expr) := return (insts.find? (·.1 == t)).map (·.2)
         let candidate (l : Nat) : MetaM (Option Expr) := do
-          let nm := ci.name.getPrefix ++ Name.mkSimple s!"to{l}"
+          let nm := ci.name.modifyBase (·.getPrefix ++ Name.mkSimple s!"to{l}")
           return if (← getEnv).contains nm then some (mkAppN (mkConst nm) binders) else none
         if let some why ← checkRecMaps group root i (mkApp3 (mkConst ``Iso.to) α (denoteE given) e)
             instOf candidate then
@@ -810,6 +851,13 @@ def writtenName : CommandElabM (Name → Name) := do
   let env ← getEnv
   return if env.header.isModule && !(← getScope).isPublic then mkPrivateName env else id
 
+private def relIdent (ns n : Name) : Lean.Ident :=
+  mkIdent (n.modifyBase (·.replacePrefix ns .anonymous))
+
+private def mkEqIdent (c : Name) : Lean.Ident :=
+  let id := addMacroScope `_internal `eqLemma reservedMacroScope
+  ⟨Syntax.ident SourceInfo.none (toString c).toRawSubstring id [.decl c []]⟩
+
 /-- Writes the proof that the code `codeName` stands for the declaration `declName` through the
 isomorphism `isoName`, through the private constructor of `Ty.Stands` that admits a declared type,
 and the instance of `HasCode` that carries the three. `codeName`, `isoName` and `standsName` are the
@@ -827,8 +875,9 @@ def mkStandsAndInstance (declName : Name) (indVal : InductiveVal) (instName code
       | throwError "LeanIntent.HasCode: the code of `{.ofConstName declName}` is not a `Ty.decl`"
     addFun standsName binders (mkApp3 (mkConst ``Ty.Stands) tApp codeApp isoApp)
       (mkAppN (mkConst ctor) #[tApp, toExpr declName, ps, rep, isoApp]) true
+  let instRel := relIdent (← getCurrNamespace) instName
   elabCommand (← `(command|
-    instance $(mkIdent (`_root_ ++ instName)):ident $binders* : LeanIntent.HasCode $tStx :=
+    instance $instRel:ident $binders* : LeanIntent.HasCode $tStx :=
       ⟨@$(mkCIdent codeName) $args*, @$(mkCIdent isoName) $args*, @$(mkCIdent standsName) $args*⟩))
   let (_, why?) ← liftTermElabM <| withoutExporting do
     checkAttestation ctor (← getConstInfo standsName)
@@ -882,7 +931,7 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
   let toInvName := instName ++ `toInv
   let act ← writtenName
   let ns ← getCurrNamespace
-  let rel (n : Name) : Lean.Ident := mkIdent (n.replacePrefix ns .anonymous)
+  let rel := relIdent ns
   let (plans, root) ← liftTermElabM <| withParams indVal fun xs binders tApp => do
     if (← synthInstance? (mkApp (mkConst ``HasCode) tApp)).isSome then
       throwError "LeanIntent.HasCode: `{.ofConstName declName}` already has a code"
@@ -946,15 +995,12 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
   let famK := famTy kId
   let fold ← `(LeanIntent.Ty.muFold $G (@$(mkCIdent (act baseInvName)) $args*) (@$(mkCIdent (act algName)) $args*))
   let fin (n : Nat) : TermElabM Term := `(⟨$(quote n), of_decide_eq_true rfl⟩)
-  let (toDefs, baseAlts, algAlts, invToDefs, toInvAlts) ← liftTermElabM do
+  let (toDefs, baseAlts, algAlts) ← liftTermElabM do
     let mut toDefs := #[]
     let mut baseAlts := #[]
     let mut algAlts := #[]
-    let mut invToDefs := #[]
-    let mut toInvAlts := #[]
     for h : k in [0:K] do
       let mut toAlts := #[]
-      let mut invToAlts := #[]
       for c in plans[k] do
         let holes ← (List.range c.numParams).toArray.mapM fun _ => `(_)
         let xs ← c.fields.mapM fun _ => return (mkIdent (← mkFreshUserName `x) : Term)
@@ -962,7 +1008,6 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
         let datas := (c.fields.zip xs).filterMap fun (f, x) => if f.isNone then some x else none
         let refs := (c.fields.zip xs).filterMap fun (f, x) => f.map fun (l, arr) => (l, arr, x)
         let dataTo ← datas.toList.mapM fun x => `(LeanIntent.Iso.to LeanIntent.HasCode.iso $x)
-        let ctorFn ← `(@$(mkCIdent c.name) $holes*)
         let rhs ← match c.role with
           | .base ib kb => do `(LeanIntent.MuVal.base $(← injStx kb ib (← chainStx dataTo)))
           | .node cn => do
@@ -979,28 +1024,11 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
               else `(fun e _ => match e with $alts:matchAlt*)
             `(LeanIntent.MuVal.node $(← fin cn) $(← chainStx dataTo) $children)
         toAlts := toAlts.push (← `(matchAltExpr| | $pat => $rhs))
-        let fieldPrfs ← (c.fields.zip xs).toList.mapM fun (f, x) => match f with
-          | none => `(LeanIntent.Iso.inv_to LeanIntent.HasCode.iso $x)
-          | some (l, n) => do
-            let ys ← (List.range n).toArray.mapM fun _ => return (mkIdent (← mkFreshUserName `y) : Term)
-            let ih ← `($(rel (invToName l)) ($x $ys*))
-            let p ← if n == 0 then pure ih else
-              `(by simp only [LeanIntent.Iso.inv_to] <;> exact $ih)
-            ys.foldrM (fun y p => `(funext fun $(⟨y.raw⟩):ident => $p)) p
-        let prf ← match fieldPrfs with
-          | [] => `(rfl)
-          | p :: ps => ps.foldlM (fun acc q => `(congr $acc $q)) (← `(congrArg $ctorFn $p))
-        invToAlts := invToAlts.push (← `(matchAltExpr| | $pat => by rw [$(mkCIdent (act (toName k))):ident]; exact $prf))
-        let eqLemma := mkIdent (`_root_ ++ toName k ++ Name.mkSimple s!"eq_{c.alt}")
         match c.role with
         | .base ib kb =>
           let ys ← datas.mapM fun _ => return (mkIdent (← mkFreshUserName `y) : Term)
           let invVal ← `(@$(mkCIdent c.name) $holes* $(← ys.mapM fun y => `(LeanIntent.Iso.inv LeanIntent.HasCode.iso $y))*)
           baseAlts := baseAlts.push (← `(matchAltExpr| | $(← injStx kb ib (← chainStx ys.toList)) => $invVal))
-          let z := mkIdent `z
-          let pz ← chainEq (← ys.toList.mapM fun y => `(LeanIntent.Iso.to_inv LeanIntent.HasCode.iso $y))
-          toInvAlts := toInvAlts.push (← `(matchAltExpr| | _, LeanIntent.MuVal.base $(← injStx kb ib (← chainStx ys.toList)) =>
-            ($eqLemma ..).trans (congrArg (fun $z => LeanIntent.MuVal.base $(← injStx kb ib z)) $pz)))
         | .node cn =>
           let d := mkIdent `d
           let ih := mkIdent `ih
@@ -1028,65 +1056,118 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
           let ihPat : Term ← if refs.isEmpty then `(_) else pure ih
           algAlts := algAlts.push (← `(matchAltExpr| | $(quote k), ⟨$(quote cn), _⟩, $dPat, $ihPat =>
             @$(mkCIdent c.name) $holes* $algArgs*))
-          let pd ← chainEq (← (List.range datas.size).mapM fun q' => do
-            `(LeanIntent.Iso.to_inv LeanIntent.HasCode.iso $(← chainGet d q')))
-          let kk := mkIdent `kk
-          let pk ← if refs.isEmpty then `(funext fun e => e.elim0) else do
-            let alts ← refs.mapIdxM fun r (_, n, _) => do
-              let ih ← `($(rel toInvName) ($kk $(← fin r) $(mkIdent `y)))
-              let p ← if n == 0 then pure ih else
-                `(by simp only [LeanIntent.Iso.to_inv] <;> exact $ih)
-              `(matchAltExpr| | ⟨$(quote r), _⟩ => $p)
-            `(funext fun e => funext fun $(mkIdent `y):ident => match e with $alts:matchAlt*)
-          let kkPat : Term ← if refs.isEmpty then `(_) else pure kk
-          toInvAlts := toInvAlts.push (← `(matchAltExpr| | $(quote k), LeanIntent.MuVal.node ⟨$(quote cn), _⟩ $dPat $kkPat =>
-            ($eqLemma ..).trans (congr (congrArg (LeanIntent.MuVal.node _) $pd) $pk)))
       let n := nodes k
       if n > 0 then
         let nn := mkIdent `n
         let hh := mkIdent `h
         algAlts := algAlts.push (← `(matchAltExpr| | $(quote k), ⟨$nn + $(quote n), $hh⟩, _, _ =>
           absurd $hh (LeanIntent.Ty.not_add_lt $nn $(quote n))))
-        toInvAlts := toInvAlts.push (← `(matchAltExpr| | $(quote k), LeanIntent.MuVal.node ⟨$nn + $(quote n), $hh⟩ _ _ =>
-          absurd $hh (LeanIntent.Ty.not_add_lt $nn $(quote n))))
       else
         algAlts := algAlts.push (← `(matchAltExpr| | $(quote k), c, _, _ => c.elim0))
-        toInvAlts := toInvAlts.push (← `(matchAltExpr| | $(quote k), LeanIntent.MuVal.node c _ _ => c.elim0))
       let x := mkIdent `x
       toDefs := toDefs.push (← `(command|
         @[expose] def $(rel (toName k)) $binders* ($x : $G $(quote k)) :
             $(famTy (quote k)) :=
           match $x:ident with $toAlts:matchAlt*))
-      invToDefs := invToDefs.push (← `(command|
-        theorem $(rel (invToName k)) $binders* ($x : $G $(quote k)) :
-            $fold ($(mkCIdent (act (toName k))) $x) = $x :=
-          match $x:ident with $invToAlts:matchAlt*))
     let nn := mkIdent `n
     algAlts := algAlts.push (← `(matchAltExpr| | $nn + $(quote K), c, _, _ => c.elim0))
-    toInvAlts := toInvAlts.push (← `(matchAltExpr| | $nn + $(quote K), LeanIntent.MuVal.node c _ _ => c.elim0))
-    return (toDefs, baseAlts, algAlts, invToDefs, toInvAlts)
+    return (toDefs, baseAlts, algAlts)
   elabCommand (← `(command| mutual $toDefs:command* end))
   elabCommand (← `(command|
-    @[expose] def $(mkIdent (`_root_ ++ baseInvName)) $binders* (x : LeanIntent.Ty.denote $B) : $G $rq :=
+    @[expose] def $(rel baseInvName) $binders* (x : LeanIntent.Ty.denote $B) : $G $rq :=
       match x with $baseAlts:matchAlt*))
   elabCommand (← `(command|
-    @[expose] def $(mkIdent (`_root_ ++ algName)) $binders* : $algTy :=
+    @[expose] def $(rel algName) $binders* : $algTy :=
       fun j c d ih => match j, c, d, ih with $algAlts:matchAlt*))
-  elabCommand (← `(command| mutual $invToDefs:command* end))
   let toGAlts ← liftTermElabM do
     let mut alts := #[]
     for k in [0:K] do
       alts := alts.push (← `(matchAltExpr| | $(quote k) => @$(mkCIdent (act (toName k))) $args*))
     alts.push <$> `(matchAltExpr| | _ + $(quote K) => fun e => nomatch e)
   elabCommand (← `(command|
-    @[expose] def $(mkIdent (`_root_ ++ toGName)) $binders* ($kId : Nat) : $G $kId → $famK :=
+    @[expose] def $(rel toGName) $binders* ($kId : Nat) : $G $kId → $famK :=
       match $kId:ident with $toGAlts:matchAlt*))
+  let eqss ← liftTermElabM <| withoutExporting do
+    plans.mapIdxM fun k cs => do
+      if cs.isEmpty then return #[]
+      let some eqs ← Lean.Meta.getEqnsFor? (act (toName k))
+        | throwError "LeanIntent.HasCode: no equation theorems for `{.ofConstName (act (toName k))}`"
+      return eqs
+  let (invToDefs, toInvAlts) ← liftTermElabM do
+    let mut invToDefs := #[]
+    let mut toInvAlts := #[]
+    for h : k in [0:K] do
+      let some eqs := eqss[k]?
+        | throwError "LeanIntent.HasCode: missing equation theorems for group type {k}"
+      let mut invToAlts := #[]
+      for c in plans[k] do
+        let some eqName := eqs[c.alt - 1]?
+          | throwError "LeanIntent.HasCode: missing equation theorem {c.alt} for `{.ofConstName c.name}`"
+        let eqLemma := mkEqIdent eqName
+        let holes ← (List.range c.numParams).toArray.mapM fun _ => `(_)
+        let xs ← c.fields.mapM fun _ => return (mkIdent (← mkFreshUserName `x) : Term)
+        let pat ← `(@$(mkCIdent c.name) $holes* $xs*)
+        let ctorFn ← `(@$(mkCIdent c.name) $holes*)
+        let fieldPrfs ← (c.fields.zip xs).toList.mapM fun (f, x) => match f with
+          | none => `(LeanIntent.Iso.inv_to LeanIntent.HasCode.iso $x)
+          | some (l, n) => do
+            let ys ← (List.range n).toArray.mapM fun _ => return (mkIdent (← mkFreshUserName `y) : Term)
+            let ih ← `($(rel (invToName l)) ($x $ys*))
+            let p ← if n == 0 then pure ih else
+              `(by simp only [LeanIntent.Iso.inv_to] <;> exact $ih)
+            ys.foldrM (fun y p => `(funext fun $(⟨y.raw⟩):ident => $p)) p
+        let prf ← match fieldPrfs with
+          | [] => `(rfl)
+          | p :: ps => ps.foldlM (fun acc q => `(congr $acc $q)) (← `(congrArg $ctorFn $p))
+        invToAlts := invToAlts.push (← `(matchAltExpr| | $pat => by rw [$eqLemma:ident]; exact $prf))
+        let nData := (c.fields.filter Option.isNone).size
+        let refArities := c.fields.filterMap (·.map (·.2))
+        match c.role with
+        | .base ib kb =>
+          let ys ← (List.range nData).toArray.mapM fun _ => return (mkIdent (← mkFreshUserName `y) : Term)
+          let z := mkIdent `z
+          let pz ← chainEq (← ys.toList.mapM fun y => `(LeanIntent.Iso.to_inv LeanIntent.HasCode.iso $y))
+          toInvAlts := toInvAlts.push (← `(matchAltExpr| | _, LeanIntent.MuVal.base $(← injStx kb ib (← chainStx ys.toList)) =>
+            ($eqLemma ..).trans (congrArg (fun $z => LeanIntent.MuVal.base $(← injStx kb ib z)) $pz)))
+        | .node cn =>
+          let d := mkIdent `d
+          let dPat : Term ← if nData == 0 then `(_) else pure d
+          let pd ← chainEq (← (List.range nData).mapM fun q' => do
+            `(LeanIntent.Iso.to_inv LeanIntent.HasCode.iso $(← chainGet d q')))
+          let kk := mkIdent `kk
+          let pk ← if refArities.isEmpty then `(funext fun e => e.elim0) else do
+            let alts ← refArities.mapIdxM fun r n => do
+              let ih ← `($(rel toInvName) ($kk $(← fin r) $(mkIdent `y)))
+              let p ← if n == 0 then pure ih else
+                `(by simp only [LeanIntent.Iso.to_inv] <;> exact $ih)
+              `(matchAltExpr| | ⟨$(quote r), _⟩ => $p)
+            `(funext fun e => funext fun $(mkIdent `y):ident => match e with $alts:matchAlt*)
+          let kkPat : Term ← if refArities.isEmpty then `(_) else pure kk
+          toInvAlts := toInvAlts.push (← `(matchAltExpr| | $(quote k), LeanIntent.MuVal.node ⟨$(quote cn), _⟩ $dPat $kkPat =>
+            ($eqLemma ..).trans (congr (congrArg (LeanIntent.MuVal.node _) $pd) $pk)))
+      let n := nodes k
+      if n > 0 then
+        let nn := mkIdent `n
+        let hh := mkIdent `h
+        toInvAlts := toInvAlts.push (← `(matchAltExpr| | $(quote k), LeanIntent.MuVal.node ⟨$nn + $(quote n), $hh⟩ _ _ =>
+          absurd $hh (LeanIntent.Ty.not_add_lt $nn $(quote n))))
+      else
+        toInvAlts := toInvAlts.push (← `(matchAltExpr| | $(quote k), LeanIntent.MuVal.node c _ _ => c.elim0))
+      let x := mkIdent `x
+      invToDefs := invToDefs.push (← `(command|
+        theorem $(rel (invToName k)) $binders* ($x : $G $(quote k)) :
+            $fold ($(mkCIdent (act (toName k))) $x) = $x :=
+          match $x:ident with $invToAlts:matchAlt*))
+    let nn := mkIdent `n
+    toInvAlts := toInvAlts.push (← `(matchAltExpr| | $nn + $(quote K), LeanIntent.MuVal.node c _ _ => c.elim0))
+    return (invToDefs, toInvAlts)
+  elabCommand (← `(command| mutual $invToDefs:command* end))
   elabCommand (← `(command|
     theorem $(rel toInvName) $binders* {$kId : Nat} (v : $famK) :
         @$(mkCIdent (act toGName)) $args* $kId ($fold v) = v :=
       match $kId:ident, v with $toInvAlts:matchAlt*))
   elabCommand (← `(command|
-    @[expose] def $(mkIdent (`_root_ ++ isoName)) $binders* :
+    @[expose] def $(rel isoName) $binders* :
         LeanIntent.Iso $tStx (LeanIntent.Ty.denote (@$(mkCIdent (act codeName)) $args*)) where
       to := @$(mkCIdent (act (toName i))) $args*
       inv := $fold
@@ -1114,6 +1195,7 @@ def mkHasCode (declName : Name) : CommandElabM Unit := do
   let isoName := instName ++ `iso
   let standsName := instName ++ `stands
   let act ← writtenName
+  let ns ← getCurrNamespace
   let shapes ← liftTermElabM <| withParams indVal fun xs binders tApp => do
     if (← synthInstance? (mkApp (mkConst ``HasCode) tApp)).isSome then
       throwError "LeanIntent.HasCode: `{.ofConstName declName}` already has a code"
@@ -1151,7 +1233,7 @@ def mkHasCode (declName : Name) : CommandElabM Unit := do
         by dsimp only; try simp only [LeanIntent.Iso.to_inv]))
     return (toAlts, invAlts, invToAlts, toInvAlts)
   elabCommand (← `(command|
-    @[expose] def $(mkIdent (`_root_ ++ isoName)) $binders* :
+    @[expose] def $(relIdent ns isoName) $binders* :
         LeanIntent.Iso $tStx (LeanIntent.Ty.denote (@$(mkCIdent (act codeName)) $args*)) where
       to t := match t with $toAlts:matchAlt*
       inv r := match r with $invAlts:matchAlt*
@@ -1174,7 +1256,13 @@ def handler (declNames : Array Name) : CommandElabM Bool := do
     unless pub.isEmpty do
       throwError "LeanIntent.HasCode: {MessageData.andList (pub.map fun n => m!"`{.ofConstName n}`")} cannot be derived by this command: the command also derives a type that is not public, so Lean would make every code it writes private; derive the public types in a command of their own"
   let hidden := (← getEnv).header.isModule && !(← getScope).isPublic
-  withScope (fun sc => { sc with isNoncomputable := sc.isNoncomputable || hidden }) do
+  withScope (fun sc => { sc with
+    isNoncomputable := sc.isNoncomputable || hidden
+    varDecls := #[]
+    varUIds := #[]
+    includedVars := []
+    omittedVars := []
+    levelNames := [] }) do
     for n in declNames do
       mkHasCode n
   return true
