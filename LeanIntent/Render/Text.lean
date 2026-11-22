@@ -163,7 +163,29 @@ annotation, which Lean applies to the arguments written after them and nothing e
 @[expose] def holdsMatch (env : Environment) (e : Expr) : Bool :=
   (e.find? fun x => match x with | .const c _ => isMatcherCore env c | _ => false).isSome
 
-def elaboratesTo (text : String) (e : Expr) (ns : Name := .anonymous) : MetaM Bool := do
+@[expose] def equalModuloMatch (env : Environment) : Expr → Expr → Bool
+  | .app f1 a1, .app f2 a2 => equalModuloMatch env f1 f2 && equalModuloMatch env a1 a2
+  | .lam _ t1 b1 bi1, .lam _ t2 b2 bi2 =>
+    bi1 == bi2 && equalModuloMatch env t1 t2 && equalModuloMatch env b1 b2
+  | .forallE _ t1 b1 bi1, .forallE _ t2 b2 bi2 =>
+    bi1 == bi2 && equalModuloMatch env t1 t2 && equalModuloMatch env b1 b2
+  | .letE _ t1 v1 b1 nd1, .letE _ t2 v2 b2 nd2 =>
+    nd1 == nd2 && equalModuloMatch env t1 t2 && equalModuloMatch env v1 v2 &&
+      equalModuloMatch env b1 b2
+  | .proj s1 i1 x1, .proj s2 i2 x2 => s1 == s2 && i1 == i2 && equalModuloMatch env x1 x2
+  | .const c1 us1, .const c2 us2 =>
+    if c1 == c2 && us1 == us2 then true
+    else isMatcherCore env c1 && isMatcherCore env c2 &&
+      Kernel.isDefEqGuarded env {} (.const c1 us1) (.const c2 us2)
+  | .bvar i1, .bvar i2 => i1 == i2
+  | .fvar id1, .fvar id2 => id1 == id2
+  | .sort l1, .sort l2 => l1 == l2
+  | .lit l1, .lit l2 => l1 == l2
+  | .mvar id1, .mvar id2 => id1 == id2
+  | _, _ => false
+
+def elaboratesTo (text : String) (e : Expr) (ns : Name := .anonymous)
+    (allowMatch : Bool := false) : MetaM Bool := do
   match Parser.runParserCategory (← getEnv) `term text with
   | .error _ => return false
   | .ok stx =>
@@ -177,10 +199,13 @@ def elaboratesTo (text : String) (e : Expr) (ns : Name := .anonymous) : MetaM Bo
             Term.synthesizeSyntheticMVarsNoPostponing
             instantiateMVars e'
         if e'.hasMVar then return false
-        if (eraseNames (eraseMData e')).equal (eraseNames e) then return true
+        let e1 := eraseNames (eraseMData e')
+        let e2 := eraseNames (eraseMData e)
+        if e1.equal e2 then return true
+        unless allowMatch do return false
         let env ← getEnv
         unless holdsMatch env e do return false
-        return Kernel.isDefEqGuarded env (← getLCtx) e' e
+        return equalModuloMatch env e1 e2
       catch _ => return false
 
 /-- `e` printed exactly, as text that Lean elaborates back to `e`, binder names and metadata aside;
@@ -300,7 +325,7 @@ def Reader.print (R : Reader) (e : Expr) : MetaM String := do
   for extra in readableOptions do
     let attempt ← observing? (R.delabWith extra ec)
     if let some (text, kinds) := attempt then
-      if ← elaboratesTo text ec R.ns then
+      if ← elaboratesTo text ec R.ns (allowMatch := true) then
         R.notations.modify (kinds.foldl .insert ·)
         return text
   R.printClosed e
@@ -636,6 +661,14 @@ not those, or when it rests on an axiom other than Lean's own (`LeanIntent.Cone.
 its statement names `c`, the axioms of `c`, its termination proof among them, are among its own
 (`Lean.collectAxioms` follows each constant's type and value). -/
 def unfoldEqn (c : Name) (levels : List Name) : MetaM (Name × Expr) := do
+  let env ← getEnv
+  if env.header.isModule then
+    if let some idx := env.getModuleIdxFor? c then
+      if let some imp := env.header.modules[idx.toNat]? then
+        unless imp.isExported do
+          throwError "cannot print {c}: its module {imp.module} is imported without `public`; \
+            in a `module` file, import the record's module with `public import` so {imp.module} \
+            is publicly imported"
   let eq? ← try getUnfoldEqnFor? c (nonRec := false)
     catch err => throwError "cannot print {c}: Lean cannot state its equation: {err.toMessageData}"
   let some eq := eq?
@@ -772,8 +805,8 @@ def definitions (R : Reader) (roots : List Name) (shown : NameSet) : MetaM Strin
     let stop := stopAt env own shown
     let found := eqns
     let eqn := fun c => match found.find? c with
-      | some (_, t) => some t
-      | none => if (recursionKind env c).isSome then some (.sort .zero) else none
+      | some (_, t) => .eqn t
+      | none => if (recursionKind env c).isSome then .typeOnly else .value
     let bound := env.constants.map₂.foldl (fun k _ _ => k + 1) env.constants.map₁.size + 1
     let out ← match meaning lookup eqn stop bound roots with
       | .ok out => pure out
