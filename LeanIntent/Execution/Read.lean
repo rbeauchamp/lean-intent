@@ -191,8 +191,6 @@ theorem pushNew_mem (queued : Std.HashSet Name) (acc rs : List Name) :
 structure TableInv (step : Name → List Name) (root : Name) (queued : Std.HashSet Name)
     (work : List Name) (table : Std.HashMap Name (List Name)) : Prop where
   root_mem : root ∈ table ∨ root ∈ work
-  table_queued : ∀ k ∈ table, k ∈ queued
-  work_queued : ∀ w ∈ work, w ∈ queued
   queued_cov : ∀ q ∈ queued, q ∈ table ∨ q ∈ work
   table_eq : ∀ k ∈ table, table.getD k [] = step k
   table_closed : ∀ k ∈ table, ∀ r ∈ table.getD k [], r ∈ table ∨ r ∈ work
@@ -202,10 +200,6 @@ structure TableInv (step : Name → List Name) (root : Name) (queued : Std.HashS
 theorem tableInv_init (step : Name → List Name) (root : Name) :
     TableInv step root (({} : Std.HashSet Name).insert root) [root] {} where
   root_mem := .inr (List.mem_singleton_self _)
-  table_queued := fun _ h => absurd h (Std.HashMap.not_mem_of_isEmpty Std.HashMap.isEmpty_empty)
-  work_queued := fun w hw => by
-    rw [List.mem_singleton.mp hw]
-    exact Cone.mem_insert.mpr (.inl rfl)
   queued_cov := fun q hq => by
     rcases Cone.mem_insert.mp hq with rfl | hq
     · exact .inr (List.mem_singleton_self _)
@@ -229,7 +223,6 @@ theorem buildTable_inv {step : Name → List Name} {root : Name} :
     dsimp only at h
     obtain ⟨hq1, hq2⟩ := pushNew_mem queued [] (step n)
     have hn : Reaches step root n := hInv.work_reach n (List.mem_cons_self ..)
-    have hnq : n ∈ queued := hInv.work_queued n (List.mem_cons_self ..)
     have hcov : ∀ q ∈ (pushNew queued [] (step n)).1,
         q ∈ table.insert n (step n) ∨ q ∈ (pushNew queued [] (step n)).2.reverse ++ rest := by
       intro q hq
@@ -254,16 +247,6 @@ theorem buildTable_inv {step : Name → List Name} {root : Name} :
           · rcases List.mem_cons.mp hw with rfl | hw
             · exact .inl (mem_table_insert.mpr (.inl rfl))
             · exact .inr (List.mem_append_right _ hw)
-        table_queued := fun k hk => by
-          rcases mem_table_insert.mp hk with rfl | hk
-          · exact (hq1 k).mpr (.inl hnq)
-          · exact (hq1 k).mpr (.inl (hInv.table_queued k hk))
-        work_queued := fun w hw => by
-          rcases List.mem_append.mp hw with hw | hw
-          · rcases (hq2 w).mp (List.mem_reverse.mp hw) with hnil | ⟨hwr, _⟩
-            · exact nomatch hnil
-            · exact (hq1 w).mpr (.inr hwr)
-          · exact (hq1 w).mpr (.inl (hInv.work_queued w (List.mem_cons_of_mem _ hw)))
         queued_cov := hcov
         table_eq := fun k hk => by
           rw [Std.HashMap.getD_insert]
