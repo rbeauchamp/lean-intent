@@ -19,7 +19,7 @@ Two verification readers bridge compiled Lean/Lake artifacts into pure proved de
 - **Deliberately excluded compiler artifacts** (documented remedies live in `docs/execution.md`):
   - Extracted closed terms `c._closed_i` (`Lean/Compiler/LCNF/ExtractClosed.lean`, lines 216–233): cached and shared across unrelated declarations, so reaching one does not establish running `c`.
   - Lifted lambdas from inlined `c`: reached only when callers inline `c`.
-  - Specializations `c._at_.caller.spec_i` (`Lean/Compiler/LCNF/Specialize.lean`, lines 30 and 315–318): origin metadata lives in a module-private compiler cache that `lean-intent` does not read (remedy: `@[nospecialize]`).
+  - Specializations `c._at_.caller.spec_i` (`Lean/Compiler/LCNF/Specialize.lean`, lines 30 and 315–318): origin metadata lives in a module-private compiler cache that `lean-intent` does not read (remedy: `@[nospecialize]`, `Lean/Compiler/LCNF/SpecInfo.lean` lines 197–198).
 
 ### Closed-form ASCII module-name decoding (`LeanIntent/Required/ModuleName.lean`)
 

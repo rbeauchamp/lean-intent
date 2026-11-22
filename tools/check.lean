@@ -1270,21 +1270,70 @@ def parseRegulaCoverageLine (line : String) : Option (Nat × Nat) := do
     return (nMods, nDecls)
   | _ => none
 
+structure CanonicalPosixPath where
+  path : System.FilePath
+  abs : path.toString.startsWith "/" = true
+
+def pathSegments (p : System.FilePath) : List String :=
+  (p.toString.splitOn "/").filter (· ≠ "")
+
+def isSameOrSubpath (root target : CanonicalPosixPath) : Bool :=
+  (pathSegments root.path).isPrefixOf (pathSegments target.path)
+
+theorem isSameOrSubpath_eq_true_iff (root target : CanonicalPosixPath) :
+    isSameOrSubpath root target = true ↔
+      ∃ rest, pathSegments target.path = pathSegments root.path ++ rest := by
+  unfold isSameOrSubpath
+  exact List.isPrefixOf_iff_prefix.trans
+    ⟨fun ⟨rest, h⟩ => ⟨rest, h.symm⟩, fun ⟨rest, h⟩ => ⟨rest, h.symm⟩⟩
+
+def CanonicalPosixPath.ofRealPath (rule label : String) (raw : System.FilePath) (checkSymlinks : Bool) :
+    IO CanonicalPosixPath := do
+  let real ← IO.FS.realPath raw
+  let s := real.toString
+  if s.contains '\n' || s.contains '\r' || s.contains '\x00' then
+    throw <| IO.userError s!"{rule}: resolved {label} {s.quote} contains control characters"
+  if (pathSegments real).any (fun seg => seg == "." || seg == "..") then
+    throw <| IO.userError s!"{rule}: resolved {label} {s.quote} contains relative segments"
+  if checkSymlinks then
+    discard <| checkNoSymlinkDir rule label s
+  if h : s.startsWith "/" then
+    return ⟨real, h⟩
+  else
+    throw <| IO.userError s!"{rule}: resolved {label} {s.quote} is not an absolute POSIX path"
+
+def resolveScratchParent : IO System.FilePath := do
+  for var in ["TMPDIR", "TMP", "TEMP", "TEMPDIR"] do
+    if let some raw ← IO.getEnv var then
+      if raw.isEmpty then
+        throw <| IO.userError s!"REGULA: {var} is set to an empty scratch directory path"
+      return System.FilePath.mk raw
+  return System.FilePath.mk "/tmp"
+
 def checkRegula (mods : Array Name) : IO (Array Rejection) := do
   if let some err ← checkCommittedRegularFile regulaPinFile then
     return #[{ rule := "REGULA", message := err }]
   let pin ← readRegulaPin
   let regulaDir ← ensureRegulaDir pin
-  let pkgReal ← IO.FS.realPath "."
-  let pkgRealStr := pkgReal.toString
-  if pkgRealStr.contains '\n' || pkgRealStr.contains '\r' then
-    throw <| IO.userError s!"REGULA: resolved package directory {pkgRealStr.quote} contains newline characters"
-  let tmpBase ← IO.FS.realPath (← IO.FS.createTempDir)
+  let pkg ← CanonicalPosixPath.ofRealPath "REGULA" "resolved package directory" "." false
+  let pkgRealStr := pkg.path.toString
+  let scratchParent ← CanonicalPosixPath.ofRealPath "REGULA" "scratch parent directory"
+    (← resolveScratchParent) true
+  if isSameOrSubpath pkg scratchParent then
+    throw <| IO.userError
+      s!"REGULA: scratch parent directory {scratchParent.path.toString.quote} overlaps target workspace {pkgRealStr.quote}"
+  let rawTmpBase ← IO.FS.createTempDir
   let (preSnap, out, postSnap) ←
     try
-      discard <| checkNoSymlinkDir "REGULA" "temporary build directory" tmpBase.toString
-      let tarPath := tmpBase / "regula.tar"
-      let srcDir := tmpBase / "src"
+      let tmpBase ← CanonicalPosixPath.ofRealPath "REGULA" "temporary build directory" rawTmpBase true
+      unless tmpBase.path.parent == some scratchParent.path do
+        throw <| IO.userError
+          s!"REGULA: temporary build directory {tmpBase.path.toString.quote} is not under scratch parent {scratchParent.path.toString.quote}"
+      if isSameOrSubpath pkg tmpBase || isSameOrSubpath tmpBase pkg then
+        throw <| IO.userError
+          s!"REGULA: temporary build directory {tmpBase.path.toString.quote} overlaps target workspace {pkgRealStr.quote}"
+      let tarPath := tmpBase.path / "regula.tar"
+      let srcDir := tmpBase.path / "src"
       IO.FS.createDir srcDir
       let archOut ← gitIn regulaDir #["archive", "--format=tar", s!"--output={tarPath}", pin.commit]
       unless archOut.exitCode == 0 do
@@ -1305,7 +1354,7 @@ def checkRegula (mods : Array Name) : IO (Array Rejection) := do
       pure (preSnap, out, postSnap)
     finally
       try
-        IO.FS.removeDirAll tmpBase
+        IO.FS.removeDirAll rawTmpBase
       catch _ => pure ()
   if preSnap != postSnap then
     return #[{ rule := "REGULA", message := "Regula mutated the lean-intent workspace during proof-verdict checking" }]
