@@ -50,18 +50,72 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_version="v0.2.0"
-          expected_sha256="f1a5d5cee2214515f9d36d3bb7245beee3856c06a85f6593ac0b23c4a0c6941e"
-          pin_version="$(awk -F= '$1 == "VERSION" { print $2 }' tools/no-comments.pin)"
-          pin_sha256="$(awk -F= '$1 == "LINUX_X86_64_SHA256" { print $2 }' tools/no-comments.pin)"
-          if [ "$pin_version" != "$expected_version" ] || [ "$pin_sha256" != "$expected_sha256" ]; then
-            echo "::error::tools/no-comments.pin does not match pinned release $expected_version ($expected_sha256)"
+          if [ ! -f tools/no-comments.pin ] || [ -L tools/no-comments.pin ] || [ -L tools ]; then
+            echo "::error::tools/no-comments.pin must be a regular file with no symlink components"
+            exit 1
+          fi
+          seen_version=0
+          seen_darwin=0
+          seen_linux=0
+          pin_version=""
+          pin_darwin_sha256=""
+          pin_linux_sha256=""
+          while IFS= read -r line || [ -n "$line" ]; do
+            case "$line" in
+              *$'\r'*)
+                echo "::error::tools/no-comments.pin must use LF line endings"
+                exit 1
+                ;;
+              VERSION=*)
+                if [ "$seen_version" -ne 0 ]; then
+                  echo "::error::tools/no-comments.pin has duplicate VERSION key"
+                  exit 1
+                fi
+                seen_version=1
+                pin_version="${line#VERSION=}"
+                ;;
+              DARWIN_ARM64_SHA256=*)
+                if [ "$seen_darwin" -ne 0 ]; then
+                  echo "::error::tools/no-comments.pin has duplicate DARWIN_ARM64_SHA256 key"
+                  exit 1
+                fi
+                seen_darwin=1
+                pin_darwin_sha256="${line#DARWIN_ARM64_SHA256=}"
+                ;;
+              LINUX_X86_64_SHA256=*)
+                if [ "$seen_linux" -ne 0 ]; then
+                  echo "::error::tools/no-comments.pin has duplicate LINUX_X86_64_SHA256 key"
+                  exit 1
+                fi
+                seen_linux=1
+                pin_linux_sha256="${line#LINUX_X86_64_SHA256=}"
+                ;;
+              *)
+                echo "::error::tools/no-comments.pin contains unexpected line"
+                exit 1
+                ;;
+            esac
+          done < tools/no-comments.pin
+          if [ "$seen_version" -ne 1 ] || [ "$seen_darwin" -ne 1 ] || [ "$seen_linux" -ne 1 ]; then
+            echo "::error::tools/no-comments.pin is missing required keys"
+            exit 1
+          fi
+          if ! [[ "$pin_version" =~ ^v[A-Za-z0-9.-]+$ ]] || [[ "$pin_version" == *..* ]]; then
+            echo "::error::tools/no-comments.pin has invalid VERSION: $pin_version"
+            exit 1
+          fi
+          if ! [[ "$pin_darwin_sha256" =~ ^[0-9a-f]{64}$ ]] || ! [[ "$pin_linux_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::tools/no-comments.pin has invalid or missing SHA-256 digest"
+            exit 1
+          fi
+          if [ -L "$RUNNER_TEMP" ] || [ -L "$RUNNER_TEMP/no-comments" ]; then
+            echo "::error::RUNNER_TEMP no-comments destination must not be a symlink"
             exit 1
           fi
           curl -sSfL --proto '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --retry-delay 2 \
             -o "$RUNNER_TEMP/no-comments" \
             "https://github.com/rbeauchamp/lean-no-comments/releases/download/${pin_version}/no-comments-linux-x86_64"
-          echo "${pin_sha256}  $RUNNER_TEMP/no-comments" | sha256sum --check --strict
+          printf '%s  %s\n' "$pin_linux_sha256" "$RUNNER_TEMP/no-comments" | sha256sum --check --strict
           chmod 0755 "$RUNNER_TEMP/no-comments"
           echo "NO_COMMENTS_BIN=$RUNNER_TEMP/no-comments" >> "$GITHUB_ENV"
       # LAKE-CONFIG, LEAN-BUILD, LEAN-MODULE, AXIOMS, PROCESS, CODES and NO-COMMENTS: no other

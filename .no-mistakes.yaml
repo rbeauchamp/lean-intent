@@ -25,25 +25,25 @@
 # elaborates tools/check.lean against Lean and Lake and runs once per side, peaked at 2.94 and
 # 2.95 GiB under Lean v4.36.0 on 2026-11-20 (down from 4.76 GiB under Lean v4.35.0 on 2026-10-30
 # and 2026-11-05); the 6 GiB bound is kept. Measure again when the library grows or the toolchain
-# changes, and raise a bound before a peak comes within 15% of it. The comment check
-# (NO-COMMENTS), which the check runs after its build has ended and after its audit of codes, and
-# before it imports the library for its other audits, reads each tracked Lean file in a child
-# process, three at a time, and is now the check's peak: on 2026-11-20 under Lean v4.36.0 on the
-# same machine, the check with it peaked at 5.63 GiB, 140 seconds into a run in an already-built
-# tree, sampled every 0.2 seconds (measured alone under Lean v4.35.0 over 67 files against a built
-# library, it had peaked at 5.52 and 5.46 GiB), which is below the 9 GiB bound by more than 15%.
-# The check with it was measured on 2026-11-21 under Lean v4.36.0 in a clean tree with an empty
-# artifact cache (no `.lake` directory, empty `LAKE_CACHE_DIR`, `LAKE_ARTIFACT_CACHE` unset),
-# sampled every 0.1 seconds: `tools/check.lean` peaked at 5.523 GiB (5,790,928 KiB, 154.3 seconds
-# in across 4 processes during the readers), and `--tests` peaked at 3.065 GiB (3,213,552 KiB) in
-# the unbuilt clean tree and 3.059 GiB (3,207,232 KiB) after the build, all well below the kept
-# 9 GiB and 6 GiB bounds with > 15% margin. After migrating NO-COMMENTS onto compiled
-# `rbeauchamp/lean-no-comments` `v0.2.0` on 2026-11-21 (pinned in `tools/no-comments.pin`,
-# configured in `.no-comments.json`), sampling summed process-group RSS every 0.1 seconds on the
-# same machine: standalone `no-comments check` peaked at 1.821 GiB (1,909,072 KiB across 5
-# processes), clean empty-cache `lean --run tools/check.lean` (including downloading the v0.2.0
-# binary) peaked at 4.733 GiB (4,963,136 KiB during the initial build), built `tools/check.lean`
-# peaked at 2.535 GiB (2,658,528 KiB), and `--tests` peaked at 2.965 GiB (3,108,880 KiB).
+# changes, and raise a bound before a peak comes within 15% of it. Historically, before migrating
+# to compiled `no-comments`, the in-repo comment check (`NO-COMMENTS`), which ran after the build
+# and code audit and before library import, read each tracked Lean file in a child process three at
+# a time and was then the check's peak: on 2026-11-20 under Lean v4.36.0 on the same machine, the
+# check with it peaked at 5.63 GiB, 140 seconds into a run in an already-built tree, sampled every
+# 0.2 seconds (measured alone under Lean v4.35.0 over 67 files against a built library, it had
+# peaked at 5.52 and 5.46 GiB), which was below the 9 GiB bound by more than 15%. Also before that
+# migration, measured on 2026-11-21 under Lean v4.36.0 in a clean tree with an empty artifact cache
+# (no `.lake` directory, empty `LAKE_CACHE_DIR`, `LAKE_ARTIFACT_CACHE` unset), sampled every 0.1
+# seconds: `tools/check.lean` peaked at 5.523 GiB (5,790,928 KiB, 154.3 seconds in across 4
+# processes during the readers), and `--tests` peaked at 3.065 GiB (3,213,552 KiB) in the unbuilt
+# clean tree and 3.059 GiB (3,207,232 KiB) after the build. Currently, after migrating NO-COMMENTS
+# onto compiled `rbeauchamp/lean-no-comments` `v0.2.0` on 2026-11-21 (pinned in
+# `tools/no-comments.pin`, configured in `.no-comments.json`), sampling summed process-group RSS
+# every 0.1 seconds on the same machine: standalone `no-comments check` peaked at 1.821 GiB
+# (1,909,072 KiB across 5 processes), clean empty-cache `lean --run tools/check.lean` (including
+# downloading the v0.2.0 binary) peaked at 4.733 GiB (4,963,136 KiB during the initial build),
+# built `tools/check.lean` peaked at 2.535 GiB (2,658,528 KiB), and `--tests` peaked at 2.965 GiB
+# (3,108,880 KiB), all well below the kept 9 GiB and 6 GiB bounds with > 15% margin.
 #
 # Time. Each check also runs under a wall-clock limit, so that a check that stalls fails and gives
 # back its share of the memory budget instead of holding the share and the run until someone stops
@@ -123,7 +123,7 @@ test:
       lean_files=$(git ls-files -- '*.lean')
       if [ -n "$lean_files" ]; then
         status=0
-        no-mistakes admit --memory 6GiB --limit "none; measured peak 3.065 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests || status=$?
+        no-mistakes admit --memory 6GiB --limit "none; measured peak 2.965 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests || status=$?
         case $status in
           124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 420 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
           137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 420 seconds and did not stop within 30 seconds of TERM" >&2 ;;
@@ -147,7 +147,8 @@ test:
 # passing when it finds nothing to check: the checks refuse a library with no Lean file or no
 # declaration, and the listing a project with no Lean file. The two run one after the other, so
 # the command's peak is the larger of the two peaks the paragraph on memory above gives, the
-# check's 5.63 GiB, which is below the check's 9 GiB bound by more than 15%.
+# check's 4.733 GiB (down from 5.63 GiB historically before compiled no-comments v0.2.0), which is
+# below the check's 9 GiB bound by more than 15%.
 #
 # What a change re-checks is Lake's decision: Lake reuses an earlier output only where its own
 # record of the module's inputs matches, the trace in .lake/build or the input hash that finds an
@@ -165,14 +166,14 @@ commands:
     export LAKE_CACHE_DIR="$PWD/.lake/cache"
     unset LAKE_ARTIFACT_CACHE
     status=0
-    no-mistakes admit --memory 9GiB --limit "none; measured peak 5.63 GiB" -- gtimeout --foreground --verbose --kill-after=30 1020 lean --run tools/check.lean || status=$?
+    no-mistakes admit --memory 9GiB --limit "none; measured peak 4.733 GiB" -- gtimeout --foreground --verbose --kill-after=30 1020 lean --run tools/check.lean || status=$?
     case $status in
       124) echo "lean --run tools/check.lean reached its wall-clock limit of 1020 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
       137) echo "lean --run tools/check.lean was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 1020 seconds and did not stop within 30 seconds of TERM" >&2 ;;
     esac
     [ "$status" -eq 0 ] || exit "$status"
     mkdir -p .lake
-    no-mistakes admit --memory 6GiB --limit "none; measured peak 3.065 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests > .lake/tests-listing || status=$?
+    no-mistakes admit --memory 6GiB --limit "none; measured peak 2.965 GiB" -- gtimeout --foreground --verbose --kill-after=30 420 lean --run tools/check.lean --tests > .lake/tests-listing || status=$?
     case $status in
       124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 420 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
       137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 420 seconds and did not stop within 30 seconds of TERM" >&2 ;;
@@ -198,7 +199,7 @@ commands:
 build_outputs:
   command: |
     status=0
-    no-mistakes admit --memory 9GiB --limit "none; measured peak 5.63 GiB" -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true gtimeout --foreground --verbose --kill-after=30 1020 lean --run tools/check.lean || status=$?
+    no-mistakes admit --memory 9GiB --limit "none; measured peak 4.733 GiB" -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true gtimeout --foreground --verbose --kill-after=30 1020 lean --run tools/check.lean || status=$?
     case $status in
       124) echo "lean --run tools/check.lean reached its wall-clock limit of 1020 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
       137) echo "lean --run tools/check.lean was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 1020 seconds and did not stop within 30 seconds of TERM" >&2 ;;

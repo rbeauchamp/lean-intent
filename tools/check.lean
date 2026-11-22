@@ -20,6 +20,8 @@ def noCommentsPinFile : String := "tools/no-comments.pin"
 
 def noCommentsConfigFile : String := ".no-comments.json"
 
+def noCommentsRatchetFile : String := "tools/comment-ratchet.json"
+
 def run (cmd : String) (args : Array String) : IO (UInt32 × String) := do
   let out ← IO.Process.output { cmd, args }
   return (out.exitCode, out.stdout ++ out.stderr)
@@ -447,6 +449,84 @@ def BaseRef.parse (raw : String) : Except String BaseRef :=
 structure CheckOpts where
   baseRef? : Option BaseRef := none
 
+def isRegularGitMode (mode : String) : Bool :=
+  mode == "100644" || mode == "100755"
+
+inductive GitIndexEntry where
+  | absent
+  | regular (oid : String)
+  | invalid (detail : String)
+
+def parseGitIndexHeader (expectedPath path : String) (fields : List String) : Option String :=
+  match fields with
+  | [mode, oid, "0"] =>
+    if path == expectedPath && isRegularGitMode mode && oid != "" then some oid else none
+  | _ => none
+
+def parseGitIndexEntry (expectedPath raw : String) : GitIndexEntry :=
+  match raw.splitOn "\x00" with
+  | [""] => .absent
+  | [entry, ""] =>
+    match entry.splitOn "\t" with
+    | [header, path] =>
+      match parseGitIndexHeader expectedPath path (header.splitOn " ") with
+      | some oid => .regular oid
+      | none => .invalid entry
+    | _ => .invalid entry
+  | _ => .invalid (raw.replace "\x00" "; ")
+
+theorem parseGitIndexHeader_eq_some_iff (expectedPath path oid : String) (fields : List String) :
+    parseGitIndexHeader expectedPath path fields = some oid ↔
+      path = expectedPath ∧
+      oid ≠ "" ∧
+      ∃ mode, (mode = "100644" ∨ mode = "100755") ∧ fields = [mode, oid, "0"] := by
+  unfold parseGitIndexHeader isRegularGitMode
+  constructor
+  · intro h
+    split at h
+    · split at h
+      · rename_i mode _ hc
+        simp only [Option.some.injEq] at h
+        subst h
+        simp only [Bool.and_eq_true, Bool.or_eq_true, beq_iff_eq, bne_iff_ne] at hc
+        exact ⟨hc.1.1, hc.2, mode, hc.1.2, rfl⟩
+      · cases h
+    · cases h
+  · rintro ⟨rfl, hoid, mode, hmode, rfl⟩
+    rcases hmode with rfl | rfl <;> simp [hoid]
+
+theorem parseGitIndexEntry_regular_iff (expectedPath raw oid : String) :
+    parseGitIndexEntry expectedPath raw = .regular oid ↔
+      ∃ entry header mode,
+        raw.splitOn "\x00" = [entry, ""] ∧
+        entry.splitOn "\t" = [header, expectedPath] ∧
+        (mode = "100644" ∨ mode = "100755") ∧
+        oid ≠ "" ∧
+        header.splitOn " " = [mode, oid, "0"] := by
+  unfold parseGitIndexEntry
+  constructor
+  · intro h
+    split at h
+    · cases h
+    · rename_i entry hr
+      split at h
+      · rename_i header path ht
+        split at h
+        · rename_i oid' hh
+          cases h
+          have ⟨hp, hoid, mode, hmode, hf⟩ :=
+            (parseGitIndexHeader_eq_some_iff expectedPath path oid (header.splitOn " ")).mp hh
+          subst hp
+          exact ⟨entry, header, mode, hr, ht, hmode, hoid, hf⟩
+        · cases h
+      · cases h
+    · cases h
+  · rintro ⟨entry, header, mode, hr, ht, hmode, hoid, hf⟩
+    have hh :=
+      (parseGitIndexHeader_eq_some_iff expectedPath expectedPath oid (header.splitOn " ")).mpr
+        ⟨rfl, hoid, mode, hmode, hf⟩
+    simp [hr, ht, hh]
+
 def checkWorkingTreeRegularFile (path : String) : IO (Option String) := do
   let comps := path.splitOn "/"
   if comps.any (fun c => c.isEmpty || c == "." || c == "..") then
@@ -472,6 +552,50 @@ where
       unless info.type == .dir do
         return some s!"{next} is not a directory in the working tree"
       walk nextSeg tl next
+
+def checkCommittedRegularFile (path : String) : IO (Option String) := do
+  let staged ← git #["ls-files", "--stage", "-z", "--full-name", "--", path]
+  match parseGitIndexEntry path staged with
+  | .absent =>
+    return some s!"{path} is not tracked at that exact path in Git's index"
+  | .invalid detail =>
+    return some s!"{path} is not a regular staged file at that exact path in Git's index ({detail})"
+  | .regular _ =>
+    checkWorkingTreeRegularFile path
+
+def defaultBaseRefs : List String :=
+  ["refs/remotes/origin/main", "refs/heads/main"]
+
+def resolveCommit (ref : String) : IO (Option String) := do
+  let known ← IO.Process.output
+    { cmd := "git", args := #["rev-parse", "--verify", "--quiet", "--end-of-options", ref ++ "^{commit}"] }
+  if known.exitCode == 0 then
+    return some known.stdout.trimAscii.toString
+  else if known.exitCode == 1 then
+    return none
+  else
+    throw <| IO.userError s!"NO-COMMENTS: git rev-parse for {ref} failed:\n{known.stderr}"
+
+def exactRefExists (fullRef : String) : IO Bool := do
+  let res ← IO.Process.output
+    { cmd := "git", args := #["show-ref", "--verify", "--quiet", "--", fullRef] }
+  if res.exitCode == 0 then
+    return true
+  else if res.exitCode == 1 then
+    return false
+  else
+    throw <| IO.userError s!"NO-COMMENTS: git show-ref for {fullRef} failed:\n{res.stderr}"
+
+def resolveDefaultBaseCommit : IO String := do
+  for ref in defaultBaseRefs do
+    if ← exactRefExists ref then
+      let some sha ← resolveCommit ref
+        | throw <| IO.userError s!"NO-COMMENTS: default base ref {ref} does not name a commit"
+      match BaseRef.parse sha with
+      | .ok base => return base.value
+      | .error e =>
+        throw <| IO.userError s!"NO-COMMENTS: default base ref {ref} resolved to invalid commit ({e})"
+  throw <| IO.userError "NO-COMMENTS: neither refs/remotes/origin/main nor refs/heads/main names a commit; fetch the base branch or pass --base-ref <ref>"
 
 def readNoCommentsPin : IO NoCommentsPin := do
   let raw ← IO.FS.readFile noCommentsPinFile
@@ -509,94 +633,229 @@ def parseSha256Output (tool raw : String) : IO String := do
     throw <| IO.userError s!"NO-COMMENTS: {tool} produced empty output"
 
 def sha256File (path : System.FilePath) : IO String := do
-  let sha256sumRes? ← try
-    some <$> IO.Process.output { cmd := "sha256sum", args := #["--", path.toString] }
-  catch _ =>
-    pure none
-  match sha256sumRes? with
-  | some o =>
-    unless o.exitCode == 0 do
-      throw <| IO.userError s!"NO-COMMENTS: sha256sum failed on {path}:\n{o.stderr}"
-    parseSha256Output "sha256sum" o.stdout
-  | none =>
-    let o ← IO.Process.output { cmd := "shasum", args := #["-a", "256", "--", path.toString] }
-    unless o.exitCode == 0 do
-      throw <| IO.userError s!"NO-COMMENTS: shasum failed on {path}:\n{o.stderr}"
-    parseSha256Output "shasum" o.stdout
+  let (cmd, args) ←
+    if System.Platform.isOSX then
+      pure ("shasum", #["-a", "256", "--", path.toString])
+    else if System.Platform.isLinux then
+      pure ("sha256sum", #["--", path.toString])
+    else
+      throw <| IO.userError s!"NO-COMMENTS: unsupported platform target {System.Platform.target.quote} for SHA-256 verification"
+  let o ← IO.Process.output { cmd, args }
+  unless o.exitCode == 0 do
+    throw <| IO.userError s!"NO-COMMENTS: {cmd} failed on {path}:\n{o.stderr}"
+  parseSha256Output cmd o.stdout
 
-def ensureNoCommentsBin (pin : NoCommentsPin) : IO System.FilePath := do
-  let (assetName, expectedSha) ← platformAsset pin
-  let envBin? := (← IO.getEnv "NO_COMMENTS_BIN").bind fun s =>
-    let trimmed := s.trimAscii.toString
-    if trimmed.isEmpty then none else some trimmed
-  if let some raw := envBin? then
-    let bin ← try IO.FS.realPath raw catch _ =>
-      throw <| IO.userError s!"NO-COMMENTS: NO_COMMENTS_BIN ({raw}) does not exist or cannot be resolved"
-    let info ← try bin.metadata catch _ =>
-      throw <| IO.userError s!"NO-COMMENTS: NO_COMMENTS_BIN ({raw}) cannot be inspected"
+def buildPathPrefixes (isAbs : Bool) : List String → Option (List String × String)
+  | [] => none
+  | first :: rest =>
+    let p0 := if isAbs then "/" ++ first else first
+    some (go [] p0 rest)
+where
+  go (acc : List String) (cur : String) : List String → List String × String
+    | [] => (acc.reverse, cur)
+    | seg :: tl => go (cur :: acc) (cur ++ "/" ++ seg) tl
+
+def splitRegularPath (raw : String) : Except String (List String × String) :=
+  if raw.isEmpty then
+    .error "path is empty"
+  else if raw.contains '\x00' then
+    .error "path contains NUL byte"
+  else if raw.startsWith "//" then
+    .error "path starts with '//'"
+  else if raw.endsWith "/" then
+    .error "path ends with '/'"
+  else
+    let isAbs := raw.startsWith "/"
+    let segs := (raw.splitOn "/").filter (· ≠ "")
+    match buildPathPrefixes isAbs segs with
+    | some res => .ok res
+    | none => .error "path has no components"
+
+def checkNoSymlinkRegularFile (label raw : String) : IO System.FilePath := do
+  let (dirPrefixes, finalPath) ← match splitRegularPath raw with
+    | .ok res => pure res
+    | .error e => throw <| IO.userError s!"NO-COMMENTS: {label} ({raw.quote}) is invalid: {e}"
+  for p in dirPrefixes do
+    let info ← try System.FilePath.symlinkMetadata p catch _ =>
+      throw <| IO.userError s!"NO-COMMENTS: {label} ({raw.quote}) cannot inspect path component {p.quote}"
+    unless info.type == .dir do
+      throw <| IO.userError s!"NO-COMMENTS: {label} ({raw.quote}) traverses non-directory or symlink component {p.quote}"
+  let info ← try System.FilePath.symlinkMetadata finalPath catch _ =>
+    throw <| IO.userError s!"NO-COMMENTS: {label} ({raw.quote}) does not exist or cannot be inspected"
+  unless info.type == .file do
+    throw <| IO.userError s!"NO-COMMENTS: {label} ({raw.quote}) is not a regular file (symlinks are rejected)"
+  return System.FilePath.mk finalPath
+
+def copyFileBytes (src dst : System.FilePath) : IO Unit := do
+  let hIn ← IO.FS.Handle.mk src .read
+  let hOut ← IO.FS.Handle.mk dst .write
+  repeat
+    let chunk ← hIn.read 262144
+    if chunk.isEmpty then
+      break
+    hOut.write chunk
+  hOut.flush
+
+def noCommentsCacheDirPrefixes (expectedSha : String) : List String :=
+  [".lake", ".lake/cache", ".lake/cache/no-comments", s!".lake/cache/no-comments/{expectedSha}"]
+
+def noCommentsCacheBinPath (expectedSha : String) : System.FilePath :=
+  System.FilePath.mk s!".lake/cache/no-comments/{expectedSha}/no-comments"
+
+def checkCacheDirChain (expectedSha : String) : IO Unit := do
+  for p in noCommentsCacheDirPrefixes expectedSha do
+    let info ← try System.FilePath.symlinkMetadata p catch _ =>
+      throw <| IO.userError s!"NO-COMMENTS: cache directory {p} does not exist or cannot be inspected"
+    unless info.type == .dir do
+      throw <| IO.userError s!"NO-COMMENTS: cache path {p} is not a real directory (symlinks are rejected)"
+
+def ensureNoCommentsCacheDir (expectedSha : String) : IO System.FilePath := do
+  for p in noCommentsCacheDirPrefixes expectedSha do
+    let existing? ← try
+      some <$> System.FilePath.symlinkMetadata p
+    catch
+      | .noFileOrDirectory .. => pure none
+      | e => throw e
+    match existing? with
+    | some info =>
+      unless info.type == .dir do
+        throw <| IO.userError s!"NO-COMMENTS: cache path {p} is not a real directory (symlinks are rejected)"
+    | none =>
+      try
+        IO.FS.createDir p
+      catch
+        | .alreadyExists .. =>
+          let raced ← try System.FilePath.symlinkMetadata p catch _ =>
+            throw <| IO.userError s!"NO-COMMENTS: cannot inspect cache directory {p} after concurrent creation"
+          unless raced.type == .dir do
+            throw <| IO.userError s!"NO-COMMENTS: cache path {p} is not a real directory (symlinks are rejected)"
+        | e =>
+          throw <| IO.userError s!"NO-COMMENTS: failed to create cache directory {p}: {e}"
+      let created ← try System.FilePath.symlinkMetadata p catch _ =>
+        throw <| IO.userError s!"NO-COMMENTS: cannot inspect cache directory {p} after creation"
+      unless created.type == .dir do
+        throw <| IO.userError s!"NO-COMMENTS: cache path {p} is not a real directory (symlinks are rejected)"
+  return System.FilePath.mk s!".lake/cache/no-comments/{expectedSha}"
+
+def verifyNoCommentsCachePath (expectedSha : String) : IO (Option System.FilePath) := do
+  for p in noCommentsCacheDirPrefixes expectedSha do
+    let existing? ← try
+      some <$> System.FilePath.symlinkMetadata p
+    catch
+      | .noFileOrDirectory .. => pure none
+      | e => throw e
+    match existing? with
+    | none => return none
+    | some info =>
+      unless info.type == .dir do
+        throw <| IO.userError s!"NO-COMMENTS: cache path {p} is not a real directory (symlinks are rejected)"
+  let cacheBin := noCommentsCacheBinPath expectedSha
+  let binInfo? ← try
+    some <$> cacheBin.symlinkMetadata
+  catch
+    | .noFileOrDirectory .. => pure none
+    | e => throw e
+  let some info := binInfo? | return none
+  unless info.type == .file do
+    throw <| IO.userError s!"NO-COMMENTS: cached binary path {cacheBin} is not a regular file (symlinks are rejected)"
+  let actual ← sha256File cacheBin
+  unless actual == expectedSha do
+    throw <| IO.userError s!"NO-COMMENTS: cached binary {cacheBin} SHA-256 mismatch: expected {expectedSha}, got {actual}"
+  return some cacheBin
+
+def stageNoCommentsBin (expectedSha sourceLabel : String) (populate : System.FilePath → IO Unit) :
+    IO System.FilePath := do
+  let cacheDir ← ensureNoCommentsCacheDir expectedSha
+  let cacheBin := noCommentsCacheBinPath expectedSha
+  let preBin? ← try
+    some <$> cacheBin.symlinkMetadata
+  catch
+    | .noFileOrDirectory .. => pure none
+    | e => throw e
+  if let some info := preBin? then
     unless info.type == .file do
-      throw <| IO.userError s!"NO-COMMENTS: NO_COMMENTS_BIN ({raw}) is not a regular file"
-    let actual ← sha256File bin
-    unless actual == expectedSha do
-      throw <| IO.userError s!"NO-COMMENTS: NO_COMMENTS_BIN ({raw}) SHA-256 mismatch: expected {expectedSha}, got {actual}"
-    return bin
-  let cacheDir := System.FilePath.mk ".lake" / "cache" / "no-comments" / expectedSha
-  let cacheBin := cacheDir / "no-comments"
-  let existing? ← try some <$> cacheBin.symlinkMetadata catch _ => pure none
-  if let some info := existing? then
-    unless info.type == .file do
-      throw <| IO.userError s!"NO-COMMENTS: cached binary path {cacheBin} is not a regular file"
-    let actual ← sha256File cacheBin
-    unless actual == expectedSha do
-      throw <| IO.userError s!"NO-COMMENTS: cached binary {cacheBin} SHA-256 mismatch: expected {expectedSha}, got {actual}"
-    return cacheBin
-  IO.FS.createDirAll cacheDir
+      throw <| IO.userError s!"NO-COMMENTS: cached binary path {cacheBin} is not a regular file (symlinks are rejected)"
   let mk ← IO.Process.output { cmd := "mktemp", args := #[(cacheDir / "no-comments.tmp.XXXXXX").toString] }
   unless mk.exitCode == 0 do
     throw <| IO.userError s!"NO-COMMENTS: mktemp failed in {cacheDir}:\n{mk.stderr}"
-  let tmpPath := System.FilePath.mk mk.stdout.trimAscii.toString
+  let tmpRaw := mk.stdout.trimAscii.toString
+  let expectedPrefix := cacheDir.toString ++ "/no-comments.tmp."
+  unless tmpRaw.startsWith expectedPrefix && (tmpRaw.splitOn "/").length == 5 do
+    throw <| IO.userError s!"NO-COMMENTS: mktemp returned unexpected staging path {tmpRaw.quote}"
+  let tmpPath := System.FilePath.mk tmpRaw
   try
-    let url := s!"https://github.com/rbeauchamp/lean-no-comments/releases/download/{pin.version}/{assetName}"
-    let dl ← IO.Process.output {
-      cmd := "curl"
-      args := #[
-        "-sSfL", "--proto", "=https", "--tlsv1.2",
-        "--connect-timeout", "15", "--retry", "2", "--retry-delay", "2",
-        "--speed-time", "30", "--speed-limit", "1024",
-        "-o", tmpPath.toString, "--", url
-      ]
-    }
-    unless dl.exitCode == 0 do
-      throw <| IO.userError s!"NO-COMMENTS: failed to download {url}:\n{dl.stderr}"
+    let tmpPre ← try tmpPath.symlinkMetadata catch _ =>
+      throw <| IO.userError s!"NO-COMMENTS: staging file {tmpPath} cannot be inspected"
+    unless tmpPre.type == .file do
+      throw <| IO.userError s!"NO-COMMENTS: staging path {tmpPath} is not a regular file"
+    populate tmpPath
+    let tmpPost ← try tmpPath.symlinkMetadata catch _ =>
+      throw <| IO.userError s!"NO-COMMENTS: staging file {tmpPath} cannot be inspected after staging"
+    unless tmpPost.type == .file do
+      throw <| IO.userError s!"NO-COMMENTS: staging path {tmpPath} is not a regular file after staging"
     let actual ← sha256File tmpPath
     unless actual == expectedSha do
-      throw <| IO.userError s!"NO-COMMENTS: downloaded {assetName} ({pin.version}) SHA-256 mismatch: expected {expectedSha}, got {actual}"
+      throw <| IO.userError s!"NO-COMMENTS: {sourceLabel} SHA-256 mismatch: expected {expectedSha}, got {actual}"
     IO.setAccessRights tmpPath {
       user := { read := true, write := true, execution := true }
       group := { read := true, execution := true }
       other := { read := true, execution := true }
     }
+    checkCacheDirChain expectedSha
+    let preRenameBin? ← try
+      some <$> cacheBin.symlinkMetadata
+    catch
+      | .noFileOrDirectory .. => pure none
+      | e => throw e
+    if let some info := preRenameBin? then
+      unless info.type == .file do
+        throw <| IO.userError s!"NO-COMMENTS: cached binary path {cacheBin} is not a regular file (symlinks are rejected)"
     IO.FS.rename tmpPath cacheBin
-    let cachedActual ← sha256File cacheBin
-    unless cachedActual == expectedSha do
-      throw <| IO.userError s!"NO-COMMENTS: cached binary {cacheBin} SHA-256 mismatch after staging: expected {expectedSha}, got {cachedActual}"
-    return cacheBin
+    let some verified ← verifyNoCommentsCachePath expectedSha
+      | throw <| IO.userError s!"NO-COMMENTS: cached binary {cacheBin} missing after staging"
+    return verified
   finally
     try
-      if ← tmpPath.pathExists then
-        IO.FS.removeFile tmpPath
+      IO.FS.removeFile tmpPath
     catch _ => pure ()
 
+def ensureNoCommentsBin (pin : NoCommentsPin) : IO System.FilePath := do
+  let (assetName, expectedSha) ← platformAsset pin
+  match ← IO.getEnv "NO_COMMENTS_BIN" with
+  | some raw =>
+    let verifiedSrc ← checkNoSymlinkRegularFile "NO_COMMENTS_BIN" raw
+    stageNoCommentsBin expectedSha s!"NO_COMMENTS_BIN ({raw.quote})" fun tmpPath =>
+      copyFileBytes verifiedSrc tmpPath
+  | none =>
+    if let some cacheBin ← verifyNoCommentsCachePath expectedSha then
+      return cacheBin
+    let url := s!"https://github.com/rbeauchamp/lean-no-comments/releases/download/{pin.version}/{assetName}"
+    stageNoCommentsBin expectedSha s!"downloaded {assetName} ({pin.version})" fun tmpPath => do
+      let dl ← IO.Process.output {
+        cmd := "curl"
+        args := #[
+          "-sSfL", "--proto", "=https", "--tlsv1.2",
+          "--connect-timeout", "15", "--retry", "2", "--retry-delay", "2",
+          "--speed-time", "30", "--speed-limit", "1024",
+          "-o", tmpPath.toString, "--", url
+        ]
+      }
+      unless dl.exitCode == 0 do
+        throw <| IO.userError s!"NO-COMMENTS: failed to download {url}:\n{dl.stderr}"
+
 def checkComments (opts : CheckOpts) : IO (Array Rejection) := do
-  if let some err ← checkWorkingTreeRegularFile noCommentsPinFile then
-    return #[{ rule := "NO-COMMENTS", message := err }]
-  if let some err ← checkWorkingTreeRegularFile noCommentsConfigFile then
-    return #[{ rule := "NO-COMMENTS", message := err }]
+  let mut admissionErrs : Array Rejection := #[]
+  for path in [noCommentsPinFile, noCommentsConfigFile, noCommentsRatchetFile] do
+    if let some err ← checkCommittedRegularFile path then
+      admissionErrs := admissionErrs.push { rule := "NO-COMMENTS", message := err }
+  unless admissionErrs.isEmpty do
+    return admissionErrs
   let pin ← readNoCommentsPin
   let bin ← ensureNoCommentsBin pin
-  let mut args := #["check"]
-  if let some ref := opts.baseRef? then
-    args := args ++ #["--base-ref", ref.value]
+  let baseRefArg ← match opts.baseRef? with
+    | some ref => pure ref.value
+    | none => resolveDefaultBaseCommit
+  let args := #["check", "--base-ref", baseRefArg]
   let out ← IO.Process.output { cmd := bin.toString, args }
   if out.exitCode == 0 then
     return #[]
@@ -607,10 +866,13 @@ def checkComments (opts : CheckOpts) : IO (Array Rejection) := do
   return lines.map fun l => { rule := "NO-COMMENTS", message := l }
 
 def listComments (target? : Option String) : IO Unit := do
-  if let some err ← checkWorkingTreeRegularFile noCommentsPinFile then
-    throw <| IO.userError s!"NO-COMMENTS: {err}"
-  if let some err ← checkWorkingTreeRegularFile noCommentsConfigFile then
-    throw <| IO.userError s!"NO-COMMENTS: {err}"
+  let configErrs ← checkConfig
+  unless configErrs.isEmpty do
+    let details := "\n".intercalate (configErrs.toList.map fun e => s!"[{e.rule}] {e.message}")
+    throw <| IO.userError details
+  for path in [noCommentsPinFile, noCommentsConfigFile] do
+    if let some err ← checkCommittedRegularFile path then
+      throw <| IO.userError s!"NO-COMMENTS: {err}"
   let pin ← readNoCommentsPin
   let bin ← ensureNoCommentsBin pin
   let args := match target? with

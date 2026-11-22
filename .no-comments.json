@@ -2,10 +2,7 @@
   "workspaces": [
     {
       "dir": ".",
-      "srcDir": ".",
-      "lakeArgs": [],
-      "toolPrefixes": ["tools/"],
-      "excludePrefixes": []
+      "toolPrefixes": ["tools/"]
     }
   ],
   "exclude": [],
