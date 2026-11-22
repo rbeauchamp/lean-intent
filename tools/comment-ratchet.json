@@ -435,7 +435,7 @@
     "f64b56c71cf47db4",
     "f75726fc9040042c"
   ]},
-  {"file": "LeanIntent/Confirmation.lean", "comments": 127, "lines": 272, "fingerprints": [
+  {"file": "LeanIntent/Confirmation.lean", "comments": 126, "lines": 189, "fingerprints": [
     "003002450ae82f89",
     "03e0367dbee45c07",
     "06e76cf210e171e1",
@@ -541,7 +541,6 @@
     "cbc1791662471b93",
     "d01cfecb7321fb44",
     "d0e1abe057b21cfc",
-    "d2c9c2dcb4b5997a",
     "d6c85dd7d7a8d5ae",
     "d7e1f67b720dabf0",
     "d8da93eb0ff997c6",
@@ -564,15 +563,13 @@
     "fb16741741888f52",
     "fbc4e6c793d597d9"
   ]},
-  {"file": "LeanIntent/Confirmation/Read.lean", "comments": 18, "lines": 103, "fingerprints": [
+  {"file": "LeanIntent/Confirmation/Read.lean", "comments": 16, "lines": 50, "fingerprints": [
     "12373ff89be3eb54",
-    "285531e2d1d771ab",
     "6ac1c797de1212f6",
     "705f0df0b7cce34a",
     "71ad73a39576f7aa",
     "7bda5ee5bcfe37a3",
     "82286a82739eaed6",
-    "8b530494f25a9d9e",
     "a7f3c7397448d807",
     "ac939ba8d646eeca",
     "b3f6788ed9da2741",

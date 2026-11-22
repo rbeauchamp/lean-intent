@@ -3,90 +3,6 @@ module
 public import LeanIntent.Explain
 public import LeanIntent.Trace
 
-/-!
-# The check that a project's deliverables are confirmed
-
-A consequence counts as confirmed only when a declared owner confirmed it, or a party acting under
-a delegation that traces back to one; an agent marking its own specification confirmed would remove
-the one check no proof replaces. A project keeps its statements in its owners' log (`OwnersLog`) and
-declares each deliverable (`Deliverable`): a record, its explanation, with who settled each thing
-(`Restatement`, `Settled`), the answers it keeps, with who gave each (`Attributed`), and the proof
-that the record keeps them. Those values are ones a project writes. This module decides, from them
-and the log and nothing a caller chooses, whether they agree and the current revision of every
-deliverable is confirmed, and says why when it is not.
-
-* **The owners** are read from the log (`Declares`): it holds exactly one owners declaration, which
-  names at least one principal, every statement of the log belongs to that declaration's project, and
-  no two statements share an id (`Confirmed.nodup`). So no caller supplies who the owners are, and a
-  log with no owner declared passes nothing.
-* **An answer counts** (`Counts`) exactly when `LeanIntent.Trace` accepts it, by the owners so
-  declared, which is exactly when it traces back to a declared owner within the scope of every
-  delegation on the way (`counts_iff`, `Trace.check_eq_ok_iff`), for every log and statement. So the
-  check accepts every confirmation that traces back and refuses every other. Separately, each answer
-  that counts must record its source, so one that records none is a finding of the log.
-* **A revision** (`Revision`) is what the current build shows: the record's name, the text of its
-  rendering with no word of who settled what, the recorded standing of its restatement, the
-  consequences shown with their statuses, and the answers kept, each consequence with the text of
-  its predicate's whole meaning. An answer answers a question of the revision (`answersNow`) only
-  when it names that exact text, so an answer for an older revision answers nothing, and a
-  definition changed under an unchanged name changes the text.
-* **A revision is confirmed** (`Revision.Confirmed`) when:
-  - its plain restatement (`restatement`) has an answer that counts and confirms it at this revision,
-    by the owner its `Restatement` names, or, where it records none, by a delegate and no owner; and
-    none that counts declines it. Every revision asks this, so one that shows no consequence, or
-    whose every consequence is derived, still needs that confirmation;
-  - each consequence shown has a status that holds (`Settles`): answered and confirmed, by the
-    answerer it names, at this revision; or derived, which the type allows only where the restatement
-    stands as an owner's, with no answer at this revision. A fork, or a consequence not settled, does
-    not pass, and neither does one an answer that counts declines;
-  - each answer it keeps is backed by an answer that counts, by the answerer it names, at any
-    revision, with the same text and verdict; and each answer that counts on its record, but a
-    restatement, is one it keeps. So a deliverable cannot quietly drop a requirement: an answer stops
-    being one only when someone with authority retracts it.
-* **Each status agrees with the answers it keeps** (`Revision.Agrees`): one that records an answer
-  names one of them, by the same answerer with the same verdict, and one recorded as derived, which
-  says no one answered it, names no consequence one of them answers.
-* **The decision** (`findings`) lists everything wrong, and is empty exactly when the deliverables
-  are confirmed (`findings_eq_nil_iff`); each finding states what holds (`findings_sound`).
-* **The standing the log gives** (`logStanding`, `checked`): a status printed from these reads a
-  confirmation only where the log holds one of this revision, so a record revised after its owner
-  confirmed it stops printing as confirmed, whatever value it still holds (`logStanding_of_older`).
-
-A status is a field of a consequence the explanation shows, so a status of a consequence the revision
-no longer has does not exist; an answer in the log to such a consequence still counts, and must be
-kept or retracted.
-
-The decisions this module makes, each on the owner's behalf:
-
-* A refused answer does not count, and is reported (`Report.decisions`), but it does not stop the
-  deliverable being confirmed by answers that do count. A check that failed on any refused answer
-  would refuse answers that trace back, and would let any bad entry hold a project's confirmations.
-* Authority is read as the log now stands, whatever the dates. **A delegation revoked or removed, or
-  an owner removed from the declaration, after an answer was recorded**, takes the answer's authority
-  with it: it stops counting, and the check refuses until someone with authority answers again. A
-  date is what its author wrote, so a rule that kept an answer because of its date would let the date
-  keep an authority the project has withdrawn; refusing costs one answer given again.
-* **Of several owners, one confirming is enough**, as `Trace` reads every owner's authority alike; a
-  project that wants more says so by its own review, or by signatures (lean-intent #19).
-* A declined consequence of the current revision stops the deliverable, since each consequence shown
-  holds of it by proof: the record must change.
-* A log with several owners declarations is refused, and owners change by a reviewed edit of the one
-  declaration. A declaration names no author, and only signatures (lean-intent #19) could settle
-  which of several is in force.
-* **A log that repeats a statement's id is refused**, naming each id it repeats. `Trace` refuses an
-  answer whose id another statement shares, and breaks a link to a delegation whose id another
-  shares, so an unrelated statement could otherwise make an answer refuse and so drop out of what is
-  checked: an owner's decline would no longer stop the deliverable, with no retraction by anyone with
-  authority. Refusing costs one id renamed.
-
-What this module does not establish: that a statement's author made it, which review of the change
-that commits it checks, and a dishonest agent could invent an answer, which the history would show;
-that a consequence recorded as derived truly follows from the restatement, so an agent could record
-a real fork as derived, which the committed history shows; that the texts of a `Revision` are those
-of the current build, which `LeanIntent.Confirmation.Read` computes from Lean's environment; and that
-a rendering's text determines its meaning, which `LeanIntent.Render` lists as what it trusts.
--/
-
 public section
 
 namespace LeanIntent
@@ -133,8 +49,32 @@ structure Question where
   predicate : String
   deriving @[expose] DecidableEq
 
-@[expose] def restatement : Question :=
-  ⟨"the record's plain restatement", .entailment, "the record, as its revision prints it"⟩
+@[expose] def restatementConsequence : String := "the record's plain restatement"
+
+@[expose] def restatementPredicate : String := "the record, as its revision prints it"
+
+@[expose] def isRestatementAnswer (a : Statement.Answer) : Bool :=
+  a.consequence == restatementConsequence && a.kind == .entailment &&
+    a.predicate == restatementPredicate
+
+@[expose] def restatementAnswer (author : Authority) (record revision : String)
+    (verdict : Verdict) : Statement.Answer :=
+  { author, record, revision, consequence := restatementConsequence,
+    kind := .entailment, predicate := restatementPredicate, verdict }
+
+inductive Target where
+  | restatement
+  | consequence (q : Question)
+  deriving @[expose] DecidableEq
+
+inductive Asked where
+  | restatement
+  | consequence (name : String)
+  deriving @[expose] DecidableEq
+
+@[expose] def Target.asked : Target → Asked
+  | .restatement => .restatement
+  | .consequence q => .consequence q.consequence
 
 /-- A deliverable's current revision, as the build shows it. -/
 structure Revision where
@@ -152,17 +92,148 @@ structure Revision where
 
 /-- The answer `a` is to the question `q`. -/
 @[expose] def Question.names (q : Question) (a : Statement.Answer) : Bool :=
-  a.consequence == q.consequence && a.kind == q.kind && a.predicate == q.predicate
+  !isRestatementAnswer a &&
+    a.consequence == q.consequence && a.kind == q.kind && a.predicate == q.predicate
+
+@[expose] def Target.names : Target → Statement.Answer → Bool
+  | .restatement, a => isRestatementAnswer a
+  | .consequence q, a => q.names a
+
+@[expose] def Target.matchesName : Target → Statement.Answer → Bool
+  | .restatement, a => isRestatementAnswer a
+  | .consequence q, a => !isRestatementAnswer a && a.consequence == q.consequence
+
+@[expose] def Asked.Matches : Asked → Statement.Answer → Prop
+  | .restatement, a => isRestatementAnswer a = true
+  | .consequence c, a => isRestatementAnswer a = false ∧ a.consequence = c
+
+theorem isRestatementAnswer_restatementAnswer (author : Authority) (record revision : String)
+    (verdict : Verdict) :
+    isRestatementAnswer (restatementAnswer author record revision verdict) = true := rfl
+
+theorem Target.restatement_ne_consequence (q : Question) :
+    Target.restatement ≠ Target.consequence q := by
+  intro h; cases h
+
+theorem Asked.restatement_ne_consequence (name : String) :
+    Asked.restatement ≠ Asked.consequence name := by
+  intro h; cases h
+
+theorem Target.names_disjoint (q : Question) (a : Statement.Answer) :
+    ¬ (Target.restatement.names a = true ∧ (Target.consequence q).names a = true) := by
+  rintro ⟨hr, hc⟩
+  change isRestatementAnswer a = true at hr
+  simp [Target.names, Question.names, hr] at hc
+
+theorem Question.names_not_restatement {q : Question} {a : Statement.Answer}
+    (h : q.names a = true) : isRestatementAnswer a = false := by
+  simp only [Question.names, Bool.and_eq_true, Bool.not_eq_true'] at h
+  exact h.1.1.1
+
+theorem isRestatementAnswer_false_of_predicate_ne {a : Statement.Answer}
+    (h : a.predicate ≠ restatementPredicate) : isRestatementAnswer a = false := by
+  simp [isRestatementAnswer, h]
+
+theorem Question.names_of_predicate_ne {q : Question} {a : Statement.Answer}
+    (h : q.predicate ≠ restatementPredicate) :
+    q.names a = (a.consequence == q.consequence && a.kind == q.kind && a.predicate == q.predicate) := by
+  by_cases hp : a.predicate = q.predicate
+  · have ha : a.predicate ≠ restatementPredicate := hp ▸ h
+    simp [Question.names, isRestatementAnswer_false_of_predicate_ne ha]
+  · have hb : (a.predicate == q.predicate) = false := beq_false_of_ne hp
+    simp [Question.names, hb]
+
+theorem Target.matchesName_eq_true_iff (q : Target) (a : Statement.Answer) :
+    q.matchesName a = true ↔ q.asked.Matches a := by
+  cases q <;> simp [Target.matchesName, Target.asked, Asked.Matches]
+
+theorem Target.asked_matches_of_names {q : Target} {a : Statement.Answer}
+    (h : q.names a = true) : q.asked.Matches a := by
+  cases q with
+  | restatement => exact h
+  | consequence qc =>
+    simp only [Target.names, Question.names, Bool.and_eq_true, Bool.not_eq_true',
+      beq_iff_eq] at h
+    exact ⟨h.1.1.1, h.1.1.2⟩
 
 /-- The answer `a` answers the question `q` of the revision `rev`: it names the record, the
 revision's exact text and the question. An answer to an older revision does not. -/
-@[expose] def Revision.answersNow (rev : Revision) (q : Question) (a : Statement.Answer) : Bool :=
+@[expose] def Revision.answersNow (rev : Revision) (q : Target) (a : Statement.Answer) : Bool :=
   a.record == rev.record && a.revision == rev.text && q.names a
 
 /-- The answer `a` backs a kept answer to `q` with the verdict `v`, of the revision `rev`: it names
 the record and the question, with the same text and verdict, at any revision. -/
 @[expose] def Revision.backs (rev : Revision) (q : Question) (v : Verdict) (a : Statement.Answer) : Bool :=
   a.record == rev.record && q.names a && a.verdict == v
+
+@[expose] def buildAnswer (rev : Revision) (question : Asked) (author : Authority)
+    (verdict : Verdict) : Except String Statement.Answer :=
+  match question with
+  | .restatement => .ok (restatementAnswer author rev.record rev.text verdict)
+  | .consequence name =>
+    match (rev.shown.map (·.1)).find? (·.consequence == name) with
+    | some q => .ok
+        { author, record := rev.record, revision := rev.text, consequence := q.consequence,
+          kind := q.kind, predicate := q.predicate, verdict }
+    | none => .error s!"asks no consequence named {name}"
+
+theorem buildAnswer_restatement (rev : Revision) (author : Authority) (verdict : Verdict) :
+    ∃ a, buildAnswer rev .restatement author verdict = .ok a ∧
+      rev.answersNow .restatement a = true ∧ isRestatementAnswer a = true := by
+  refine ⟨restatementAnswer author rev.record rev.text verdict, rfl, ?_, rfl⟩
+  simp [Revision.answersNow, Target.names, restatementAnswer, isRestatementAnswer]
+
+theorem buildAnswer_consequence {rev : Revision} {name : String} {author : Authority}
+    {verdict : Verdict} {a : Statement.Answer}
+    (h : buildAnswer rev (.consequence name) author verdict = .ok a) :
+    ∃ q ∈ rev.shown.map (·.1), q.consequence = name ∧ a.record = rev.record ∧
+      a.revision = rev.text ∧ a.consequence = q.consequence ∧ a.kind = q.kind ∧
+      a.predicate = q.predicate ∧ a.verdict = verdict ∧
+      (q.predicate ≠ restatementPredicate → rev.answersNow (.consequence q) a = true) := by
+  unfold buildAnswer at h
+  cases hf : (rev.shown.map (·.1)).find? (·.consequence == name) with
+  | none => simp [hf] at h
+  | some q =>
+    simp only [hf, Except.ok.injEq] at h
+    subst h
+    have hmem := List.mem_of_find?_eq_some hf
+    have hname : q.consequence = name := by simpa using List.find?_some hf
+    refine ⟨q, hmem, hname, rfl, rfl, rfl, rfl, rfl, rfl, fun hp => ?_⟩
+    simp [Revision.answersNow, Target.names, Question.names_of_predicate_ne hp]
+
+theorem buildAnswer_consequence_not_restatement {rev : Revision} {name : String}
+    {author : Authority} {verdict : Verdict} {a : Statement.Answer}
+    (hpred : ∀ x ∈ rev.shown, x.1.predicate ≠ restatementPredicate)
+    (h : buildAnswer rev (.consequence name) author verdict = .ok a) :
+    isRestatementAnswer a = false ∧ Target.restatement.names a = false := by
+  obtain ⟨q, hmem, -, -, -, -, -, hp, -, -⟩ := buildAnswer_consequence h
+  obtain ⟨x, hx, rfl⟩ := List.mem_map.mp hmem
+  have hne : a.predicate ≠ restatementPredicate := hp ▸ hpred x hx
+  have hf := isRestatementAnswer_false_of_predicate_ne hne
+  exact ⟨hf, hf⟩
+
+theorem buildAnswer_consequence_of_mem {rev : Revision} {q : Question} {author : Authority}
+    {verdict : Verdict} (hpred : ∀ x ∈ rev.shown, x.1.predicate ≠ restatementPredicate)
+    (hq : q ∈ rev.shown.map (·.1)) (hname : q.consequence = restatementConsequence) :
+    ∃ a q', buildAnswer rev (.consequence restatementConsequence) author verdict = .ok a ∧
+      q' ∈ rev.shown.map (·.1) ∧ q'.consequence = restatementConsequence ∧
+      isRestatementAnswer a = false ∧ rev.answersNow (.consequence q') a = true := by
+  have hne : (rev.shown.map (·.1)).find? (·.consequence == restatementConsequence) ≠ none := by
+    intro hf
+    have hfalse := List.find?_eq_none.mp hf q hq
+    simp [hname] at hfalse
+  cases hf : (rev.shown.map (·.1)).find? (·.consequence == restatementConsequence) with
+  | none => exact absurd hf hne
+  | some q' =>
+    have hb : buildAnswer rev (.consequence restatementConsequence) author verdict = .ok
+        { author, record := rev.record, revision := rev.text, consequence := q'.consequence,
+          kind := q'.kind, predicate := q'.predicate, verdict } := by
+      simp [buildAnswer, hf]
+    obtain ⟨q'', hmem, hcn, -, -, -, -, -, -, hans⟩ := buildAnswer_consequence hb
+    obtain ⟨x, hx, rfl⟩ := List.mem_map.mp hmem
+    have hxpred := hpred x hx
+    exact ⟨_, x.1, hb, hmem, hcn,
+      (buildAnswer_consequence_not_restatement hpred hb).1, hans hxpred⟩
 
 /-- The answerer the statement `s`, stating the answer `a`, shows: its author, for the reason its
 source gives. -/
@@ -200,20 +271,20 @@ answerer it names, at this revision; or derived, with no answer at this revision
 declines, a fork and a consequence not settled do not pass. -/
 @[expose] def Revision.Settles (rev : Revision) (q : Question) {s : Restatement} : Settled s → Prop
   | .answered ans .confirmed => AnswerWhere p o log fun t a =>
-      rev.answersNow q a = true ∧ a.verdict = .confirmed ∧ answererOf t a = ans
-  | .derived => ¬ AnswerWhere p o log fun _ a => rev.answersNow q a = true
+      rev.answersNow (.consequence q) a = true ∧ a.verdict = .confirmed ∧ answererOf t a = ans
+  | .derived => ¬ AnswerWhere p o log fun _ a => rev.answersNow (.consequence q) a = true
   | _ => False
 
 /-- The recorded standing `s` of the restatement of the revision `rev` holds: a confirmation of this
 revision by the owner it names; or, where it names none, by a delegate, and by no owner. -/
 @[expose] def Revision.Stands (rev : Revision) : Restatement → Prop
   | .confirmed n => AnswerWhere p o log fun _ a =>
-      rev.answersNow restatement a = true ∧ a.verdict = .confirmed ∧ a.author = ⟨n, none⟩
+      rev.answersNow .restatement a = true ∧ a.verdict = .confirmed ∧ a.author = ⟨n, none⟩
   | .unconfirmed =>
       (AnswerWhere p o log fun _ a =>
-        rev.answersNow restatement a = true ∧ a.verdict = .confirmed) ∧
+        rev.answersNow .restatement a = true ∧ a.verdict = .confirmed) ∧
       ¬ AnswerWhere p o log fun _ a =>
-        rev.answersNow restatement a = true ∧ a.verdict = .confirmed ∧ a.author.delegation = none
+        rev.answersNow .restatement a = true ∧ a.verdict = .confirmed ∧ a.author.delegation = none
 
 /-- The status `x` of the question `q` agrees with the answers the revision `rev` keeps: an answer it
 records is one of them, and one it records as derived, which says no one answered it, is one none of
@@ -230,13 +301,13 @@ on its record, but a restatement, is one it keeps; and each status agrees with t
 @[expose] def Revision.Confirmed (rev : Revision) : Prop :=
   rev.Stands p o log rev.standing ∧
   (¬ AnswerWhere p o log fun _ a =>
-    rev.answersNow restatement a = true ∧ a.verdict = .declined) ∧
+    rev.answersNow .restatement a = true ∧ a.verdict = .declined) ∧
   (∀ x ∈ rev.shown, rev.Settles p o log x.1 x.2 ∧
-    ¬ AnswerWhere p o log fun _ a => rev.answersNow x.1 a = true ∧ a.verdict = .declined) ∧
+    ¬ AnswerWhere p o log fun _ a => rev.answersNow (.consequence x.1) a = true ∧ a.verdict = .declined) ∧
   (∀ k ∈ rev.kept, AnswerWhere p o log fun t a =>
     rev.backs k.1 k.2.1 a = true ∧ answererOf t a = k.2.2) ∧
   (∀ s ∈ log, Counts p o log s → ∀ a, s.body = .answer a → a.record = rev.record →
-    restatement.names a = false → ∃ k ∈ rev.kept, rev.backs k.1 k.2.1 a = true) ∧
+    isRestatementAnswer a = false → ∃ k ∈ rev.kept, rev.backs k.1 k.2.1 a = true) ∧
   (∀ x ∈ rev.shown, rev.Agrees x.1 x.2)
 
 end
@@ -271,9 +342,9 @@ inductive Finding where
   /-- The recorded confirmation or answer does not hold at the current revision. The statements
   `older` answer this question at other text; the statements `refused` name the current text and do
   not count. -/
-  | unanswered (record consequence : String) (older : List Ident) (refused : List Ident)
+  | unanswered (record : String) (question : Asked) (older : List Ident) (refused : List Ident)
   /-- Answers that count decline this question at the current revision. -/
-  | declined (record consequence : String) (answers : List Ident)
+  | declined (record : String) (question : Asked) (answers : List Ident)
   /-- The explanation records no owner's confirmation of the restatement, and these answers that
   count are one, of the current revision. -/
   | ownerUnrecorded (record : String) (answers : List Ident)
@@ -306,17 +377,17 @@ variable (p : Ident) (o : Statement.Owners) (log : List Statement)
     | _ => none
 
 /-- The answers that count and answer `q` of the revision `rev`. -/
-@[expose] def countedNow (rev : Revision) (q : Question) : List (Statement × Statement.Answer) :=
+@[expose] def countedNow (rev : Revision) (q : Target) : List (Statement × Statement.Answer) :=
   (answersWhere log (rev.answersNow q)).filter fun x => counts p o log x.1
 
 /-- The ids of a list of statements with their answers. -/
 @[expose] def idsOf (l : List (Statement × Statement.Answer)) : List Ident := l.map (·.1.id)
 
 /-- That the question `q` of the revision `rev` has no answer that holds. -/
-@[expose] def unansweredFinding (rev : Revision) (q : Question) : Finding :=
-  .unanswered rev.record q.consequence
+@[expose] def unansweredFinding (rev : Revision) (q : Target) : Finding :=
+  .unanswered rev.record q.asked
     (idsOf (answersWhere log fun a =>
-      a.record == rev.record && a.consequence == q.consequence && !rev.answersNow q a))
+      a.record == rev.record && q.matchesName a && !rev.answersNow q a))
     (idsOf ((answersWhere log (rev.answersNow q)).filter fun x => !counts p o log x.1))
 
 /-- The answers among `c` that decline. -/
@@ -325,37 +396,37 @@ variable (p : Ident) (o : Statement.Owners) (log : List Statement)
 
 /-- What is wrong with the restatement of the revision `rev`, given its recorded standing `s`. -/
 @[expose] def restatementFindings (rev : Revision) (s : Restatement) : List Finding :=
-  let c := countedNow p o log rev restatement
+  let c := countedNow p o log rev .restatement
   let d := decliners c
   let owners := c.filter fun x => x.2.verdict == .confirmed && x.2.author.delegation == none
   if d.isEmpty then
     match s with
     | .confirmed n =>
       if c.any (fun x => x.2.verdict == .confirmed && x.2.author == ⟨n, none⟩) then []
-      else [unansweredFinding p o log rev restatement]
+      else [unansweredFinding p o log rev .restatement]
     | .unconfirmed =>
       if owners.isEmpty then
         if c.any fun x => x.2.verdict == .confirmed then []
-        else [unansweredFinding p o log rev restatement]
+        else [unansweredFinding p o log rev .restatement]
       else [.ownerUnrecorded rev.record (idsOf owners)]
-  else [.declined rev.record restatement.consequence (idsOf d)]
+  else [.declined rev.record .restatement (idsOf d)]
 
 /-- What is wrong with the status `x` of the question `q` of the revision `rev`. -/
 @[expose] def statusFindings (rev : Revision) (q : Question) {s : Restatement} (x : Settled s) :
     List Finding :=
-  let c := countedNow p o log rev q
+  let c := countedNow p o log rev (.consequence q)
   let d := decliners c
   if d.isEmpty then
     match x with
     | .answered ans .confirmed =>
       if c.any (fun y => y.2.verdict == .confirmed && answererOf y.1 y.2 == ans) then []
-      else [unansweredFinding p o log rev q]
+      else [unansweredFinding p o log rev (.consequence q)]
     | .answered _ .declined => [.statusDisagrees rev.record q.consequence []]
     | .derived =>
       if c.isEmpty then [] else [.statusDisagrees rev.record q.consequence (idsOf c)]
     | .fork => [.fork rev.record q.consequence]
-    | .unsettled => [unansweredFinding p o log rev q]
-  else [.declined rev.record q.consequence (idsOf d)]
+    | .unsettled => [unansweredFinding p o log rev (.consequence q)]
+  else [.declined rev.record (.consequence q.consequence) (idsOf d)]
 
 /-- What is wrong with the kept answer `k` of the revision `rev`. -/
 @[expose] def keptFindings (rev : Revision) (k : Question × Verdict × Answerer) : List Finding :=
@@ -363,12 +434,12 @@ variable (p : Ident) (o : Statement.Owners) (log : List Statement)
       (fun x => answererOf x.1 x.2 == k.2.2) then []
   else
     [.unbacked rev.record k.1.consequence (idsOf (answersWhere log fun a =>
-      a.record == rev.record && a.consequence == k.1.consequence))]
+      a.record == rev.record && !isRestatementAnswer a && a.consequence == k.1.consequence))]
 
 /-- What is wrong with the answers that count on the record of the revision `rev`: those it does not
 keep. -/
 @[expose] def unkeptFindings (rev : Revision) : List Finding :=
-  ((answersWhere log fun a => a.record == rev.record && !restatement.names a &&
+  ((answersWhere log fun a => a.record == rev.record && !isRestatementAnswer a &&
       !rev.kept.any fun k => rev.backs k.1 k.2.1 a).filter fun x => counts p o log x.1).map
     fun x => .unkept rev.record x.1.id
 
@@ -501,7 +572,7 @@ variable (p : Ident) (o : Statement.Owners) (log : List Statement)
 /-- The standing the log gives the restatement of the revision `rev`: an owner's confirmation of this
 revision that counts, or none. -/
 @[expose] def logStanding (rev : Revision) : Restatement :=
-  match (countedNow p o log rev restatement).find? (fun x =>
+  match (countedNow p o log rev .restatement).find? (fun x =>
       x.2.verdict == .confirmed && x.2.author.delegation == none) with
   | some x => .confirmed x.2.author.principal
   | none => .unconfirmed
@@ -518,10 +589,11 @@ confirmation of this revision. What is printed from this says nothing the log do
     Settled (logStanding p o log rev) :=
   match x with
   | .answered ans v =>
-    if (countedNow p o log rev q).any (fun y => y.2.verdict == v && answererOf y.1 y.2 == ans) then
+    if (countedNow p o log rev (.consequence q)).any
+        (fun y => y.2.verdict == v && answererOf y.1 y.2 == ans) then
       .answered ans v
     else .unsettled
-  | .derived => if (countedNow p o log rev q).isEmpty then derivedAt _ else .unsettled
+  | .derived => if (countedNow p o log rev (.consequence q)).isEmpty then derivedAt _ else .unsettled
   | .fork => .fork
   | .unsettled => .unsettled
 
@@ -571,7 +643,7 @@ theorem any_counted {test : Statement.Answer → Bool} {v : Statement → Statem
   · rintro ⟨s, hs, hc, a, hb, ht, hv⟩
     exact ⟨s, a, ⟨hs, hb, ht, hc⟩, hv⟩
 
-theorem decliners_isEmpty {rev : Revision} {q : Question} :
+theorem decliners_isEmpty {rev : Revision} {q : Target} :
     (decliners (countedNow p o log rev q)).isEmpty = true ↔
       ¬ AnswerWhere p o log fun _ a => rev.answersNow q a = true ∧ a.verdict = .declined := by
   have h := any_counted (p := p) (o := o) (log := log) (test := rev.answersNow q)
@@ -585,12 +657,12 @@ theorem restatementFindings_eq_nil_iff {rev : Revision} {s : Restatement} :
     restatementFindings p o log rev s = [] ↔
       rev.Stands p o log s ∧
         ¬ AnswerWhere p o log fun _ a =>
-          rev.answersNow restatement a = true ∧ a.verdict = .declined := by
-  have hDec := decliners_isEmpty (p := p) (o := o) (log := log) (rev := rev) (q := restatement)
-  have hyes := any_counted (p := p) (o := o) (log := log) (test := rev.answersNow restatement)
+          rev.answersNow .restatement a = true ∧ a.verdict = .declined := by
+  have hDec := decliners_isEmpty (p := p) (o := o) (log := log) (rev := rev) (q := .restatement)
+  have hyes := any_counted (p := p) (o := o) (log := log) (test := rev.answersNow .restatement)
     (v := fun _ a => a.verdict == .confirmed) (T := fun _ a => a.verdict = .confirmed)
     (fun _ _ => by simp)
-  have howner := any_counted (p := p) (o := o) (log := log) (test := rev.answersNow restatement)
+  have howner := any_counted (p := p) (o := o) (log := log) (test := rev.answersNow .restatement)
     (v := fun _ a => a.verdict == .confirmed && a.author.delegation == none)
     (T := fun _ a => a.verdict = .confirmed ∧ a.author.delegation = none)
     (fun _ _ => by simp)
@@ -601,7 +673,7 @@ theorem restatementFindings_eq_nil_iff {rev : Revision} {s : Restatement} :
     have hnd := hDec.mp hE
     cases s with
     | confirmed n =>
-      have hn := any_counted (p := p) (o := o) (log := log) (test := rev.answersNow restatement)
+      have hn := any_counted (p := p) (o := o) (log := log) (test := rev.answersNow .restatement)
         (v := fun _ a => a.verdict == .confirmed && a.author == ⟨n, none⟩)
         (T := fun _ a => a.verdict = .confirmed ∧ a.author = ⟨n, none⟩) (fun _ _ => by simp)
       simp only [Revision.Stands]
@@ -614,11 +686,11 @@ theorem restatementFindings_eq_nil_iff {rev : Revision} {s : Restatement} :
       simp only [Revision.Stands]
       split
       · rename_i he
-        have hno : ¬ AnswerWhere p o log fun _ a => rev.answersNow restatement a = true ∧
+        have hno : ¬ AnswerWhere p o log fun _ a => rev.answersNow .restatement a = true ∧
             a.verdict = .confirmed ∧ a.author.delegation = none := by
           intro hw
           obtain ⟨t, ht, hc, a, hb, hnow, hv, hdl⟩ := hw
-          have hm : (t, a) ∈ (countedNow p o log rev restatement).filter fun x =>
+          have hm : (t, a) ∈ (countedNow p o log rev .restatement).filter fun x =>
               x.2.verdict == .confirmed && x.2.author.delegation == none :=
             List.mem_filter.mpr ⟨mem_counted.mpr ⟨ht, hb, hnow, hc⟩, by simp [hv, hdl]⟩
           rw [List.isEmpty_iff.mp he] at hm
@@ -643,7 +715,7 @@ theorem restatementFindings_eq_nil_iff {rev : Revision} {s : Restatement} :
           exact h'.1.2 ⟨t, ht, hc, a, hb, hnow, hv.1, hv.2⟩
   · rename_i hE
     have hD : AnswerWhere p o log fun _ a =>
-        rev.answersNow restatement a = true ∧ a.verdict = .declined :=
+        rev.answersNow .restatement a = true ∧ a.verdict = .declined :=
       Classical.byContradiction fun h => hE (hDec.mpr h)
     exact ⟨fun h => (by cases h), fun h => absurd hD h.2⟩
 
@@ -651,8 +723,8 @@ theorem statusFindings_eq_nil_iff {rev : Revision} {q : Question} {s : Restateme
     {x : Settled s} :
     statusFindings p o log rev q x = [] ↔
       rev.Settles p o log q x ∧
-        ¬ AnswerWhere p o log fun _ a => rev.answersNow q a = true ∧ a.verdict = .declined := by
-  have hDec := decliners_isEmpty (p := p) (o := o) (log := log) (rev := rev) (q := q)
+        ¬ AnswerWhere p o log fun _ a => rev.answersNow (.consequence q) a = true ∧ a.verdict = .declined := by
+  have hDec := decliners_isEmpty (p := p) (o := o) (log := log) (rev := rev) (q := .consequence q)
   unfold statusFindings
   simp only []
   split
@@ -662,7 +734,7 @@ theorem statusFindings_eq_nil_iff {rev : Revision} {q : Question} {s : Restateme
     | answered ans v =>
       cases v with
       | confirmed =>
-        have hn := any_counted (p := p) (o := o) (log := log) (test := rev.answersNow q)
+        have hn := any_counted (p := p) (o := o) (log := log) (test := rev.answersNow (.consequence q))
           (v := fun t a => a.verdict == .confirmed && answererOf t a == ans)
           (T := fun t a => a.verdict = .confirmed ∧ answererOf t a = ans) (fun _ _ => by simp)
         simp only [Revision.Settles]
@@ -679,7 +751,7 @@ theorem statusFindings_eq_nil_iff {rev : Revision} {q : Question} {s : Restateme
       · rename_i he
         refine ⟨fun _ => ⟨?_, hnd⟩, fun _ => rfl⟩
         rintro ⟨t, ht, hc, a, hb, hnow⟩
-        have hm : (t, a) ∈ countedNow p o log rev q := mem_counted.mpr ⟨ht, hb, hnow, hc⟩
+        have hm : (t, a) ∈ countedNow p o log rev (.consequence q) := mem_counted.mpr ⟨ht, hb, hnow, hc⟩
         rw [List.isEmpty_iff.mp he] at hm
         cases hm
       · rename_i he
@@ -693,7 +765,7 @@ theorem statusFindings_eq_nil_iff {rev : Revision} {q : Question} {s : Restateme
     | fork => simp [Revision.Settles]
     | unsettled => simp [Revision.Settles]
   · rename_i hE
-    have hD : AnswerWhere p o log fun _ a => rev.answersNow q a = true ∧ a.verdict = .declined :=
+    have hD : AnswerWhere p o log fun _ a => rev.answersNow (.consequence q) a = true ∧ a.verdict = .declined :=
       Classical.byContradiction fun h => hE (hDec.mpr h)
     exact ⟨fun h => (by cases h), fun h => absurd hD h.2⟩
 
@@ -713,7 +785,7 @@ theorem keptFindings_eq_nil_iff {rev : Revision} {k : Question × Verdict × Ans
 theorem unkeptFindings_eq_nil_iff {rev : Revision} :
     unkeptFindings p o log rev = [] ↔
       ∀ s ∈ log, Counts p o log s → ∀ a, s.body = .answer a → a.record = rev.record →
-        restatement.names a = false → ∃ k ∈ rev.kept, rev.backs k.1 k.2.1 a = true := by
+        isRestatementAnswer a = false → ∃ k ∈ rev.kept, rev.backs k.1 k.2.1 a = true := by
   unfold unkeptFindings
   rw [List.map_eq_nil_iff, List.eq_nil_iff_forall_not_mem]
   constructor
@@ -906,26 +978,27 @@ theorem findings_eq_nil_iff {revs : List Revision} :
 /-- What the finding `f`, about the revision `rev`, says of the log and of `rev`. -/
 @[expose] def Finding.Names (p : Ident) (o : Statement.Owners) (log : List Statement) (rev : Revision) :
     Finding → Prop
-  | .unanswered r c older refused => r = rev.record ∧
+  | .unanswered r q older refused => r = rev.record ∧
       (∀ i ∈ older, ∃ s ∈ log, s.id = i ∧ ∃ a, s.body = .answer a ∧ a.record = r ∧
-        a.consequence = c) ∧
+        q.Matches a) ∧
       (∀ i ∈ refused, ∃ s ∈ log, s.id = i ∧ ¬ Counts p o log s ∧ ∃ a, s.body = .answer a ∧
-        a.record = r ∧ a.revision = rev.text ∧ a.consequence = c)
-  | .declined r c ids => r = rev.record ∧ ids ≠ [] ∧
+        a.record = r ∧ a.revision = rev.text ∧ q.Matches a)
+  | .declined r q ids => r = rev.record ∧ ids ≠ [] ∧
       ∀ i ∈ ids, ∃ s ∈ log, s.id = i ∧ Counts p o log s ∧ ∃ a, s.body = .answer a ∧ a.record = r ∧
-        a.revision = rev.text ∧ a.consequence = c ∧ a.verdict = .declined
+        a.revision = rev.text ∧ q.Matches a ∧ a.verdict = .declined
   | .ownerUnrecorded r ids => r = rev.record ∧ ids ≠ [] ∧
       ∀ i ∈ ids, ∃ s ∈ log, s.id = i ∧ Counts p o log s ∧ ∃ a, s.body = .answer a ∧
-        rev.answersNow restatement a = true ∧ a.verdict = .confirmed ∧ a.author.delegation = none
+        rev.answersNow .restatement a = true ∧ a.verdict = .confirmed ∧ a.author.delegation = none
   | .statusDisagrees r c ids => r = rev.record ∧
       ∀ i ∈ ids, ∃ s ∈ log, s.id = i ∧ Counts p o log s ∧ ∃ a, s.body = .answer a ∧ a.record = r ∧
         a.revision = rev.text ∧ a.consequence = c
   | .fork r c => r = rev.record ∧ ∃ x ∈ rev.shown, x.1.consequence = c ∧ x.2.claim = .fork
   | .unbacked r c stale => r = rev.record ∧ ∃ k ∈ rev.kept, k.1.consequence = c ∧
       (¬ AnswerWhere p o log fun t a => rev.backs k.1 k.2.1 a = true ∧ answererOf t a = k.2.2) ∧
-      ∀ i ∈ stale, ∃ s ∈ log, s.id = i ∧ ∃ a, s.body = .answer a ∧ a.record = r ∧ a.consequence = c
+      ∀ i ∈ stale, ∃ s ∈ log, s.id = i ∧ ∃ a, s.body = .answer a ∧ a.record = r ∧
+        isRestatementAnswer a = false ∧ a.consequence = c
   | .unkept r i => r = rev.record ∧ ∃ s ∈ log, s.id = i ∧ Counts p o log s ∧
-      ∃ a, s.body = .answer a ∧ a.record = r ∧ restatement.names a = false ∧
+      ∃ a, s.body = .answer a ∧ a.record = r ∧ isRestatementAnswer a = false ∧
         ¬ ∃ k ∈ rev.kept, rev.backs k.1 k.2.1 a = true
   | .keptDisagrees r c => r = rev.record ∧ ∃ x ∈ rev.shown, x.1.consequence = c ∧
       ¬ rev.Agrees x.1 x.2
@@ -1020,24 +1093,25 @@ theorem findings_of_repeated {revs : List Revision} {i : Ident}
       cases h
       exact List.mem_cons_of_mem _ hm
 
-theorem unansweredFinding_names {rev : Revision} {q : Question} :
+theorem unansweredFinding_names {rev : Revision} {q : Target} :
     (unansweredFinding p o log rev q).Names p o log rev := by
   refine ⟨rfl, ?_, ?_⟩
   · intro i hi
     obtain ⟨⟨s, a⟩, hm, rfl⟩ := List.mem_map.mp hi
     obtain ⟨hs, hb, ht⟩ := mem_answersWhere.mp hm
     simp only [Bool.and_eq_true, beq_iff_eq] at ht
-    exact ⟨s, hs, rfl, a, hb, ht.1.1, ht.1.2⟩
+    exact ⟨s, hs, rfl, a, hb, ht.1.1, (Target.matchesName_eq_true_iff q a).mp ht.1.2⟩
   · intro i hi
     obtain ⟨⟨s, a⟩, hm, rfl⟩ := List.mem_map.mp hi
     obtain ⟨hm, hc⟩ := List.mem_filter.mp hm
     obtain ⟨hs, hb, ht⟩ := mem_answersWhere.mp hm
-    simp only [Revision.answersNow, Question.names, Bool.and_eq_true, beq_iff_eq] at ht
-    exact ⟨s, hs, rfl, fun h => by simp [counts_iff.mpr h] at hc, a, hb, ht.1.1, ht.1.2, ht.2.1.1⟩
+    simp only [Revision.answersNow, Bool.and_eq_true, beq_iff_eq] at ht
+    exact ⟨s, hs, rfl, fun h => by simp [counts_iff.mpr h] at hc, a, hb, ht.1.1, ht.1.2,
+      Target.asked_matches_of_names ht.2⟩
 
-theorem declinedFinding_names {rev : Revision} {q : Question}
+theorem declinedFinding_names {rev : Revision} {q : Target}
     (hne : (decliners (countedNow p o log rev q)).isEmpty ≠ true) :
-    (Finding.declined rev.record q.consequence
+    (Finding.declined rev.record q.asked
       (idsOf (decliners (countedNow p o log rev q)))).Names p o log rev := by
   refine ⟨rfl, fun he => hne ?_, ?_⟩
   · rw [List.isEmpty_iff]
@@ -1046,8 +1120,9 @@ theorem declinedFinding_names {rev : Revision} {q : Question}
     obtain ⟨⟨s, a⟩, hm, rfl⟩ := List.mem_map.mp hi
     obtain ⟨hm, hv⟩ := List.mem_filter.mp hm
     obtain ⟨hs, hb, ht, hc⟩ := mem_counted.mp hm
-    simp only [Revision.answersNow, Question.names, Bool.and_eq_true, beq_iff_eq] at ht
-    exact ⟨s, hs, rfl, hc, a, hb, ht.1.1, ht.1.2, ht.2.1.1, by simpa using hv⟩
+    simp only [Revision.answersNow, Bool.and_eq_true, beq_iff_eq] at ht
+    exact ⟨s, hs, rfl, hc, a, hb, ht.1.1, ht.1.2, Target.asked_matches_of_names ht.2,
+      by simpa using hv⟩
 
 theorem restatementFindings_names {rev : Revision} {s : Restatement} {f : Finding}
     (hf : f ∈ restatementFindings p o log rev s) : f.Names p o log rev := by
@@ -1118,8 +1193,9 @@ theorem statusFindings_names {rev : Revision} {q : Question} {s : Restatement} {
         intro i hi
         obtain ⟨⟨t, a⟩, hm, rfl⟩ := List.mem_map.mp hi
         obtain ⟨ht, hb, hnow, hc⟩ := mem_counted.mp hm
-        simp only [Revision.answersNow, Question.names, Bool.and_eq_true, beq_iff_eq] at hnow
-        exact ⟨t, ht, rfl, hc, a, hb, hnow.1.1, hnow.1.2, hnow.2.1.1⟩
+        simp only [Revision.answersNow, Bool.and_eq_true, beq_iff_eq] at hnow
+        have hcon := (Target.asked_matches_of_names hnow.2).2
+        exact ⟨t, ht, rfl, hc, a, hb, hnow.1.1, hnow.1.2, hcon⟩
     | fork =>
       simp only [List.mem_singleton] at hf
       subst hf
@@ -1150,8 +1226,8 @@ theorem keptFindings_names {rev : Revision} {k : Question × Verdict × Answerer
     intro i hi
     obtain ⟨⟨s, a⟩, hm, rfl⟩ := List.mem_map.mp hi
     obtain ⟨hs, hb, ht⟩ := mem_answersWhere.mp hm
-    simp only [Bool.and_eq_true, beq_iff_eq] at ht
-    exact ⟨s, hs, rfl, a, hb, ht.1, ht.2⟩
+    simp only [Bool.and_eq_true, Bool.not_eq_true', beq_iff_eq] at ht
+    exact ⟨s, hs, rfl, a, hb, ht.1.1, ht.1.2, ht.2⟩
 
 theorem unkeptFindings_names {rev : Revision} {f : Finding}
     (hf : f ∈ unkeptFindings p o log rev) : f.Names p o log rev := by
@@ -1292,7 +1368,8 @@ theorem not_confirmed_nil : ¬ Confirmed log [] := by
 the standing is an owner's. -/
 theorem Revision.settles_cases {rev : Revision} {q : Question} {s : Restatement} {x : Settled s}
     (h : rev.Settles p o log q x) :
-    (AnswerWhere p o log fun _ a => rev.answersNow q a = true ∧ a.verdict = .confirmed) ∨
+    (AnswerWhere p o log fun _ a =>
+        rev.answersNow (.consequence q) a = true ∧ a.verdict = .confirmed) ∨
       ∃ n, s = .confirmed n := by
   cases x with
   | answered ans v =>
@@ -1309,12 +1386,12 @@ names an owner, by that owner, whose answer counts. -/
 theorem Revision.Confirmed.owner {rev : Revision} {n : Ident} (h : rev.Confirmed p o log)
     (hn : rev.standing = .confirmed n) :
     ∃ s ∈ log, Counts p o log s ∧ ∃ a, s.body = .answer a ∧ a.record = rev.record ∧
-      a.revision = rev.text ∧ restatement.names a = true ∧ a.verdict = .confirmed ∧
+      a.revision = rev.text ∧ isRestatementAnswer a = true ∧ a.verdict = .confirmed ∧
         a.author = ⟨n, none⟩ := by
   have hs := h.1
   rw [hn] at hs
   obtain ⟨s, hsl, hc, a, hb, hnow, hv, ha⟩ := hs
-  simp only [Revision.answersNow, Bool.and_eq_true, beq_iff_eq] at hnow
+  simp only [Revision.answersNow, Target.names, Bool.and_eq_true, beq_iff_eq] at hnow
   exact ⟨s, hsl, hc, a, hb, hnow.1.1, hnow.1.2, hnow.2, hv, ha⟩
 
 /-- **Every consequence of the current revision has an answer naming that revision, or a derived
@@ -1323,11 +1400,12 @@ earlier revision never carries a derived status forward. -/
 theorem Confirmed.settled {revs : List Revision} {rev : Revision} {x : Question × Settled rev.standing}
     (h : Confirmed log revs) (hr : rev ∈ revs) (hx : x ∈ rev.shown) :
     ∃ p o, Declares log p o ∧
-      ((∃ s ∈ log, Counts p o log s ∧ ∃ a, s.body = .answer a ∧ rev.answersNow x.1 a = true ∧
-          a.revision = rev.text ∧ a.verdict = .confirmed) ∨
+      ((∃ s ∈ log, Counts p o log s ∧ ∃ a, s.body = .answer a ∧
+          rev.answersNow (.consequence x.1) a = true ∧ a.revision = rev.text ∧
+          a.verdict = .confirmed) ∨
         ∃ n, rev.standing = .confirmed n ∧ Trace.isOwner o n = true ∧
           ∃ s ∈ log, Counts p o log s ∧ ∃ a, s.body = .answer a ∧ a.record = rev.record ∧
-            a.revision = rev.text ∧ restatement.names a = true ∧ a.verdict = .confirmed ∧
+            a.revision = rev.text ∧ isRestatementAnswer a = true ∧ a.verdict = .confirmed ∧
               a.author = ⟨n, none⟩) := by
   obtain ⟨p, o, hd, -, -, hc⟩ := h
   have hrc := hc rev hr
@@ -1346,13 +1424,13 @@ deliverable passes with an empty or absent confirmation, whatever it shows. -/
 theorem Confirmed.restated {revs : List Revision} {rev : Revision} (h : Confirmed log revs)
     (hr : rev ∈ revs) :
     ∃ p o, Declares log p o ∧ ∃ s ∈ log, Counts p o log s ∧ ∃ a, s.body = .answer a ∧
-      a.record = rev.record ∧ a.revision = rev.text ∧ restatement.names a = true ∧
+      a.record = rev.record ∧ a.revision = rev.text ∧ isRestatementAnswer a = true ∧
         a.verdict = .confirmed := by
   obtain ⟨p, o, hd, -, -, hc⟩ := h
   refine ⟨p, o, hd, ?_⟩
   have hs := (hc rev hr).1
   have : AnswerWhere p o log fun _ a =>
-      rev.answersNow restatement a = true ∧ a.verdict = .confirmed := by
+      rev.answersNow .restatement a = true ∧ a.verdict = .confirmed := by
     cases hst : rev.standing with
     | confirmed n =>
       rw [hst] at hs
@@ -1362,7 +1440,7 @@ theorem Confirmed.restated {revs : List Revision} {rev : Revision} (h : Confirme
       rw [hst] at hs
       exact hs.1
   obtain ⟨s, hs, hcs, a, hb, hnow, hv⟩ := this
-  simp only [Revision.answersNow, Bool.and_eq_true, beq_iff_eq] at hnow
+  simp only [Revision.answersNow, Target.names, Bool.and_eq_true, beq_iff_eq] at hnow
   exact ⟨s, hs, hcs, a, hb, hnow.1.1, hnow.1.2, hnow.2, hv⟩
 
 /-- **A status agrees with the answers kept.** Of a confirmed revision, each consequence shown with an
@@ -1395,7 +1473,7 @@ theorem not_confirmed_of_changed {revs : List Revision} {rev : Revision}
 /-- **An answer dropped from those a deliverable keeps is refused**, while it counts. -/
 theorem not_confirmed_of_dropped {revs : List Revision} {rev : Revision}
     {s : Statement} {a : Statement.Answer} (hr : rev ∈ revs) (hs : s ∈ log)
-    (hb : s.body = .answer a) (hrec : a.record = rev.record) (hn : restatement.names a = false)
+    (hb : s.body = .answer a) (hrec : a.record = rev.record) (hn : isRestatementAnswer a = false)
     (hk : ¬ ∃ k ∈ rev.kept, rev.backs k.1 k.2.1 a = true)
     (hcounts : ∀ p o, Declares log p o → Counts p o log s) : ¬ Confirmed log revs := by
   rintro ⟨p, o, hd, -, -, hc⟩
@@ -1408,7 +1486,7 @@ Since `Restatement.words` says confirmed exactly when the standing is (`says_con
 printed from this says so only then. -/
 theorem logStanding_eq_confirmed {rev : Revision} {n : Ident}
     (h : logStanding p o log rev = .confirmed n) :
-    AnswerWhere p o log fun _ a => rev.answersNow restatement a = true ∧ a.verdict = .confirmed ∧
+    AnswerWhere p o log fun _ a => rev.answersNow .restatement a = true ∧ a.verdict = .confirmed ∧
       a.author = ⟨n, none⟩ := by
   unfold logStanding at h
   split at h
@@ -1441,7 +1519,7 @@ theorem logStanding_of_older {rev : Revision}
 theorem checked_eq_answered {rev : Revision} {q : Question} {s : Restatement} {x : Settled s}
     {ans : Answerer} {v : Verdict}
     (h : checked p o log rev q x = .answered ans v) :
-    AnswerWhere p o log fun t a => rev.answersNow q a = true ∧ a.verdict = v ∧
+    AnswerWhere p o log fun t a => rev.answersNow (.consequence q) a = true ∧ a.verdict = v ∧
       answererOf t a = ans := by
   unfold checked at h
   cases x with
@@ -1450,7 +1528,7 @@ theorem checked_eq_answered {rev : Revision} {q : Question} {s : Restatement} {x
     split at h
     · rename_i hany
       cases h
-      exact (any_counted (p := p) (o := o) (log := log) (test := rev.answersNow q)
+      exact (any_counted (p := p) (o := o) (log := log) (test := rev.answersNow (.consequence q))
         (v := fun t a => a.verdict == v && answererOf t a == ans)
         (T := fun t a => a.verdict = v ∧ answererOf t a = ans) (fun _ _ => by simp)).mp hany
     · cases h
