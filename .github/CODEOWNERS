@@ -1,0 +1,17 @@
+# Trusted Computing Base: build/toolchain configuration, repository checks,
+# and GitHub/pipeline configuration.
+/lakefile.toml @rbeauchamp
+/lake-manifest.json @rbeauchamp
+/lean-toolchain @rbeauchamp
+/tools/ @rbeauchamp
+/.github/ @rbeauchamp
+/.no-mistakes.yaml @rbeauchamp
+
+# Core formal verification library and repository governance/instructions.
+/LeanIntent/ @rbeauchamp
+/AGENTS.md @rbeauchamp
+/CLAUDE.md @rbeauchamp
+/SECURITY.md @rbeauchamp
+/CONTRIBUTING.md @rbeauchamp
+/CODE_OF_CONDUCT.md @rbeauchamp
+/LICENSE @rbeauchamp
