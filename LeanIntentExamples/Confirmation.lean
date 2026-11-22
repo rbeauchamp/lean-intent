@@ -127,8 +127,12 @@ open LeanIntent LeanIntent.Confirmation LeanIntentExamples.Sorting
 /-- `claude` acting under the delegation. -/
 @[expose] def underDelegation : Authority := ⟨.of "claude", some (.of "assistant")⟩
 
+@[expose] def restatementBody (author : Authority) (revision : String := "revision 2")
+    (verdict : Verdict := .confirmed) : Statement.Body :=
+  .answer (restatementAnswer author "sorting" revision verdict)
+
 /-- `richard` confirms the plain restatement. -/
-@[expose] def restated : Statement := mk (.of "restated") (answerBody ⟨.of "richard", none⟩ restatement)
+@[expose] def restated : Statement := mk (.of "restated") (restatementBody ⟨.of "richard", none⟩)
 
 /-- `claude` confirms the second consequence, on the owner's behalf, for its reason. -/
 @[expose] def sortAnswer : Statement := mkWith reason (.of "sort") (answerBody underDelegation isSort)
@@ -166,8 +170,8 @@ theorem confirmed : Confirmed log [current] :=
 
 theorem revised_refused :
     findings log [revised] =
-      [.unanswered "sorting" restatement.consequence [.of "restated"] [],
-       .unanswered "sorting" isSort.consequence [.of "sort"] []] := by
+      [.unanswered "sorting" .restatement [.of "restated"] [],
+       .unanswered "sorting" (.consequence isSort.consequence) [.of "sort"] []] := by
   decide +kernel
 
 /-- The log gives the revised record no owner's confirmation, whatever value it holds. -/
@@ -181,7 +185,7 @@ theorem meaningChanged_refused :
     findings log [revision "revision 2"
         [(notEmpty, .derived), (isSort', .answered assistantAnswerer .confirmed)]
         [(isSort', .confirmed, assistantAnswerer)]] =
-      [.unanswered "sorting" isSort.consequence [.of "sort"] [],
+      [.unanswered "sorting" (.consequence isSort.consequence) [.of "sort"] [],
        .unbacked "sorting" isSort.consequence [.of "sort"],
        .unkept "sorting" (.of "sort")] := by
   decide +kernel
@@ -205,21 +209,21 @@ theorem noDeliverable_refused : findings log [] = [.noDeliverable] := by
 theorem revoked_refused :
     findings (log ++ [mk (.of "revoke") (.revocation ⟨⟨.of "richard", none⟩, .of "assistant"⟩)])
         [current] =
-      [.unanswered "sorting" isSort.consequence [] [.of "sort"],
+      [.unanswered "sorting" (.consequence isSort.consequence) [] [.of "sort"],
        .unbacked "sorting" isSort.consequence [.of "sort"]] := by
   decide +kernel
 
 theorem delegationRemoved_refused :
     findings (log.erase assistant) [current] =
-      [.unanswered "sorting" isSort.consequence [] [.of "sort"],
+      [.unanswered "sorting" (.consequence isSort.consequence) [] [.of "sort"],
        .unbacked "sorting" isSort.consequence [.of "sort"]] := by
   decide +kernel
 
 theorem ownerRemoved_refused :
     findings (mk (.of "owners") (.owners ⟨[⟨.of "dana", []⟩], none⟩) :: log.erase owners)
         [current] =
-      [.unanswered "sorting" restatement.consequence [] [.of "restated"],
-       .unanswered "sorting" isSort.consequence [] [.of "sort"],
+      [.unanswered "sorting" .restatement [] [.of "restated"],
+       .unanswered "sorting" (.consequence isSort.consequence) [] [.of "sort"],
        .unbacked "sorting" isSort.consequence [.of "sort"]] := by
   decide +kernel
 
@@ -230,11 +234,11 @@ theorem secondOwner_confirmed :
   findings_eq_nil_iff.mp (by decide +kernel)
 
 /-- `claude` writes its own confirmation of the restatement as an owner's. -/
-@[expose] def selfConfirmed : Statement := mk (.of "self") (answerBody ⟨.of "claude", none⟩ restatement)
+@[expose] def selfConfirmed : Statement := mk (.of "self") (restatementBody ⟨.of "claude", none⟩)
 
 theorem selfConfirmed_refused :
     findings [owners, assistant, selfConfirmed, sortAnswer] [current] =
-      [.unanswered "sorting" restatement.consequence [] [.of "self"]] := by
+      [.unanswered "sorting" .restatement [] [.of "self"]] := by
   decide +kernel
 
 theorem selfConfirmed_ignored : Confirmed (log ++ [selfConfirmed]) [current] :=
@@ -264,7 +268,7 @@ theorem fork_refused :
 
 theorem unsettled_refused :
     findings [owners, restated] [revision "revision 2" [(notEmpty, .unsettled)] []] =
-      [.unanswered "sorting" notEmpty.consequence [] []] := by
+      [.unanswered "sorting" (.consequence notEmpty.consequence) [] []] := by
   decide +kernel
 
 /-- `claude` confirms the second consequence, recording no source. -/
@@ -272,7 +276,7 @@ theorem unsettled_refused :
 
 theorem sourceless_refused :
     findings [owners, assistant, restated, sourcelessAnswer] [current] =
-      [.sourceless (.of "sort"), .unanswered "sorting" isSort.consequence [] [],
+      [.sourceless (.of "sort"), .unanswered "sorting" (.consequence isSort.consequence) [] [],
        .unbacked "sorting" isSort.consequence [.of "sort"]] := by
   decide +kernel
 
@@ -321,7 +325,7 @@ theorem bothKept_confirmed :
 
 /-- The owner confirms the restatement of the next revision. -/
 @[expose] def restatedAgain : Statement :=
-  mk (.of "restated-again") (answerBody ⟨.of "richard", none⟩ restatement "revision 3")
+  mk (.of "restated-again") (restatementBody ⟨.of "richard", none⟩ "revision 3")
 
 /-- The next revision, recording the second consequence as derived, and keeping `kept`. -/
 @[expose] def bothDerived (kept : List (Question × Verdict × Answerer)) : Revision :=
@@ -386,15 +390,12 @@ theorem origin_read :
 /-- The log, with `dana` a second owner, who declines the restatement `richard` confirmed. -/
 @[expose] def declinedLog : List Statement :=
   mk (.of "owners") (.owners ⟨[⟨.of "richard", []⟩, ⟨.of "dana", []⟩], none⟩) :: log.erase owners ++
-    [mk (.of "decline") <| .answer
-      { author := ⟨.of "dana", none⟩, record := "sorting", revision := "revision 2",
-        consequence := restatement.consequence, kind := restatement.kind,
-        predicate := restatement.predicate, verdict := .declined }]
+    [mk (.of "decline") (restatementBody ⟨.of "dana", none⟩ "revision 2" .declined)]
 
 /-- An owner's decline stops the deliverable. -/
 theorem ownerDeclined_refused :
     findings declinedLog [current] =
-      [.declined "sorting" restatement.consequence [.of "decline"]] := by
+      [.declined "sorting" .restatement [.of "decline"]] := by
   decide +kernel
 
 /-- A tool statement with the decline's id, which would make `Trace` refuse the decline and so drop it
@@ -437,5 +438,29 @@ must reduce to a string literal, from the finished build. -/
 
 theorem parseLog_printed : parseLog (log.map Statement.print) = .ok log :=
   parseLog_eq_ok_iff.mpr rfl
+
+@[expose] def homonymQuestion : Question :=
+  ⟨restatementConsequence, .entailment, "fun f => f = sort"⟩
+
+@[expose] def homonymRevision : Revision :=
+  revision "revision 2" [(homonymQuestion, .answered assistantAnswerer .confirmed)]
+    [(homonymQuestion, .confirmed, assistantAnswerer)]
+
+@[expose] def homonymAnswer : Statement :=
+  mkWith reason (.of "homonym") (answerBody underDelegation homonymQuestion)
+
+theorem homonym_confirmed :
+    Confirmed [owners, assistant, restated, homonymAnswer] [homonymRevision] :=
+  findings_eq_nil_iff.mp (by decide +kernel)
+
+theorem homonym_consequence_does_not_settle_restatement :
+    findings [owners, assistant, homonymAnswer] [homonymRevision] =
+      [.unanswered "sorting" .restatement [] []] := by
+  decide +kernel
+
+theorem homonym_restatement_does_not_settle_consequence :
+    findings [owners, restated] [revision "revision 2" [(homonymQuestion, .unsettled)] []] =
+      [.unanswered "sorting" (.consequence restatementConsequence) [] []] := by
+  decide +kernel
 
 end LeanIntentExamples.Confirmation

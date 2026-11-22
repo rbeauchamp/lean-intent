@@ -3,6 +3,7 @@ module
 import Lean
 import Lake
 import Lake.Load.Package
+import Std.Internal.UV.System
 meta import Lake
 meta import Lake.Load.Package
 
@@ -191,6 +192,35 @@ partial def nodes (stx : Syntax) (acc : Array Syntax) : Array Syntax :=
   | .node _ _ args => args.foldl (fun acc arg => nodes arg acc) (acc.push stx)
   | _ => acc
 
+partial def syntaxKinds (stx : Syntax) (acc : Std.HashSet Name) : Std.HashSet Name :=
+  match stx with
+  | .node _ k args => args.foldl (fun acc arg => syntaxKinds arg acc) (acc.insert k)
+  | _ => acc.insert stx.getKind
+
+partial def treeEnvs (t : Elab.InfoTree) (acc : Array Environment) : Array Environment :=
+  match t with
+  | .context (.commandCtx cci) child => treeEnvs child (acc.push cci.env)
+  | .context _ child => treeEnvs child acc
+  | .node _ cs => cs.foldl (fun a c => treeEnvs c a) acc
+  | .hole _ => acc
+
+def hasProjectDispatchCandidate (declared isMacro : Name → Bool) (env : Environment)
+    (kind : SyntaxNodeKind) : Bool :=
+  let has {γ : Type} (attr : KeyedDeclsAttribute γ) : Bool :=
+    (attr.getEntries env kind).any fun entry => declared entry.declName && !isMacro entry.declName
+  has Elab.Command.commandElabAttribute ||
+    has Elab.Term.termElabAttribute ||
+    has Elab.Tactic.tacticElabAttribute ||
+    has Elab.Do.doElemElabAttribute ||
+    has Elab.Tactic.Try.tryTacticElabAttribute ||
+    has Elab.Tactic.Grind.grindTacElabAttribute ||
+    has Elab.Tactic.Grind.symSimprocElabAttribute ||
+    has Elab.Tactic.Grind.symDischargerElabAttribute ||
+    has Elab.Tactic.Grind.symDSimprocElabAttribute ||
+    has Elab.Command.inductiveElabAttr ||
+    has Elab.Term.Quotation.precheckAttribute ||
+    has Elab.Do.controlInfoElemAttribute
+
 def testsLean : String := "4.36.0"
 
 def testTokens : List String :=
@@ -206,7 +236,7 @@ def otherTokens : List String :=
 
 def nativeConfig (n : Syntax) : Bool :=
   let item (kinds : List Name) (names : List Name) (m : Syntax) : Bool :=
-    kinds.contains m.getKind && m[1].isIdent && names.contains m[1].getId
+    kinds.contains m.getKind && m[1].isIdent && names.contains m[1].getId.eraseMacroScopes
   let vals := [``Parser.Term.valConfigItem, ``Parser.Tactic.valConfigItem]
   item ([``Parser.Term.posConfigItem, ``Parser.Tactic.posConfigItem] ++ vals) [`native] n ||
     (n.getKind == ``Parser.Tactic.decide && (nodes n #[]).any (item vals [`config]))
@@ -226,7 +256,7 @@ unsafe def testsOfModule (path file : String) (mod : Name) (mods : Array Name)
     (out : System.FilePath) : IO (Array String) := do
   let input ← IO.FS.readFile file
   let inputCtx := Parser.mkInputContext input file
-  let opts := (({} : Options).setBool `Elab.async false).setBool `debug.byAsSorry true
+  let opts := ({} : Options).setBool `Elab.async false
   let fail (messages : MessageLog) : IO (Array String) := do
     let shown ← messages.toList.mapM (·.toString)
     throw <| IO.userError s!"{path}: Lean could not elaborate it, so its tests cannot be read:\n{String.join shown}"
@@ -235,11 +265,14 @@ unsafe def testsOfModule (path file : String) (mod : Name) (mods : Array Name)
   let (env, messages) ← Elab.processHeader header opts messages inputCtx (mainModule := mod)
   if messages.hasErrors then
     return ← fail messages
+  let headerEnv := env
   let state := Elab.Command.mkState env messages opts
   let state := { state with infoState := { state.infoState with enabled := true } }
   let s ← Elab.IO.processCommandsIncrementally inputCtx parserState state none
   if s.commandState.messages.hasErrors then
     return ← fail s.commandState.messages
+  if s.commandState.messages.reportedPlusUnreported.any (·.data.hasTag (· == `hasSorry)) then
+    throw <| IO.userError s!"{path}: cannot inspect tests of a file using `sorry` or `debug.byAsSorry`"
   let env := s.commandState.env
   let modIdxs : Std.HashSet ModuleIdx := mods.foldl (init := {}) fun s m =>
     match env.getModuleIdx? m with
@@ -251,6 +284,7 @@ unsafe def testsOfModule (path file : String) (mod : Name) (mods : Array Name)
     | none => env.contains c
   let isMacro (c : Name) : Bool := (env.find? c).any (·.type.isConstOf ``Macro)
   let mut snap := s.initialSnap
+  let mut prevEnv := headerEnv
   let mut seen : Std.HashMap String Nat := {}
   let mut tests : Array String := #[]
   repeat
@@ -258,24 +292,39 @@ unsafe def testsOfModule (path file : String) (mod : Name) (mods : Array Name)
     let key := syntaxKey cmd
     let k := seen.getD key 0 + 1
     seen := seen.insert key k
+    let cmdEnv := snap.elabSnap.resultSnap.get.cmdState.env
     let trees := snap.elabSnap.infoTreeSnap.get.infoTree?.toList
-    let (syntaxes, elaborators) := trees.foldl (init := (#[cmd], #[]))
-      fun acc tree => tree.foldInfo (init := acc) fun _ info (ss, es) =>
+    let (syntaxes, elaborators, sawByAsSorry) := trees.foldl (init := (#[cmd], #[], false))
+      fun acc tree => tree.foldInfo (init := acc) fun _ info (ss, es, byAsSorry) =>
         match info with
-        | .ofCommandInfo i => (ss.push i.stx, es.push i.elaborator)
-        | .ofTermInfo i => (ss, es.push i.elaborator)
-        | .ofTacticInfo i => (ss, es.push i.elaborator)
-        | .ofMacroExpansionInfo i => (ss.push i.output, es)
-        | _ => (ss, es)
+        | .ofCommandInfo i => (ss.push i.stx, es.push i.elaborator, byAsSorry)
+        | .ofTermInfo i => (ss.push i.stx, es.push i.elaborator, byAsSorry)
+        | .ofPartialTermInfo i => (ss.push i.stx, es.push i.elaborator, byAsSorry)
+        | .ofDelabTermInfo i => (ss.push i.stx, es.push i.elaborator, byAsSorry)
+        | .ofTacticInfo i => (ss.push i.stx, es.push i.elaborator, byAsSorry)
+        | .ofChoiceInfo i => (ss.push i.stx, es.push i.elaborator, byAsSorry)
+        | .ofChoiceResolutionInfo i => (ss.push i.stx, es, byAsSorry)
+        | .ofMacroExpansionInfo i => ((ss.push i.stx).push i.output, es, byAsSorry)
+        | .ofOptionInfo i => (ss, es, byAsSorry || i.optionName == `debug.byAsSorry)
+        | _ => (ss, es, byAsSorry)
+    if sawByAsSorry then
+      throw <| IO.userError s!"{path}: cannot inspect tests when `debug.byAsSorry` is configured"
     let tokens := syntaxes.foldl (fun acc stx => atoms stx acc) #[]
     for a in tokens do
       if let '#' :: c :: _ := a.toList then
         unless !c.isAlpha || testTokens.contains a || otherTokens.contains a do
           throw <| IO.userError s!"{path}: the command token {a} is neither a test's nor another's that the listing knows"
+    let kinds := syntaxes.foldl (fun acc stx => syntaxKinds stx acc) {}
+    let envs := trees.foldl (fun acc t => treeEnvs t acc) #[prevEnv, cmdEnv]
+    let hasCandidate := envs.any fun e =>
+      kinds.fold (init := false) fun hit kind =>
+        hit || hasProjectDispatchCandidate declared isMacro e kind
     if tokens.any testTokens.contains ||
         (syntaxes.foldl (fun acc stx => nodes stx acc) #[]).any nativeConfig ||
-        elaborators.any (fun e => declared e && !isMacro e) then
+        elaborators.any (fun e => declared e && !isMacro e) ||
+        hasCandidate then
       tests := tests.push s!"{path.quote} {k} {key}"
+    prevEnv := cmdEnv
     match snap.nextCmdSnap? with
     | some next => snap := next.get
     | none => break
@@ -348,13 +397,19 @@ def boundQueries : List (Name × String) :=
   [(``IO.Process.spawn, "lean_io_process_spawn"), (``IO.appPath, "lean_io_app_path"),
    (``IO.currentDir, "lean_io_current_dir"),
    (``IO.Process.getCurrentDir, "lean_io_process_get_current_dir"),
-   (``IO.getEnv, "lean_io_getenv")]
+   (``IO.getEnv, "lean_io_getenv"),
+   (``Std.Internal.UV.System.exePath, "lean_uv_exepath"),
+   (``Std.Internal.UV.System.cwd, "lean_uv_cwd"),
+   (``Std.Internal.UV.System.osGetenv, "lean_uv_os_getenv"),
+   (``Std.Internal.UV.System.osEnviron, "lean_uv_os_environ"),
+   (``Std.Internal.UV.System.osHomedir, "lean_uv_os_homedir"),
+   (``Std.Internal.UV.System.osTmpdir, "lean_uv_os_tmpdir"),
+   (``Std.Internal.UV.System.osGetPasswd, "lean_uv_os_get_passwd"),
+   (``Std.Internal.UV.System.osGetHostname, "lean_uv_os_gethostname"),
+   (``Std.Internal.UV.System.osUname, "lean_uv_os_uname")]
 
 def processQueries : List String :=
-  boundQueries.map (·.2) ++
-    ["lean_uv_exepath", "lean_uv_cwd", "lean_uv_os_getenv", "lean_uv_os_environ",
-     "lean_uv_os_homedir", "lean_uv_os_tmpdir", "lean_uv_os_get_passwd", "lean_uv_os_gethostname",
-     "lean_uv_os_uname"]
+  boundQueries.map (·.2)
 
 def notFollowed : List Name := [`Lean.manualRoot]
 
@@ -365,9 +420,11 @@ def bindsTo (symbol : String) : ExternEntry → Bool
 
 def checkProcess (env : Environment) (roots : Array Name) : Array Rejection := Id.run do
   let reject (message : String) : Rejection := { rule := "PROCESS", message }
-  if roots.isEmpty then
-    return #[reject "the library's modules hold no compiled code"]
   let mut errs : Array Rejection := #[]
+  unless Lean.versionString == testsLean do
+    errs := errs.push <| reject s!"PROCESS checks extern bindings audited for Lean {testsLean}, not Lean {Lean.versionString}, which runs here: read processQueries again from Init and Std.Internal.UV.System extern attributes"
+  if roots.isEmpty then
+    return errs.push <| reject "the library's modules hold no compiled code"
   for (decl, symbol) in boundQueries do
     let bound := match IR.findEnvDecl env decl with
       | some (.extern _ _ _ data) => data.entries.any (bindsTo symbol)
@@ -380,7 +437,7 @@ def checkProcess (env : Environment) (roots : Array Name) : Array Rejection := I
   let path (parent : Std.HashMap Name Name) (c : Name) : List Name := Id.run do
     let mut out := [c]
     let mut at' := c
-    for _ in [0:64] do
+    for _ in [0:parent.size] do
       let p := parent.getD at' at'
       if p == at' then break
       out := p :: out
@@ -1409,7 +1466,7 @@ def check (opts : CheckOpts) : IO (Array Rejection) := do
   let commentErrs ← checkComments opts
   let regulaErrs ← checkRegula mods
   initSearchPath (← findSysroot) [pkg.leanLibDir]
-  let env ← importModules (mods.map fun m => { module := m }) {}
+  let env ← importModules ((mods.map fun m => { module := m }).push { module := `Std.Internal.UV.System }) {}
   let idxs := mods.filterMap env.getModuleIdx?
   let mut errs : Array Rejection := #[]
   let mut audited := 0

@@ -4,57 +4,6 @@ public import Lean
 public import LeanIntent.Confirmation
 public import LeanIntent.Render
 
-/-!
-# Reading a project's confirmations from the finished build
-
-`LeanIntent.Confirmation` decides whether a project's deliverables are confirmed, given the texts of
-its owners' log and the current revision of each. This module reads both from Lean's environment,
-so a checker that reads only the declarations of a finished build (a project's own validation gate,
-for one) reads them through the library, and parses no source text. Each input is read through Lean:
-
-| Input | How it is read |
-|---|---|
-| the project's deliverables | every definition, opaque constant or axiom of the modules given whose type reduces, unfolding every definition, to `LeanIntent.Deliverable _` |
-| the owners' log | the one such constant of those modules whose type so reduces to `LeanIntent.OwnersLog`; none, or several, is a finding |
-| each statement's text | the list and its strings, reduced by Lean to `List.cons` and string literals, an error when one does not reduce to a literal, then `Statement.parse`, which accepts exactly the texts `Statement.print` writes |
-| a deliverable's record and explanation | its constructor's arguments, each of which must be a constant, whose names the answers use |
-| the revision's text | `LeanIntent.Render.revisionText` of the explanation, computed now, saying nothing of who settled what |
-| each consequence's text | `LeanIntent.Render.consequenceText` of its predicate, computed now |
-| the standing and statuses recorded | the explanation's and each answer's constructors, by `LeanIntent.Render`'s `readRestatement`, `readSettled` and `readAnswerer` |
-| values no deliverable holds | every other constant of those modules whose type so reduces to `LeanIntent.Explanation _`, `LeanIntent.Attributed _` or a list of those answers (`undeclaredIn`), read the same way |
-| which imported modules are Lean's own, where a text's meaning stops | the process's search path (`LeanIntent.Render.leanOwnModules`), never where the running executable lies |
-
-Where the running executable lies changes no text: a compiled checker sets its search path before it
-imports the project, as `lean` does for itself, and an error, never a text, comes of a path that holds
-no Lean library. `docs/confirmation.md`'s "What is trusted" names the kinds of process observed to give
-the same text, and the notation a process imports, on which a text still depends. Nothing here starts
-a process or asks where it runs, as `tools/check.lean`'s rule `PROCESS` checks of the compiled code, so
-a checker that refuses a process start can call this.
-
-`check mods` gives the `Report`. The texts are computed from the build the check reads, so an answer
-recorded against any other build's text, an older revision's or a definition's former body's, names
-another text and does not count. A deliverable whose meaning reaches what cannot be printed fails
-with an error naming it, never a pass, as does one that is not a constructor's application once
-reduced, such as an opaque constant or an axiom, and every unsafe or partial constant of the types
-read here, whose proofs could prove anything (`declaredWhere`).
-
-Types and values are reduced by `Render.readWhnf`, through the kernel's own reduction, so the
-constructor arguments come from the admitted declaration, never an elaborator unfolding helper.
-`Render.kernelReduction_result` preserves the kernel request's result; the kernel's reduction
-semantics remain trusted.
-
-The modules given are the caller's, and should be every module of the project, as Lake lists them:
-a module left out hides what it declares, and an empty list finds no log. A constant whose type is
-not one of these once unfolded, such as a function returning a deliverable or a structure holding
-one, is not found, so it is not asked about; this is accepted, since it takes deliberately obscuring
-a declaration that review reads.
-
-`renderChecked` prints a deliverable's rendering with what the log holds of who settled each thing,
-rather than what the explanation records. `answerStatement` writes the text of a new answer to one
-question of a deliverable, with the two texts it must hold; a project commits that text as an entry
-of its log.
--/
-
 public section
 
 namespace LeanIntent.Confirmation.Read
@@ -167,13 +116,29 @@ def constName (e : Expr) (what : String) : MetaM Name := do
   | .const c _ => return c
   | e => throwError "{what} must be a constant, found{indentExpr e}"
 
-/-- The question of the consequence `c`, a term of type `LeanIntent.Consequence W`. -/
-def questionOf (c : Expr) : MetaM Question := do
+theorem consequenceHeading_not_prefix_restatementPredicate :
+    ¬ consequenceHeading.toList <+: restatementPredicate.toList := by
+  decide
+
+theorem consequenceBody_ne_restatementPredicate (predText defsText : String) :
+    consequenceBody predText defsText ≠ restatementPredicate := by
+  intro h
+  have hp := consequenceBody_prefix predText defsText
+  rw [h] at hp
+  exact consequenceHeading_not_prefix_restatementPredicate hp
+
+def questionOfVerified (c : Expr) :
+    MetaM { q : Question // q.predicate ≠ restatementPredicate } := do
   let args ← ctorArgs c ``Consequence.mk 4
   let (kind, _) ← kindWords args[2]
-  return ⟨← strLit args[1],
+  let ⟨pred, hp⟩ ← consequenceTextVerified args[3]
+  return ⟨⟨← strLit args[1],
     if kind.isConstOf ``Consequence.Kind.entailment then .entailment else .possibility,
-    ← consequenceText args[3]⟩
+    pred⟩, by obtain ⟨p, d, rfl⟩ := hp; exact consequenceBody_ne_restatementPredicate p d⟩
+
+/-- The question of the consequence `c`, a term of type `LeanIntent.Consequence W`. -/
+def questionOf (c : Expr) : MetaM Question :=
+  return (← questionOfVerified c).1
 
 /-- The kept answer of `a`, a term of type `LeanIntent.Attributed W`. -/
 def keptOf (a : Expr) : MetaM (Question × Verdict × Answerer) := do
@@ -186,17 +151,26 @@ def deliverableParts (decl : Name) : MetaM (Name × Name × Vector Expr 5) := do
   return (← constName d[1] s!"the record of {decl}", ← constName d[2] s!"the explanation of {decl}",
     d)
 
-/-- The current revision of the deliverable `decl`, a definition of type `LeanIntent.Deliverable W`,
-as the build shows it. An error, naming what cannot be read or printed, when any of it cannot. -/
-def revisionOf (decl : Name) : MetaM Revision := do
+def revisionOfVerified (decl : Name) :
+    MetaM { rev : Revision // ∀ x ∈ rev.shown, x.1.predicate ≠ restatementPredicate } := do
   let (record, explanation, d) ← deliverableParts decl
   let ex ← ctorArgs (← constOf explanation) ``Explanation.mk 11
   let standing ← readRestatement ex[6]
   let shown ← (← listElems ex[7]).mapM fun e => do
     let s ← ctorArgs e ``Shown.mk 7
-    return (← questionOf s[3], ← readSettled standing s[6])
+    let ⟨q, hq⟩ ← questionOfVerified s[3]
+    return (⟨(q, ← readSettled standing s[6]), hq⟩ :
+      { p : Question × Settled standing // p.1.predicate ≠ restatementPredicate })
   let kept ← (← listElems d[3]).mapM keptOf
-  return ⟨record.toString, ← revisionText explanation, standing, shown.toList, kept.toList⟩
+  return ⟨⟨record.toString, ← revisionText explanation, standing,
+      shown.toList.map (·.1), kept.toList⟩, fun _ hx => by
+    obtain ⟨y, _, rfl⟩ := List.mem_map.mp hx
+    exact y.2⟩
+
+/-- The current revision of the deliverable `decl`, a definition of type `LeanIntent.Deliverable W`,
+as the build shows it. An error, naming what cannot be read or printed, when any of it cannot. -/
+def revisionOf (decl : Name) : MetaM Revision :=
+  return (← revisionOfVerified decl).1
 
 /-- The texts of the owners' log `decl`, a definition of type `LeanIntent.OwnersLog`. -/
 def logTexts (decl : Name) : MetaM (List String) := do
@@ -213,11 +187,14 @@ def projectLog (mods : Array Name) : MetaM (Except (List Finding) (List String))
 /-- Whether the explanation `ex` says someone settled something: it records an owner's confirmation
 of the restatement, or an answer, or a derived consequence. -/
 def explanationClaims (ex : Name) : MetaM Bool := do
-  let args ← ctorArgs (← constOf ex) ``Explanation.mk 11
-  let standing ← readRestatement args[6]
-  let claims ← (← listElems args[7]).mapM fun e => do
-    return (← readSettled standing (← ctorArgs e ``Shown.mk 7)[6]) matches .answered .. | .derived
-  return standing != .unconfirmed || claims.any id
+  let ci ← getConstInfo ex
+  let us := ci.levelParams.map .param
+  withExplanationTelescope ci.type fun params _ => do
+    let args ← ctorArgs (mkAppN (mkConst ex us) params) ``Explanation.mk 11
+    let standing ← readRestatement args[6]
+    let claims ← (← listElems args[7]).mapM fun e => do
+      return (← readSettled standing (← ctorArgs e ``Shown.mk 7)[6]) matches .answered .. | .derived
+    return standing != .unconfirmed || claims.any id
 
 /-- The answers the constant `decl` holds, of type `LeanIntent.Attributed W` or a list of them. -/
 def attributedOf (decl : Name) : MetaM (Array (Question × Verdict × Answerer)) := do
@@ -228,7 +205,7 @@ def attributedOf (decl : Name) : MetaM (Array (Question × Verdict × Answerer))
 def undeclaredIn (mods decls : Array Name) (revs : Array Revision) : MetaM (List String) := do
   let held ← decls.mapM fun d => return (← deliverableParts d).2.1
   let kept := revs.toList.flatMap (·.kept)
-  let explanations ← (← declaredIn mods ``Explanation).filterM fun e =>
+  let explanations ← (← declaredWhere mods isExplanationType).filterM fun e =>
     return !held.contains e && (← explanationClaims e)
   let answers ← declaredWhere mods fun t => do
     if t.getAppFn.isConstOf ``Attributed then return true
@@ -268,17 +245,11 @@ def renderChecked (mods : Array Name) (decl : Name) : MetaM String := do
   renderExplanation explanation
     (statuses := .given (String.ofList (logStanding p o log rev).words) words.toArray)
 
-/-- The text of a statement, made by `author` on `date` with the source `source`, answering the
-question named `consequence` of the deliverable `decl`, at its current revision, with the two texts
-that answer must hold. An error when the deliverable asks no such question. -/
-def answerStatement (decl : Name) (consequence : String) (project id : Ident) (date : Date)
+def answerStatement (decl : Name) (question : Asked) (project id : Ident) (date : Date)
     (source : Source) (author : Authority) (verdict : Verdict) : MetaM String := do
   let rev ← revisionOf decl
-  let some q := (restatement :: rev.shown.map (·.1)).find? (·.consequence == consequence)
-    | throwError "{decl} asks no question named {consequence}"
-  let answer : Statement.Answer :=
-    { author, record := rev.record, revision := rev.text, consequence := q.consequence,
-      kind := q.kind, predicate := q.predicate, verdict }
-  return Statement.print ⟨project, id, date, source, .answer answer⟩
+  match buildAnswer rev question author verdict with
+  | .ok answer => return Statement.print ⟨project, id, date, source, .answer answer⟩
+  | .error msg => throwError "{decl} {msg}"
 
 end LeanIntent.Confirmation.Read

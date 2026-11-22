@@ -988,6 +988,24 @@ def newReader (decl : Name) (form : Form) (params : Array Expr := #[]) : MetaM R
   return { form, ns := if form == .exact then .anonymous else decl.getPrefix, params,
            own := ← leanOwnModules, notations := ← IO.mkRef {} }
 
+def withExplanationTelescope {α : Type} (type : Expr) (k : Array Expr → Expr → MetaM α) :
+    MetaM α :=
+  go (2 ^ 64) #[] type
+where
+  go : Nat → Array Expr → Expr → MetaM α
+    | 0, _, _ => throwError "explanation type has more than 2 ^ 64 nested forall telescopes"
+    | fuel + 1, acc, e => do
+      let e ← readWhnf e
+      if e.isForall then
+        forallTelescope e fun xs body =>
+          go fuel (acc ++ xs) body
+      else
+        k acc e
+
+def isExplanationType (type : Expr) : MetaM Bool :=
+  withExplanationTelescope type fun _ body =>
+    pure (body.getAppFn.isConstOf ``Explanation)
+
 /-- The rendering of the explanation `decl`, in the form `form`: its record part (`recordPart`),
 saying what `statuses` says of who settled each thing, every declaration that part's meaning reaches,
 and the toolchain. `decl` is a constant of type
@@ -999,7 +1017,9 @@ def renderExplanation (decl : Name) (form : Form := .readable) (statuses : Statu
   let ci ← getConstInfo decl
   let us := ci.levelParams.map Level.param
   let reader ← newReader decl form
-  let (doc, roots, shown) ← forallTelescope ci.type fun params _ =>
+  let (doc, roots, shown) ← withExplanationTelescope ci.type fun params body => do
+    unless body.getAppFn.isConstOf ``Explanation do
+      throwError "{decl} does not have an explanation type"
     recordPart { reader with params } (mkAppN (mkConst decl us) params) (statuses := statuses)
   return doc ++ (← definitionsPart reader roots shown)
 
@@ -1012,9 +1032,13 @@ also from each term the list prints, so the definitions a value or a proposition
 printed. -/
 def renderAt (decl : Name) (us : List Level) (args : Array Expr) : MetaM String := do
   let ci ← getConstInfo decl
+  unless ← isExplanationType ci.type do
+    throwError "{decl} does not have an explanation type"
   let reader ← newReader decl .readable
-  let binders ← forallBoundedTelescope (ci.type.instantiateLevelParams ci.levelParams us) args.size
-    fun params _ => do
+  let binders ← withExplanationTelescope (ci.type.instantiateLevelParams ci.levelParams us)
+    fun params body => do
+      unless body.getAppFn.isConstOf ``Explanation do
+        throwError "{decl} does not have an explanation type"
       unless params.size == args.size do
         throwError "{decl} takes {params.size} parameters here, and was given {args.size}"
       params.mapM fun x => return (← fvarDecl x).userName.eraseMacroScopes
@@ -1040,19 +1064,35 @@ must not change what the answer names. -/
 def revisionText (decl : Name) : MetaM String :=
   renderExplanation decl .exact .omitted
 
+@[expose] def consequenceHeading : String := "# A consequence's predicate"
+
+@[expose] def consequenceBody (predText defsText : String) : String :=
+  consequenceHeading ++
+    s!"\n\nPrinted exactly: as Lean syntax that Lean elaborates back \
+    to the term its kernel checks, binder names and metadata aside, from the root namespace with \
+    nothing opened.\n\n{code predText}\n## Definitions the predicate reaches\n\nEach \
+    is printed in full, as in the rendering of a record, with what an answer to it asks of every \
+    later revision (`LeanIntent.Answer.KeptBy`).\n\n\
+    {defsText}{toolchain}"
+
+theorem consequenceBody_prefix (predText defsText : String) :
+    consequenceHeading.toList <+: (consequenceBody predText defsText).toList := by
+  rw [consequenceBody, String.toList_append]
+  exact List.prefix_append _ _
+
+def consequenceTextVerified (pred : Expr) :
+    MetaM { s : String // ∃ p d, s = consequenceBody p d } := do
+  let p ← printExact pred
+  let d ← definitions (← newReader .anonymous .exact) (exprRefs pred [] ++ [``Answer.KeptBy]) {}
+  return ⟨consequenceBody p d, p, d, rfl⟩
+
 /-- The canonical text of what the consequence with the predicate `pred` means: the predicate printed
 exactly; every declaration it reaches, and `LeanIntent.Answer.KeptBy`, which says what an answer to
 it asks of every later revision, each printed in full by `definitions`; and the toolchain. It does
 not stop at the record, so a predicate stated through a record prints the record's value and
 changes with it. An error, naming what cannot be printed, when any of it cannot be. -/
-def consequenceText (pred : Expr) : MetaM String := do
-  return s!"# A consequence's predicate\n\nPrinted exactly: as Lean syntax that Lean elaborates back \
-    to the term its kernel checks, binder names and metadata aside, from the root namespace with \
-    nothing opened.\n\n{code (← printExact pred)}\n## Definitions the predicate reaches\n\nEach \
-    is printed in full, as in the rendering of a record, with what an answer to it asks of every \
-    later revision (`LeanIntent.Answer.KeptBy`).\n\n\
-    {← definitions (← newReader .anonymous .exact) (exprRefs pred [] ++ [``Answer.KeptBy]) {}}\
-    {toolchain}"
+def consequenceText (pred : Expr) : MetaM String :=
+  return (← consequenceTextVerified pred).1
 
 /-! ## The answers -/
 
@@ -1066,6 +1106,9 @@ answer reach, `LeanIntent.Answer.KeptBy`'s among them, which says what the answe
 later revision, each printed in full by one call of `definitions`; and the toolchain. An error,
 naming what cannot be printed, when any of it cannot be. -/
 def answerText (ex : Name) (a : Expr) : MetaM String := do
+  let exInfo ← getConstInfo ex
+  unless ← isExplanationType exInfo.type do
+    throwError "{ex} does not have an explanation type"
   let attributed ← ctorArgs a ``Attributed.mk 3
   let answerer ← readAnswerer attributed[2]
   let ans ← ctorArgs attributed[1] ``Answer.mk 3
@@ -1089,7 +1132,7 @@ def answerText (ex : Name) (a : Expr) : MetaM String := do
     exactly: as Lean syntax that Lean elaborates back to the term its kernel checks, binder names \
     and metadata aside, from the root namespace with nothing opened.\n\n\
     {code (← printExact term)}\n"
-  let exConst := mkConst ex ((← getConstInfo ex).levelParams.map .param)
+  let exConst := mkConst ex (exInfo.levelParams.map .param)
   let explained := s!"# The explanation it answers\n\nThe answer is given to the explanation \
     below, printed exactly, whose record and consequences follow as the exact form of its \
     rendering prints them.\n\n{code (← printExact exConst)}\n"
