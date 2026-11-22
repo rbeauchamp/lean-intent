@@ -119,7 +119,7 @@ jobs:
           printf '%s  %s\n' "$pin_linux_sha256" "$RUNNER_TEMP/no-comments" | sha256sum --check --strict
           chmod 0755 "$RUNNER_TEMP/no-comments"
           echo "NO_COMMENTS_BIN=$RUNNER_TEMP/no-comments" >> "$GITHUB_ENV"
-      - name: Install and build Regula matching tools/regula.pin with commit verification
+      - name: Install Regula matching tools/regula.pin with commit verification
         shell: bash
         run: |
           set -euo pipefail
@@ -187,11 +187,11 @@ jobs:
           fi
           git -C "$regula_dir" checkout --quiet --detach "$pin_commit"
           actual_head="$(git -C "$regula_dir" rev-parse --verify --quiet --end-of-options "HEAD^{commit}")"
-          if [ "$actual_head" != "$pin_commit" ] || [ -n "$(git -C "$regula_dir" status --porcelain=v1 -z --untracked-files=all)" ]; then
+          regula_status="$(git -C "$regula_dir" status --porcelain=v1 --untracked-files=all --ignored)"
+          if [ "$actual_head" != "$pin_commit" ] || [ -n "$regula_status" ]; then
             echo "::error::Regula checkout verification failed at ${pin_commit}"
             exit 1
           fi
-          (cd "$regula_dir" && lake build lint)
           echo "REGULA_DIR=$regula_dir" >> "$GITHUB_ENV"
       # LAKE-CONFIG, LEAN-BUILD, LEAN-MODULE, AXIOMS, PROCESS, CODES, NO-COMMENTS, and REGULA: no
       # other package is required, every library module builds with no error and no warning, every

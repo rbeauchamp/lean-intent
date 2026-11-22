@@ -955,13 +955,13 @@ def notationPart (R : Reader) : MetaM String := do
   let kinds := (← R.notations.get).toList
   if kinds.isEmpty then return ""
   let env ← getEnv
-  let lines := kinds.map fun k =>
+  let lines ← kinds.mapM fun k => do
     match env.getModuleIdxFor? k with
     | some idx =>
-      match env.header.modules[idx.toNat]? with
-      | some md => s!"- `{k}`, declared in {md.module}\n"
-      | none => s!"- `{k}`, declared in unknown module index {idx.toNat}\n"
-    | none => s!"- `{k}`, declared in the file that made this text\n"
+      let some md := env.header.modules[idx.toNat]?
+        | throwError "unknown module index {idx.toNat} for notation {k}"
+      return s!"- `{k}`, declared in {md.module}\n"
+    | none => return s!"- `{k}`, declared in the file that made this text\n"
   return s!"## Notation from outside Lean's own libraries\n\nThe statements above use this notation, \
     whose declaration this text does not print. Lean read each statement back as the term its \
     kernel checks, so the notation changes nothing Lean checks; what it means to a reader is in its \

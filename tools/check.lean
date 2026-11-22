@@ -97,16 +97,35 @@ def checkConfig : IO (Array Rejection) := do
     errs := errs.push (reject s!"lakefile.toml sets {k}, which is not among the keys this rule allows")
   return errs
 
+def hasDuplicateNames (xs : Array Name) : Bool := Id.run do
+  let mut seen : Std.HashSet Name := {}
+  for x in xs do
+    if seen.contains x then
+      return true
+    seen := seen.insert x
+  return false
+
 def checkModules (pkg : Lake.Package) (files : Array String) (mods : Array Name) :
     IO (Array Rejection) := do
   let reject (message : String) : Rejection := { rule := "LEAN-BUILD", message }
   let mut errs : Array Rejection := #[]
+  if hasDuplicateNames mods then
+    errs := errs.push (reject "Git's index maps multiple tracked library files to the same module name")
   let mut selected : Array Name := #[]
   for lib in pkg.leanLibs do
     let libMods := (← lib.getModuleArray).map (·.name)
     if libMods.isEmpty then
       errs := errs.push (reject s!"the library target {lib.name} selects no module")
+    unless pkg.defaultTargets.contains lib.name do
+      errs := errs.push (reject s!"the library target {lib.name} is omitted from lakefile.toml defaultTargets")
     selected := selected ++ libMods
+  if hasDuplicateNames pkg.defaultTargets then
+    errs := errs.push (reject "lakefile.toml defaultTargets contains duplicate targets")
+  for t in pkg.defaultTargets do
+    unless pkg.leanLibs.any (·.name == t) do
+      errs := errs.push (reject s!"lakefile.toml defaultTargets names {t}, which is not a library target")
+  if hasDuplicateNames selected then
+    errs := errs.push (reject "lakefile.toml library targets select duplicate modules")
   for (f, m) in files.zip mods do
     unless selected.contains m do
       errs := errs.push (reject s!"{f}, a library file Git's index lists, is the module {m}, which no library target selects, so a build of the targets does not build it")
@@ -675,18 +694,42 @@ def parseSha256Output (tool raw : String) : IO String := do
   | [] =>
     throw <| IO.userError s!"NO-COMMENTS: {tool} produced empty output"
 
+def sha256Cmd (rule : String) : IO (String × Array String) := do
+  if System.Platform.isOSX then
+    return ("shasum", #["-a", "256"])
+  else if System.Platform.isLinux then
+    return ("sha256sum", #[])
+  else
+    throw <| IO.userError s!"{rule}: unsupported platform target {System.Platform.target.quote} for SHA-256 verification"
+
 def sha256File (path : System.FilePath) : IO String := do
-  let (cmd, args) ←
-    if System.Platform.isOSX then
-      pure ("shasum", #["-a", "256", "--", path.toString])
-    else if System.Platform.isLinux then
-      pure ("sha256sum", #["--", path.toString])
-    else
-      throw <| IO.userError s!"NO-COMMENTS: unsupported platform target {System.Platform.target.quote} for SHA-256 verification"
-  let o ← IO.Process.output { cmd, args }
+  let (cmd, baseArgs) ← sha256Cmd "NO-COMMENTS"
+  let o ← IO.Process.output { cmd, args := baseArgs ++ #["--", path.toString] }
   unless o.exitCode == 0 do
     throw <| IO.userError s!"NO-COMMENTS: {cmd} failed on {path}:\n{o.stderr}"
   parseSha256Output cmd o.stdout
+
+def sha256Batch (rule : String) (paths : Array String) : IO (Array String) := do
+  if paths.isEmpty then
+    return #[]
+  let (cmd, baseArgs) ← sha256Cmd rule
+  let o ← IO.Process.output { cmd, args := baseArgs ++ #["--"] ++ paths }
+  unless o.exitCode == 0 do
+    throw <| IO.userError s!"{rule}: {cmd} failed:\n{o.stderr}"
+  unless o.stdout.endsWith "\n" do
+    throw <| IO.userError s!"{rule}: {cmd} output did not end with newline"
+  let lines := (o.stdout.splitOn "\n").dropLast.toArray
+  unless lines.size == paths.size do
+    throw <| IO.userError s!"{rule}: {cmd} returned {lines.size} lines for {paths.size} paths"
+  let mut digests : Array String := #[]
+  for (arg, line) in paths.zip lines do
+    let some digestSlice := line.dropSuffix? ("  " ++ arg)
+      | throw <| IO.userError s!"{rule}: {cmd} returned unexpected output line for {arg.quote}: {line.quote}"
+    let digest := digestSlice.toString
+    unless isSha256 digest do
+      throw <| IO.userError s!"{rule}: {cmd} produced invalid SHA-256 digest {digest.quote}"
+    digests := digests.push digest
+  return digests
 
 def buildPathPrefixes (isAbs : Bool) : List String → Option (List String × String)
   | [] => none
@@ -962,7 +1005,7 @@ def regulaCachePrefixes (commit : String) : List String :=
   regulaBasePrefixes ++ [s!".lake/cache/regula/{commit}"]
 
 def gitIn (dir : System.FilePath) (args : Array String) : IO IO.Process.Output :=
-  IO.Process.output { cmd := "git", args := #["-C", dir.toString] ++ args }
+  IO.Process.output { cmd := "git", args := #["-C", dir.toString, "-c", "core.fsmonitor=false"] ++ args }
 
 def checkRegularChildFile (rule : String) (dir : System.FilePath) (rel : String) : IO Unit := do
   let path := dir / rel
@@ -981,14 +1024,14 @@ def checkAbsentPath (rule : String) (dir : System.FilePath) (rel : String) : IO 
   if info?.isSome then
     throw <| IO.userError s!"{rule}: {path} must not exist in checkout"
 
-def verifyRegulaCheckout (pin : RegulaPin) (dir : System.FilePath) (checkTag : Bool) : IO Unit := do
+def verifyRegulaCheckout (pin : RegulaPin) (dir : System.FilePath) (checkTag checkIgnored : Bool) : IO Unit := do
   checkRegularChildFile "REGULA" dir "lakefile.toml"
   checkRegularChildFile "REGULA" dir "lean-toolchain"
   checkAbsentPath "REGULA" dir "lakefile.lean"
   let gitMeta ← try (dir / ".git").symlinkMetadata catch _ =>
     throw <| IO.userError s!"REGULA: {dir / ".git"} does not exist or cannot be inspected"
-  if gitMeta.type == .symlink then
-    throw <| IO.userError s!"REGULA: {dir / ".git"} must not be a symlink"
+  unless gitMeta.type == .dir do
+    throw <| IO.userError s!"REGULA: {dir / ".git"} must be a real directory (symlinks and gitfiles are rejected)"
   let headOut ← gitIn dir #["rev-parse", "--verify", "--quiet", "--end-of-options", "HEAD^{commit}"]
   unless headOut.exitCode == 0 do
     throw <| IO.userError s!"REGULA: git rev-parse HEAD failed in {dir}:\n{headOut.stderr}"
@@ -1003,11 +1046,15 @@ def verifyRegulaCheckout (pin : RegulaPin) (dir : System.FilePath) (checkTag : B
     let actualTag := tagOut.stdout.trimAscii.toString
     unless actualTag == pin.commit do
       throw <| IO.userError s!"REGULA: tag {pin.version} in {dir} resolves to {actualTag.quote}, expected {pin.commit.quote}"
-  let statusOut ← gitIn dir #["status", "--porcelain=v1", "-z", "--untracked-files=all"]
+  let statusArgs := if checkIgnored then
+    #["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored"]
+  else
+    #["status", "--porcelain=v1", "-z", "--untracked-files=all"]
+  let statusOut ← gitIn dir statusArgs
   unless statusOut.exitCode == 0 do
     throw <| IO.userError s!"REGULA: git status failed in {dir}:\n{statusOut.stderr}"
   unless statusOut.stdout.isEmpty do
-    throw <| IO.userError s!"REGULA: checkout {dir} has uncommitted or untracked changes"
+    throw <| IO.userError s!"REGULA: checkout {dir} has uncommitted, untracked, or ignored files"
 
 def stageRegulaCheckout (pin : RegulaPin) : IO System.FilePath := do
   ensureDirChain "REGULA" regulaBasePrefixes
@@ -1039,7 +1086,7 @@ def stageRegulaCheckout (pin : RegulaPin) : IO System.FilePath := do
     let coOut ← gitIn tmpPath #["checkout", "--quiet", "--detach", pin.commit]
     unless coOut.exitCode == 0 do
       throw <| IO.userError s!"REGULA: git checkout {pin.commit} failed in {tmpPath}:\n{coOut.stderr}"
-    verifyRegulaCheckout pin tmpPath true
+    verifyRegulaCheckout pin tmpPath true true
     checkDirChain "REGULA" regulaBasePrefixes
     let preRename? ← try
       some <$> cacheDir.symlinkMetadata
@@ -1050,7 +1097,7 @@ def stageRegulaCheckout (pin : RegulaPin) : IO System.FilePath := do
     | some info =>
       unless info.type == .dir do
         throw <| IO.userError s!"REGULA: cache path {cacheDir} is not a real directory (symlinks are rejected)"
-      verifyRegulaCheckout pin cacheDir true
+      verifyRegulaCheckout pin cacheDir true true
       return cacheDir
     | none =>
       try
@@ -1065,12 +1112,12 @@ def stageRegulaCheckout (pin : RegulaPin) : IO System.FilePath := do
         | some info =>
           unless info.type == .dir do
             throw <| IO.userError s!"REGULA: cache path {cacheDir} is not a real directory (symlinks are rejected)"
-          verifyRegulaCheckout pin cacheDir true
+          verifyRegulaCheckout pin cacheDir true true
           return cacheDir
         | none =>
           throw <| IO.userError s!"REGULA: failed to stage {cacheDir}: {e}"
       checkDirChain "REGULA" (regulaCachePrefixes pin.commit)
-      verifyRegulaCheckout pin cacheDir true
+      verifyRegulaCheckout pin cacheDir true true
       return cacheDir
   finally
     try
@@ -1081,75 +1128,210 @@ def ensureRegulaDir (pin : RegulaPin) : IO System.FilePath := do
   match ← IO.getEnv "REGULA_DIR" with
   | some raw =>
     let dir ← checkNoSymlinkDir "REGULA" "REGULA_DIR" raw
-    verifyRegulaCheckout pin dir false
+    verifyRegulaCheckout pin dir false false
     return dir
   | none =>
     if ← verifyExistingDirChain "REGULA" (regulaCachePrefixes pin.commit) then
       let cacheDir := regulaCacheDirPath pin.commit
-      verifyRegulaCheckout pin cacheDir true
+      verifyRegulaCheckout pin cacheDir true true
       return cacheDir
     stageRegulaCheckout pin
 
 def regulaEnv (proofDir? : Option String) : Array (String × Option String) :=
   #[("REGULA_PROOF", proofDir?), ("REGULA_FULL", none),
-    ("LEAN_PATH", none), ("LEAN_SRC_PATH", none),
-    ("LAKE_CACHE_DIR", none), ("LAKE_ARTIFACT_CACHE", none),
-    ("LAKE_RESTORE_ARTIFACTS", none)]
+    ("LEAN_PATH", none), ("LEAN_SRC_PATH", none), ("LEAN_GITHASH", none),
+    ("LAKE_CACHE_DIR", some ""), ("LAKE_NO_CACHE", some "true"),
+    ("LAKE_ARTIFACT_CACHE", some "false"), ("LAKE_RESTORE_ARTIFACTS", some "false"),
+    ("LAKE_CONFIG", some ""), ("LAKE_CACHE_KEY", none),
+    ("LAKE_CACHE_ARTIFACT_ENDPOINT", none), ("LAKE_CACHE_REVISION_ENDPOINT", none),
+    ("LAKE_CACHE_SERVICE", none), ("LAKE_PKG_URL_MAP", none)]
 
 def splitNonEmptyLines (raw : String) : Array String :=
   (((raw.splitOn "\n").map (·.trimAscii.toString)).filter (· ≠ "")).toArray
 
-def checkRegula : IO (Array Rejection) := do
+inductive WalkItemKind where
+  | dir
+  | file (size : UInt64)
+  | symlink
+  | other
+  deriving BEq
+
+structure WalkItem where
+  relPath : String
+  kind : WalkItemKind
+
+partial def walkDirEntries (root : System.FilePath) (skipTopGit : Bool) : IO (Array WalkItem) := do
+  let rec go (curRel : String) (acc : Array WalkItem) : IO (Array WalkItem) := do
+    let dirPath := if curRel.isEmpty then root else root / curRel
+    let rawEntries ← dirPath.readDir
+    let entries := rawEntries.qsort (fun a b => a.fileName < b.fileName)
+    let mut out := acc
+    for ent in entries do
+      let name := ent.fileName
+      if skipTopGit && curRel.isEmpty && name == ".git" then
+        continue
+      let rel := if curRel.isEmpty then name else s!"{curRel}/{name}"
+      let finfo ← (root / rel).symlinkMetadata
+      match finfo.type with
+      | .dir =>
+        out := out.push { relPath := rel, kind := .dir }
+        out ← go rel out
+      | .file =>
+        out := out.push { relPath := rel, kind := .file finfo.byteSize }
+      | .symlink =>
+        out := out.push { relPath := rel, kind := .symlink }
+      | .other =>
+        out := out.push { relPath := rel, kind := .other }
+    return out
+  go "" #[]
+
+def checkExtractedRegulaTree (dir : System.FilePath) : IO Unit := do
+  checkRegularChildFile "REGULA" dir "lakefile.toml"
+  checkRegularChildFile "REGULA" dir "lean-toolchain"
+  checkAbsentPath "REGULA" dir "lakefile.lean"
+  for item in ← walkDirEntries dir false do
+    unless item.kind matches .dir | .file _ do
+      throw <| IO.userError s!"REGULA: extracted checkout entry {dir / item.relPath} is not a regular file or directory"
+
+inductive SnapshotEntry where
+  | dir (relPath : String)
+  | fileDigest (relPath : String) (size : UInt64) (sha256 : String)
+  | fileBytes (relPath : String) (bytes : ByteArray)
+  | symlink (relPath : String) (target : String)
+  | other (relPath : String)
+  deriving BEq
+
+structure WorkspaceSnapshot where
+  status : String
+  stage : String
+  workDiff : String
+  indexDiff : String
+  refs : String
+  headCode : UInt32
+  headOut : String
+  entries : Array SnapshotEntry
+  deriving BEq
+
+def isBatchHashablePath (relPath : String) : Bool :=
+  !relPath.contains '\n' && !relPath.contains '\r' && !relPath.contains '\\'
+
+def snapshotWorkspace : IO WorkspaceSnapshot := do
+  let status ← git #["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored"]
+  let stage ← git #["ls-files", "--stage", "-z"]
+  let workDiff ← git #["diff", "--no-color", "--binary"]
+  let indexDiff ← git #["diff", "--cached", "--no-color", "--binary"]
+  let refs ← git #["for-each-ref", "--format=%(refname) %(objectname)"]
+  let headRes ← IO.Process.output { cmd := "git", args := #["rev-parse", "--verify", "--quiet", "HEAD"] }
+  let items ← walkDirEntries "." true
+  let mut batchIndices : Array Nat := #[]
+  let mut batchPaths : Array String := #[]
+  for h : idx in [:items.size] do
+    let item := items[idx]
+    if let .file _ := item.kind then
+      if isBatchHashablePath item.relPath then
+        batchIndices := batchIndices.push idx
+        batchPaths := batchPaths.push ("./" ++ item.relPath)
+  let mut digests : Std.HashMap Nat String := {}
+  let mut pos := 0
+  while pos < batchPaths.size do
+    let stop := min (pos + 200) batchPaths.size
+    let chunkPaths := batchPaths.extract pos stop
+    let chunkDigests ← sha256Batch "REGULA" chunkPaths
+    for j in [:chunkPaths.size] do
+      digests := digests.insert batchIndices[pos + j]! chunkDigests[j]!
+    pos := stop
+  let mut entries : Array SnapshotEntry := #[]
+  for h : idx in [:items.size] do
+    let item := items[idx]
+    match item.kind with
+    | .dir => entries := entries.push (.dir item.relPath)
+    | .other => entries := entries.push (.other item.relPath)
+    | .symlink =>
+      let rl ← IO.Process.output { cmd := "readlink", args := #["--", "./" ++ item.relPath] }
+      unless rl.exitCode == 0 do
+        throw <| IO.userError s!"REGULA: readlink failed on {item.relPath}:\n{rl.stderr}"
+      entries := entries.push (.symlink item.relPath rl.stdout)
+    | .file size =>
+      match digests.get? idx with
+      | some digest => entries := entries.push (.fileDigest item.relPath size digest)
+      | none => entries := entries.push (.fileBytes item.relPath (← IO.FS.readBinFile item.relPath))
+  return { status, stage, workDiff, indexDiff, refs, headCode := headRes.exitCode, headOut := headRes.stdout, entries }
+
+def parseStrictNat (s : String) : Option Nat :=
+  if !s.isEmpty && s.all (fun c => '0' ≤ c && c ≤ '9') then s.toNat? else none
+
+def parseRegulaCoverageLine (line : String) : Option (Nat × Nat) := do
+  let body ← (line.dropPrefix? "  regula: read ").map (·.toString)
+  let rest ← (body.dropSuffix? " of their constants").map (·.toString)
+  match rest.splitOn " claimed modules and " with
+  | [modsStr, declsStr] =>
+    let nMods ← parseStrictNat modsStr
+    let nDecls ← parseStrictNat declsStr
+    return (nMods, nDecls)
+  | _ => none
+
+def checkRegula (mods : Array Name) : IO (Array Rejection) := do
   if let some err ← checkCommittedRegularFile regulaPinFile then
     return #[{ rule := "REGULA", message := err }]
   let pin ← readRegulaPin
   let regulaDir ← ensureRegulaDir pin
-  let buildOut ← IO.Process.output {
-    cmd := "lake"
-    args := #["build", "lint"]
-    cwd := some regulaDir
-    env := regulaEnv none
-  }
-  unless buildOut.exitCode == 0 do
-    throw <| IO.userError s!"REGULA: lake build lint failed in {regulaDir}:\n{buildOut.stdout}{buildOut.stderr}"
   let pkgReal ← IO.FS.realPath "."
   let pkgRealStr := pkgReal.toString
   if pkgRealStr.contains '\n' || pkgRealStr.contains '\r' then
     throw <| IO.userError s!"REGULA: resolved package directory {pkgRealStr.quote} contains newline characters"
-  let preStatus ← git #["status", "--porcelain=v1", "-z", "--untracked-files=all"]
-  let preWorkDiff ← git #["diff", "--no-color", "--binary"]
-  let preIndexDiff ← git #["diff", "--cached", "--no-color", "--binary"]
-  let preLakefile ← IO.FS.readBinFile "lakefile.toml"
-  let preManifest? ← if ← System.FilePath.pathExists "lake-manifest.json" then
-      some <$> IO.FS.readBinFile "lake-manifest.json"
-    else pure none
-  let preLakefileLean ← System.FilePath.pathExists "lakefile.lean"
-  let out ← IO.Process.output {
-    cmd := "lake"
-    args := #["exe", "lint", regulaProfile]
-    cwd := some regulaDir
-    env := regulaEnv (some pkgRealStr)
-  }
-  let postStatus ← git #["status", "--porcelain=v1", "-z", "--untracked-files=all"]
-  let postWorkDiff ← git #["diff", "--no-color", "--binary"]
-  let postIndexDiff ← git #["diff", "--cached", "--no-color", "--binary"]
-  let postLakefile ← IO.FS.readBinFile "lakefile.toml"
-  let postManifest? ← if ← System.FilePath.pathExists "lake-manifest.json" then
-      some <$> IO.FS.readBinFile "lake-manifest.json"
-    else pure none
-  let postLakefileLean ← System.FilePath.pathExists "lakefile.lean"
-  if preStatus != postStatus || preWorkDiff != postWorkDiff || preIndexDiff != postIndexDiff ||
-      preLakefile != postLakefile || preManifest? != postManifest? ||
-      preLakefileLean != postLakefileLean then
-    return #[{ rule := "REGULA", message := "Regula mutated the lean-intent working tree during proof-verdict checking" }]
+  let tmpBase ← IO.FS.realPath (← IO.FS.createTempDir)
+  let (preSnap, out, postSnap) ←
+    try
+      discard <| checkNoSymlinkDir "REGULA" "temporary build directory" tmpBase.toString
+      let tarPath := tmpBase / "regula.tar"
+      let srcDir := tmpBase / "src"
+      IO.FS.createDir srcDir
+      let archOut ← gitIn regulaDir #["archive", "--format=tar", s!"--output={tarPath}", pin.commit]
+      unless archOut.exitCode == 0 do
+        throw <| IO.userError s!"REGULA: git archive failed in {regulaDir}:\n{archOut.stderr}"
+      let tarOut ← IO.Process.output { cmd := "tar", args := #["-xf", tarPath.toString, "-C", srcDir.toString] }
+      unless tarOut.exitCode == 0 do
+        throw <| IO.userError s!"REGULA: tar extraction failed in {srcDir}:\n{tarOut.stderr}"
+      IO.FS.removeFile tarPath
+      checkExtractedRegulaTree srcDir
+      let preSnap ← snapshotWorkspace
+      let out ← IO.Process.output {
+        cmd := "lake"
+        args := #["exe", "lint", regulaProfile]
+        cwd := some srcDir
+        env := regulaEnv (some pkgRealStr)
+      }
+      let postSnap ← snapshotWorkspace
+      pure (preSnap, out, postSnap)
+    finally
+      try
+        IO.FS.removeDirAll tmpBase
+      catch _ => pure ()
+  if preSnap != postSnap then
+    return #[{ rule := "REGULA", message := "Regula mutated the lean-intent workspace during proof-verdict checking" }]
   let expectedVerdict :=
     s!"regula: proof verdict: pass, which says nothing about what ran during the build, on {pkgRealStr}"
-  let stdoutLines := splitNonEmptyLines out.stdout
   if out.exitCode == 0 then
-    if stdoutLines.back? == some expectedVerdict then
-      return #[]
+    if out.stdout.endsWith "\n" then
+      match (out.stdout.splitOn "\n").reverse with
+      | "" :: lastLine :: secondLastLine :: _ =>
+        if lastLine == expectedVerdict then
+          match parseRegulaCoverageLine secondLastLine with
+          | some (readMods, readDecls) =>
+            if readMods == mods.size && readDecls > 0 then
+              return #[]
+            return #[{ rule := "REGULA", message :=
+              s!"Regula covered {readMods} modules ({readDecls} constants), expected {mods.size} modules and > 0 constants" }]
+          | none =>
+            return #[{ rule := "REGULA", message :=
+              s!"Regula exited 0 without expected module coverage line before verdict; stdout:\n{out.stdout}" }]
+        return #[{ rule := "REGULA", message :=
+          s!"Regula exited 0 without expected exact final verdict {expectedVerdict.quote}; stdout:\n{out.stdout}" }]
+      | _ =>
+        return #[{ rule := "REGULA", message :=
+          s!"Regula exited 0 with incomplete stdout:\n{out.stdout}" }]
     return #[{ rule := "REGULA", message :=
-      s!"Regula exited 0 without expected final verdict {expectedVerdict.quote}; stdout:\n{out.stdout}" }]
+      s!"Regula exited 0 without trailing newline after verdict; stdout:\n{out.stdout}" }]
   let lines := splitNonEmptyLines (out.stdout ++ "\n" ++ out.stderr)
   if lines.isEmpty then
     return #[{ rule := "REGULA", message := s!"Regula exited with status {out.exitCode}" }]
@@ -1176,7 +1358,7 @@ def check (opts : CheckOpts) : IO (Array Rejection) := do
     return built
   let codes ← checkCodes pkg.leanLibDir mods
   let commentErrs ← checkComments opts
-  let regulaErrs ← checkRegula
+  let regulaErrs ← checkRegula mods
   initSearchPath (← findSysroot) [pkg.leanLibDir]
   let env ← importModules (mods.map fun m => { module := m }) {}
   let idxs := mods.filterMap env.getModuleIdx?

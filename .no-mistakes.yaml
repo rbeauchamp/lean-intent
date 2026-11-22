@@ -204,7 +204,7 @@ commands:
 # The outputs a run starts from: Lake's artifact cache (together with the SHA-256-keyed
 # `no-comments` binary staged under `.lake/cache/no-comments/<sha256>/no-comments`, which misses
 # cleanly on `tools/no-comments.pin` updates because the path includes the digest, and the
-# commit-keyed Regula `v0.16.0` checkout staged and built under `.lake/cache/regula/<commit>/`,
+# commit-keyed Regula `v0.16.0` clean source checkout staged under `.lake/cache/regula/<commit>/`,
 # which misses cleanly on `tools/regula.pin` updates because the path includes the commit), written
 # by the repository's checks run once on a fresh checkout of the run's base commit. no-mistakes
 # stores
