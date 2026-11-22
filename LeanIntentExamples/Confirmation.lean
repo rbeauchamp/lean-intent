@@ -449,12 +449,6 @@ theorem parseLog_printed : parseLog (log.map Statement.print) = .ok log :=
 @[expose] def homonymAnswer : Statement :=
   mkWith reason (.of "homonym") (answerBody underDelegation homonymQuestion)
 
-theorem homonym_buildAnswer_eq :
-    buildAnswer homonymRevision (.consequence restatementConsequence) underDelegation .confirmed =
-      .ok { author := underDelegation, record := "sorting", revision := "revision 2",
-            consequence := restatementConsequence, kind := .entailment,
-            predicate := "fun f => f = sort", verdict := .confirmed } := rfl
-
 theorem homonym_confirmed :
     Confirmed [owners, assistant, restated, homonymAnswer] [homonymRevision] :=
   findings_eq_nil_iff.mp (by decide +kernel)

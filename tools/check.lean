@@ -192,6 +192,35 @@ partial def nodes (stx : Syntax) (acc : Array Syntax) : Array Syntax :=
   | .node _ _ args => args.foldl (fun acc arg => nodes arg acc) (acc.push stx)
   | _ => acc
 
+partial def syntaxKinds (stx : Syntax) (acc : Std.HashSet Name) : Std.HashSet Name :=
+  match stx with
+  | .node _ k args => args.foldl (fun acc arg => syntaxKinds arg acc) (acc.insert k)
+  | _ => acc.insert stx.getKind
+
+partial def treeEnvs (t : Elab.InfoTree) (acc : Array Environment) : Array Environment :=
+  match t with
+  | .context (.commandCtx cci) child => treeEnvs child (acc.push cci.env)
+  | .context _ child => treeEnvs child acc
+  | .node _ cs => cs.foldl (fun a c => treeEnvs c a) acc
+  | .hole _ => acc
+
+def hasProjectDispatchCandidate (declared isMacro : Name → Bool) (env : Environment)
+    (kind : SyntaxNodeKind) : Bool :=
+  let has {γ : Type} (attr : KeyedDeclsAttribute γ) : Bool :=
+    (attr.getEntries env kind).any fun entry => declared entry.declName && !isMacro entry.declName
+  has Elab.Command.commandElabAttribute ||
+    has Elab.Term.termElabAttribute ||
+    has Elab.Tactic.tacticElabAttribute ||
+    has Elab.Do.doElemElabAttribute ||
+    has Elab.Tactic.Try.tryTacticElabAttribute ||
+    has Elab.Tactic.Grind.grindTacElabAttribute ||
+    has Elab.Tactic.Grind.symSimprocElabAttribute ||
+    has Elab.Tactic.Grind.symDischargerElabAttribute ||
+    has Elab.Tactic.Grind.symDSimprocElabAttribute ||
+    has Elab.Command.inductiveElabAttr ||
+    has Elab.Term.Quotation.precheckAttribute ||
+    has Elab.Do.controlInfoElemAttribute
+
 def testsLean : String := "4.36.0"
 
 def testTokens : List String :=
@@ -236,6 +265,7 @@ unsafe def testsOfModule (path file : String) (mod : Name) (mods : Array Name)
   let (env, messages) ← Elab.processHeader header opts messages inputCtx (mainModule := mod)
   if messages.hasErrors then
     return ← fail messages
+  let headerEnv := env
   let state := Elab.Command.mkState env messages opts
   let state := { state with infoState := { state.infoState with enabled := true } }
   let s ← Elab.IO.processCommandsIncrementally inputCtx parserState state none
@@ -254,6 +284,7 @@ unsafe def testsOfModule (path file : String) (mod : Name) (mods : Array Name)
     | none => env.contains c
   let isMacro (c : Name) : Bool := (env.find? c).any (·.type.isConstOf ``Macro)
   let mut snap := s.initialSnap
+  let mut prevEnv := headerEnv
   let mut seen : Std.HashMap String Nat := {}
   let mut tests : Array String := #[]
   repeat
@@ -261,16 +292,19 @@ unsafe def testsOfModule (path file : String) (mod : Name) (mods : Array Name)
     let key := syntaxKey cmd
     let k := seen.getD key 0 + 1
     seen := seen.insert key k
+    let cmdEnv := snap.elabSnap.resultSnap.get.cmdState.env
     let trees := snap.elabSnap.infoTreeSnap.get.infoTree?.toList
     let (syntaxes, elaborators, sawByAsSorry) := trees.foldl (init := (#[cmd], #[], false))
       fun acc tree => tree.foldInfo (init := acc) fun _ info (ss, es, byAsSorry) =>
         match info with
         | .ofCommandInfo i => (ss.push i.stx, es.push i.elaborator, byAsSorry)
-        | .ofTermInfo i => (ss, es.push i.elaborator, byAsSorry)
-        | .ofPartialTermInfo i => (ss, es.push i.elaborator, byAsSorry)
+        | .ofTermInfo i => (ss.push i.stx, es.push i.elaborator, byAsSorry)
+        | .ofPartialTermInfo i => (ss.push i.stx, es.push i.elaborator, byAsSorry)
+        | .ofDelabTermInfo i => (ss.push i.stx, es.push i.elaborator, byAsSorry)
         | .ofTacticInfo i => (ss.push i.stx, es.push i.elaborator, byAsSorry)
-        | .ofChoiceInfo i => (ss, es.push i.elaborator, byAsSorry)
-        | .ofMacroExpansionInfo i => (ss.push i.output, es, byAsSorry)
+        | .ofChoiceInfo i => (ss.push i.stx, es.push i.elaborator, byAsSorry)
+        | .ofChoiceResolutionInfo i => (ss.push i.stx, es, byAsSorry)
+        | .ofMacroExpansionInfo i => ((ss.push i.stx).push i.output, es, byAsSorry)
         | .ofOptionInfo i => (ss, es, byAsSorry || i.optionName == `debug.byAsSorry)
         | _ => (ss, es, byAsSorry)
     if sawByAsSorry then
@@ -280,10 +314,17 @@ unsafe def testsOfModule (path file : String) (mod : Name) (mods : Array Name)
       if let '#' :: c :: _ := a.toList then
         unless !c.isAlpha || testTokens.contains a || otherTokens.contains a do
           throw <| IO.userError s!"{path}: the command token {a} is neither a test's nor another's that the listing knows"
+    let kinds := syntaxes.foldl (fun acc stx => syntaxKinds stx acc) {}
+    let envs := trees.foldl (fun acc t => treeEnvs t acc) #[prevEnv, cmdEnv]
+    let hasCandidate := envs.any fun e =>
+      kinds.fold (init := false) fun hit kind =>
+        hit || hasProjectDispatchCandidate declared isMacro e kind
     if tokens.any testTokens.contains ||
         (syntaxes.foldl (fun acc stx => nodes stx acc) #[]).any nativeConfig ||
-        elaborators.any (fun e => declared e && !isMacro e) then
+        elaborators.any (fun e => declared e && !isMacro e) ||
+        hasCandidate then
       tests := tests.push s!"{path.quote} {k} {key}"
+    prevEnv := cmdEnv
     match snap.nextCmdSnap? with
     | some next => snap := next.get
     | none => break
