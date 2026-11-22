@@ -22,6 +22,12 @@ def noCommentsConfigFile : String := ".no-comments.json"
 
 def noCommentsRatchetFile : String := "tools/comment-ratchet.json"
 
+def regulaPinFile : String := "tools/regula.pin"
+
+def regulaRepoUrl : String := "https://github.com/rbeauchamp/regula.git"
+
+def regulaProfile : String := "standard-logical"
+
 def run (cmd : String) (args : Array String) : IO (UInt32 × String) := do
   let out ← IO.Process.output { cmd, args }
   return (out.exitCode, out.stdout ++ out.stderr)
@@ -91,16 +97,35 @@ def checkConfig : IO (Array Rejection) := do
     errs := errs.push (reject s!"lakefile.toml sets {k}, which is not among the keys this rule allows")
   return errs
 
+def hasDuplicateNames (xs : Array Name) : Bool := Id.run do
+  let mut seen : Std.HashSet Name := {}
+  for x in xs do
+    if seen.contains x then
+      return true
+    seen := seen.insert x
+  return false
+
 def checkModules (pkg : Lake.Package) (files : Array String) (mods : Array Name) :
     IO (Array Rejection) := do
   let reject (message : String) : Rejection := { rule := "LEAN-BUILD", message }
   let mut errs : Array Rejection := #[]
+  if hasDuplicateNames mods then
+    errs := errs.push (reject "Git's index maps multiple tracked library files to the same module name")
   let mut selected : Array Name := #[]
   for lib in pkg.leanLibs do
     let libMods := (← lib.getModuleArray).map (·.name)
     if libMods.isEmpty then
       errs := errs.push (reject s!"the library target {lib.name} selects no module")
+    unless pkg.defaultTargets.contains lib.name do
+      errs := errs.push (reject s!"the library target {lib.name} is omitted from lakefile.toml defaultTargets")
     selected := selected ++ libMods
+  if hasDuplicateNames pkg.defaultTargets then
+    errs := errs.push (reject "lakefile.toml defaultTargets contains duplicate targets")
+  for t in pkg.defaultTargets do
+    unless pkg.leanLibs.any (·.name == t) do
+      errs := errs.push (reject s!"lakefile.toml defaultTargets names {t}, which is not a library target")
+  if hasDuplicateNames selected then
+    errs := errs.push (reject "lakefile.toml library targets select duplicate modules")
   for (f, m) in files.zip mods do
     unless selected.contains m do
       errs := errs.push (reject s!"{f}, a library file Git's index lists, is the module {m}, which no library target selects, so a build of the targets does not build it")
@@ -378,12 +403,29 @@ def checkProcess (env : Environment) (roots : Array Name) : Array Rejection := I
         queue := queue.push used
   return errs
 
+def isLowerHex (len : Nat) (s : String) : Bool :=
+  s.length == len && s.all fun c => c.isDigit || ('a' ≤ c && c ≤ 'f')
+
 def isSha256 (s : String) : Bool :=
-  s.length == 64 && s.all fun c => c.isDigit || ('a' ≤ c && c ≤ 'f')
+  isLowerHex 64 s
+
+def isSha1 (s : String) : Bool :=
+  isLowerHex 40 s
 
 def isValidReleaseTag (s : String) : Bool :=
   s.startsWith "v" && s.length > 1 && !s.contains ".." &&
     s.all fun c => c.isAlphanum || c == '.' || c == '-'
+
+def parsePinLines (path raw : String) : Except String (List (String × String)) := do
+  if raw.contains '\r' then
+    throw s!"{path}: expected LF line endings"
+  let lines := if raw.endsWith "\n" then (raw.splitOn "\n").dropLast else raw.splitOn "\n"
+  if lines.isEmpty then
+    throw s!"{path}: file is empty"
+  lines.mapM fun line =>
+    match line.splitOn "=" with
+    | [k, v] => return (k, v)
+    | _ => throw s!"{path}: expected KEY=VALUE line, got {line.quote}"
 
 structure NoCommentsPin where
   version : String
@@ -391,40 +433,31 @@ structure NoCommentsPin where
   linuxX86_64Sha256 : String
 
 def parseNoCommentsPin (raw : String) : Except String NoCommentsPin := do
-  if raw.contains '\r' then
-    throw s!"{noCommentsPinFile}: expected LF line endings"
-  let lines := if raw.endsWith "\n" then (raw.splitOn "\n").dropLast else raw.splitOn "\n"
-  if lines.isEmpty then
-    throw s!"{noCommentsPinFile}: file is empty"
   let mut version? : Option String := none
   let mut darwin? : Option String := none
   let mut linux? : Option String := none
-  for line in lines do
-    match line.splitOn "=" with
-    | [k, v] =>
-      match k with
-      | "VERSION" =>
-        if version?.isSome then
-          throw s!"{noCommentsPinFile}: duplicate VERSION key"
-        unless isValidReleaseTag v do
-          throw s!"{noCommentsPinFile}: invalid VERSION {v.quote}"
-        version? := some v
-      | "DARWIN_ARM64_SHA256" =>
-        if darwin?.isSome then
-          throw s!"{noCommentsPinFile}: duplicate DARWIN_ARM64_SHA256 key"
-        unless isSha256 v do
-          throw s!"{noCommentsPinFile}: invalid DARWIN_ARM64_SHA256 {v.quote}"
-        darwin? := some v
-      | "LINUX_X86_64_SHA256" =>
-        if linux?.isSome then
-          throw s!"{noCommentsPinFile}: duplicate LINUX_X86_64_SHA256 key"
-        unless isSha256 v do
-          throw s!"{noCommentsPinFile}: invalid LINUX_X86_64_SHA256 {v.quote}"
-        linux? := some v
-      | _ =>
-        throw s!"{noCommentsPinFile}: unknown key {k.quote}"
+  for (k, v) in ← parsePinLines noCommentsPinFile raw do
+    match k with
+    | "VERSION" =>
+      if version?.isSome then
+        throw s!"{noCommentsPinFile}: duplicate VERSION key"
+      unless isValidReleaseTag v do
+        throw s!"{noCommentsPinFile}: invalid VERSION {v.quote}"
+      version? := some v
+    | "DARWIN_ARM64_SHA256" =>
+      if darwin?.isSome then
+        throw s!"{noCommentsPinFile}: duplicate DARWIN_ARM64_SHA256 key"
+      unless isSha256 v do
+        throw s!"{noCommentsPinFile}: invalid DARWIN_ARM64_SHA256 {v.quote}"
+      darwin? := some v
+    | "LINUX_X86_64_SHA256" =>
+      if linux?.isSome then
+        throw s!"{noCommentsPinFile}: duplicate LINUX_X86_64_SHA256 key"
+      unless isSha256 v do
+        throw s!"{noCommentsPinFile}: invalid LINUX_X86_64_SHA256 {v.quote}"
+      linux? := some v
     | _ =>
-      throw s!"{noCommentsPinFile}: expected KEY=VALUE line, got {line.quote}"
+      throw s!"{noCommentsPinFile}: unknown key {k.quote}"
   let some version := version?
     | throw s!"{noCommentsPinFile}: missing VERSION"
   let some darwinArm64Sha256 := darwin?
@@ -432,6 +465,35 @@ def parseNoCommentsPin (raw : String) : Except String NoCommentsPin := do
   let some linuxX86_64Sha256 := linux?
     | throw s!"{noCommentsPinFile}: missing LINUX_X86_64_SHA256"
   return { version, darwinArm64Sha256, linuxX86_64Sha256 }
+
+structure RegulaPin where
+  version : String
+  commit : String
+
+def parseRegulaPin (raw : String) : Except String RegulaPin := do
+  let mut version? : Option String := none
+  let mut commit? : Option String := none
+  for (k, v) in ← parsePinLines regulaPinFile raw do
+    match k with
+    | "VERSION" =>
+      if version?.isSome then
+        throw s!"{regulaPinFile}: duplicate VERSION key"
+      unless isValidReleaseTag v do
+        throw s!"{regulaPinFile}: invalid VERSION {v.quote}"
+      version? := some v
+    | "COMMIT" =>
+      if commit?.isSome then
+        throw s!"{regulaPinFile}: duplicate COMMIT key"
+      unless isSha1 v do
+        throw s!"{regulaPinFile}: invalid COMMIT {v.quote}"
+      commit? := some v
+    | _ =>
+      throw s!"{regulaPinFile}: unknown key {k.quote}"
+  let some version := version?
+    | throw s!"{regulaPinFile}: missing VERSION"
+  let some commit := commit?
+    | throw s!"{regulaPinFile}: missing COMMIT"
+  return { version, commit }
 
 structure BaseRef where
   value : String
@@ -632,18 +694,42 @@ def parseSha256Output (tool raw : String) : IO String := do
   | [] =>
     throw <| IO.userError s!"NO-COMMENTS: {tool} produced empty output"
 
+def sha256Cmd (rule : String) : IO (String × Array String) := do
+  if System.Platform.isOSX then
+    return ("shasum", #["-a", "256"])
+  else if System.Platform.isLinux then
+    return ("sha256sum", #[])
+  else
+    throw <| IO.userError s!"{rule}: unsupported platform target {System.Platform.target.quote} for SHA-256 verification"
+
 def sha256File (path : System.FilePath) : IO String := do
-  let (cmd, args) ←
-    if System.Platform.isOSX then
-      pure ("shasum", #["-a", "256", "--", path.toString])
-    else if System.Platform.isLinux then
-      pure ("sha256sum", #["--", path.toString])
-    else
-      throw <| IO.userError s!"NO-COMMENTS: unsupported platform target {System.Platform.target.quote} for SHA-256 verification"
-  let o ← IO.Process.output { cmd, args }
+  let (cmd, baseArgs) ← sha256Cmd "NO-COMMENTS"
+  let o ← IO.Process.output { cmd, args := baseArgs ++ #["--", path.toString] }
   unless o.exitCode == 0 do
     throw <| IO.userError s!"NO-COMMENTS: {cmd} failed on {path}:\n{o.stderr}"
   parseSha256Output cmd o.stdout
+
+def sha256Batch (rule : String) (paths : Array String) : IO (Array String) := do
+  if paths.isEmpty then
+    return #[]
+  let (cmd, baseArgs) ← sha256Cmd rule
+  let o ← IO.Process.output { cmd, args := baseArgs ++ #["--"] ++ paths }
+  unless o.exitCode == 0 do
+    throw <| IO.userError s!"{rule}: {cmd} failed:\n{o.stderr}"
+  unless o.stdout.endsWith "\n" do
+    throw <| IO.userError s!"{rule}: {cmd} output did not end with newline"
+  let lines := (o.stdout.splitOn "\n").dropLast.toArray
+  unless lines.size == paths.size do
+    throw <| IO.userError s!"{rule}: {cmd} returned {lines.size} lines for {paths.size} paths"
+  let mut digests : Array String := #[]
+  for (arg, line) in paths.zip lines do
+    let some digestSlice := line.dropSuffix? ("  " ++ arg)
+      | throw <| IO.userError s!"{rule}: {cmd} returned unexpected output line for {arg.quote}: {line.quote}"
+    let digest := digestSlice.toString
+    unless isSha256 digest do
+      throw <| IO.userError s!"{rule}: {cmd} produced invalid SHA-256 digest {digest.quote}"
+    digests := digests.push digest
+  return digests
 
 def buildPathPrefixes (isAbs : Bool) : List String → Option (List String × String)
   | [] => none
@@ -671,20 +757,27 @@ def splitRegularPath (raw : String) : Except String (List String × String) :=
     | some res => .ok res
     | none => .error "path has no components"
 
-def checkNoSymlinkRegularFile (label raw : String) : IO System.FilePath := do
+def checkNoSymlinkPath (rule label raw : String) (expected : IO.FS.FileType) (what : String) :
+    IO System.FilePath := do
   let (dirPrefixes, finalPath) ← match splitRegularPath raw with
     | .ok res => pure res
-    | .error e => throw <| IO.userError s!"NO-COMMENTS: {label} ({raw.quote}) is invalid: {e}"
+    | .error e => throw <| IO.userError s!"{rule}: {label} ({raw.quote}) is invalid: {e}"
   for p in dirPrefixes do
     let info ← try System.FilePath.symlinkMetadata p catch _ =>
-      throw <| IO.userError s!"NO-COMMENTS: {label} ({raw.quote}) cannot inspect path component {p.quote}"
+      throw <| IO.userError s!"{rule}: {label} ({raw.quote}) cannot inspect path component {p.quote}"
     unless info.type == .dir do
-      throw <| IO.userError s!"NO-COMMENTS: {label} ({raw.quote}) traverses non-directory or symlink component {p.quote}"
+      throw <| IO.userError s!"{rule}: {label} ({raw.quote}) traverses non-directory or symlink component {p.quote}"
   let info ← try System.FilePath.symlinkMetadata finalPath catch _ =>
-    throw <| IO.userError s!"NO-COMMENTS: {label} ({raw.quote}) does not exist or cannot be inspected"
-  unless info.type == .file do
-    throw <| IO.userError s!"NO-COMMENTS: {label} ({raw.quote}) is not a regular file (symlinks are rejected)"
+    throw <| IO.userError s!"{rule}: {label} ({raw.quote}) does not exist or cannot be inspected"
+  unless info.type == expected do
+    throw <| IO.userError s!"{rule}: {label} ({raw.quote}) is not {what} (symlinks are rejected)"
   return System.FilePath.mk finalPath
+
+def checkNoSymlinkRegularFile (label raw : String) : IO System.FilePath :=
+  checkNoSymlinkPath "NO-COMMENTS" label raw .file "a regular file"
+
+def checkNoSymlinkDir (rule label raw : String) : IO System.FilePath :=
+  checkNoSymlinkPath rule label raw .dir "a directory"
 
 def copyFileBytes (src dst : System.FilePath) : IO Unit := do
   let hIn ← IO.FS.Handle.mk src .read
@@ -702,15 +795,15 @@ def noCommentsCacheDirPrefixes (expectedSha : String) : List String :=
 def noCommentsCacheBinPath (expectedSha : String) : System.FilePath :=
   System.FilePath.mk s!".lake/cache/no-comments/{expectedSha}/no-comments"
 
-def checkCacheDirChain (expectedSha : String) : IO Unit := do
-  for p in noCommentsCacheDirPrefixes expectedSha do
+def checkDirChain (rule : String) (prefixes : List String) : IO Unit := do
+  for p in prefixes do
     let info ← try System.FilePath.symlinkMetadata p catch _ =>
-      throw <| IO.userError s!"NO-COMMENTS: cache directory {p} does not exist or cannot be inspected"
+      throw <| IO.userError s!"{rule}: cache directory {p} does not exist or cannot be inspected"
     unless info.type == .dir do
-      throw <| IO.userError s!"NO-COMMENTS: cache path {p} is not a real directory (symlinks are rejected)"
+      throw <| IO.userError s!"{rule}: cache path {p} is not a real directory (symlinks are rejected)"
 
-def ensureNoCommentsCacheDir (expectedSha : String) : IO System.FilePath := do
-  for p in noCommentsCacheDirPrefixes expectedSha do
+def ensureDirChain (rule : String) (prefixes : List String) : IO Unit := do
+  for p in prefixes do
     let existing? ← try
       some <$> System.FilePath.symlinkMetadata p
     catch
@@ -719,36 +812,47 @@ def ensureNoCommentsCacheDir (expectedSha : String) : IO System.FilePath := do
     match existing? with
     | some info =>
       unless info.type == .dir do
-        throw <| IO.userError s!"NO-COMMENTS: cache path {p} is not a real directory (symlinks are rejected)"
+        throw <| IO.userError s!"{rule}: cache path {p} is not a real directory (symlinks are rejected)"
     | none =>
       try
         IO.FS.createDir p
       catch
         | .alreadyExists .. =>
           let raced ← try System.FilePath.symlinkMetadata p catch _ =>
-            throw <| IO.userError s!"NO-COMMENTS: cannot inspect cache directory {p} after concurrent creation"
+            throw <| IO.userError s!"{rule}: cannot inspect cache directory {p} after concurrent creation"
           unless raced.type == .dir do
-            throw <| IO.userError s!"NO-COMMENTS: cache path {p} is not a real directory (symlinks are rejected)"
+            throw <| IO.userError s!"{rule}: cache path {p} is not a real directory (symlinks are rejected)"
         | e =>
-          throw <| IO.userError s!"NO-COMMENTS: failed to create cache directory {p}: {e}"
+          throw <| IO.userError s!"{rule}: failed to create cache directory {p}: {e}"
       let created ← try System.FilePath.symlinkMetadata p catch _ =>
-        throw <| IO.userError s!"NO-COMMENTS: cannot inspect cache directory {p} after creation"
+        throw <| IO.userError s!"{rule}: cannot inspect cache directory {p} after creation"
       unless created.type == .dir do
-        throw <| IO.userError s!"NO-COMMENTS: cache path {p} is not a real directory (symlinks are rejected)"
-  return System.FilePath.mk s!".lake/cache/no-comments/{expectedSha}"
+        throw <| IO.userError s!"{rule}: cache path {p} is not a real directory (symlinks are rejected)"
 
-def verifyNoCommentsCachePath (expectedSha : String) : IO (Option System.FilePath) := do
-  for p in noCommentsCacheDirPrefixes expectedSha do
+def verifyExistingDirChain (rule : String) (prefixes : List String) : IO Bool := do
+  for p in prefixes do
     let existing? ← try
       some <$> System.FilePath.symlinkMetadata p
     catch
       | .noFileOrDirectory .. => pure none
       | e => throw e
     match existing? with
-    | none => return none
+    | none => return false
     | some info =>
       unless info.type == .dir do
-        throw <| IO.userError s!"NO-COMMENTS: cache path {p} is not a real directory (symlinks are rejected)"
+        throw <| IO.userError s!"{rule}: cache path {p} is not a real directory (symlinks are rejected)"
+  return true
+
+def checkCacheDirChain (expectedSha : String) : IO Unit :=
+  checkDirChain "NO-COMMENTS" (noCommentsCacheDirPrefixes expectedSha)
+
+def ensureNoCommentsCacheDir (expectedSha : String) : IO System.FilePath := do
+  ensureDirChain "NO-COMMENTS" (noCommentsCacheDirPrefixes expectedSha)
+  return System.FilePath.mk s!".lake/cache/no-comments/{expectedSha}"
+
+def verifyNoCommentsCachePath (expectedSha : String) : IO (Option System.FilePath) := do
+  unless ← verifyExistingDirChain "NO-COMMENTS" (noCommentsCacheDirPrefixes expectedSha) do
+    return none
   let cacheBin := noCommentsCacheBinPath expectedSha
   let binInfo? ← try
     some <$> cacheBin.symlinkMetadata
@@ -885,6 +989,403 @@ def listComments (target? : Option String) : IO Unit := do
     let detail := out.stderr.trimAscii.toString
     throw <| IO.userError (if detail.isEmpty then s!"{bin} inventory exited with status {out.exitCode}" else detail)
 
+def readRegulaPin : IO RegulaPin := do
+  let raw ← IO.FS.readFile regulaPinFile
+  match parseRegulaPin raw with
+  | .ok pin => return pin
+  | .error e => throw <| IO.userError s!"REGULA: {e}"
+
+def regulaBasePrefixes : List String :=
+  [".lake", ".lake/cache", ".lake/cache/regula"]
+
+def regulaCacheDirPath (commit : String) : System.FilePath :=
+  System.FilePath.mk s!".lake/cache/regula/{commit}"
+
+def regulaCachePrefixes (commit : String) : List String :=
+  regulaBasePrefixes ++ [s!".lake/cache/regula/{commit}"]
+
+def gitIn (dir : System.FilePath) (args : Array String) : IO IO.Process.Output :=
+  IO.Process.output { cmd := "git", args := #["-C", dir.toString, "-c", "core.fsmonitor=false"] ++ args }
+
+def checkRegularChildFile (rule : String) (dir : System.FilePath) (rel : String) : IO Unit := do
+  let path := dir / rel
+  let info ← try path.symlinkMetadata catch _ =>
+    throw <| IO.userError s!"{rule}: {path} does not exist or cannot be inspected"
+  unless info.type == .file do
+    throw <| IO.userError s!"{rule}: {path} is not a regular file (symlinks are rejected)"
+
+def checkAbsentPath (rule : String) (dir : System.FilePath) (rel : String) : IO Unit := do
+  let path := dir / rel
+  let info? ← try
+    some <$> path.symlinkMetadata
+  catch
+    | .noFileOrDirectory .. => pure none
+    | e => throw e
+  if info?.isSome then
+    throw <| IO.userError s!"{rule}: {path} must not exist in checkout"
+
+def verifyRegulaCheckout (pin : RegulaPin) (dir : System.FilePath) (checkTag checkIgnored : Bool) : IO Unit := do
+  checkRegularChildFile "REGULA" dir "lakefile.toml"
+  checkRegularChildFile "REGULA" dir "lean-toolchain"
+  checkAbsentPath "REGULA" dir "lakefile.lean"
+  let gitMeta ← try (dir / ".git").symlinkMetadata catch _ =>
+    throw <| IO.userError s!"REGULA: {dir / ".git"} does not exist or cannot be inspected"
+  unless gitMeta.type == .dir do
+    throw <| IO.userError s!"REGULA: {dir / ".git"} must be a real directory (symlinks and gitfiles are rejected)"
+  let headOut ← gitIn dir #["rev-parse", "--verify", "--quiet", "--end-of-options", "HEAD^{commit}"]
+  unless headOut.exitCode == 0 do
+    throw <| IO.userError s!"REGULA: git rev-parse HEAD failed in {dir}:\n{headOut.stderr}"
+  let actualHead := headOut.stdout.trimAscii.toString
+  unless actualHead == pin.commit do
+    throw <| IO.userError s!"REGULA: checkout {dir} HEAD {actualHead.quote} does not match pinned commit {pin.commit.quote}"
+  if checkTag then
+    let tagRef := s!"refs/tags/{pin.version}" ++ "^{commit}"
+    let tagOut ← gitIn dir #["rev-parse", "--verify", "--quiet", "--end-of-options", tagRef]
+    unless tagOut.exitCode == 0 do
+      throw <| IO.userError s!"REGULA: git rev-parse {pin.version} failed in {dir}:\n{tagOut.stderr}"
+    let actualTag := tagOut.stdout.trimAscii.toString
+    unless actualTag == pin.commit do
+      throw <| IO.userError s!"REGULA: tag {pin.version} in {dir} resolves to {actualTag.quote}, expected {pin.commit.quote}"
+  let statusArgs := if checkIgnored then
+    #["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored"]
+  else
+    #["status", "--porcelain=v1", "-z", "--untracked-files=all"]
+  let statusOut ← gitIn dir statusArgs
+  unless statusOut.exitCode == 0 do
+    throw <| IO.userError s!"REGULA: git status failed in {dir}:\n{statusOut.stderr}"
+  unless statusOut.stdout.isEmpty do
+    throw <| IO.userError s!"REGULA: checkout {dir} has uncommitted, untracked, or ignored files"
+
+def stageRegulaCheckout (pin : RegulaPin) : IO System.FilePath := do
+  ensureDirChain "REGULA" regulaBasePrefixes
+  let cacheDir := regulaCacheDirPath pin.commit
+  let mk ← IO.Process.output { cmd := "mktemp", args := #["-d", ".lake/cache/regula/regula.tmp.XXXXXX"] }
+  unless mk.exitCode == 0 do
+    throw <| IO.userError s!"REGULA: mktemp -d failed in .lake/cache/regula:\n{mk.stderr}"
+  let tmpRaw := mk.stdout.trimAscii.toString
+  let expectedPrefix := ".lake/cache/regula/regula.tmp."
+  unless tmpRaw.startsWith expectedPrefix && (tmpRaw.splitOn "/").length == 4 do
+    throw <| IO.userError s!"REGULA: mktemp -d returned unexpected staging path {tmpRaw.quote}"
+  let tmpPath := System.FilePath.mk tmpRaw
+  try
+    let tmpInfo ← try tmpPath.symlinkMetadata catch _ =>
+      throw <| IO.userError s!"REGULA: staging directory {tmpPath} cannot be inspected"
+    unless tmpInfo.type == .dir do
+      throw <| IO.userError s!"REGULA: staging path {tmpPath} is not a real directory"
+    let initOut ← gitIn tmpPath #["init", "--quiet"]
+    unless initOut.exitCode == 0 do
+      throw <| IO.userError s!"REGULA: git init failed in {tmpPath}:\n{initOut.stderr}"
+    let refspec := s!"refs/tags/{pin.version}:refs/tags/{pin.version}"
+    let fetchOut ← gitIn tmpPath #["fetch", "--quiet", "--depth", "1", "--no-tags", "--", regulaRepoUrl, refspec]
+    unless fetchOut.exitCode == 0 do
+      throw <| IO.userError s!"REGULA: failed to fetch {pin.version} from {regulaRepoUrl} (set REGULA_DIR for offline reuse):\n{fetchOut.stderr}"
+    let tagRef := s!"refs/tags/{pin.version}" ++ "^{commit}"
+    let tagOut ← gitIn tmpPath #["rev-parse", "--verify", "--quiet", "--end-of-options", tagRef]
+    unless tagOut.exitCode == 0 && tagOut.stdout.trimAscii.toString == pin.commit do
+      throw <| IO.userError s!"REGULA: fetched tag {pin.version} does not match pinned commit {pin.commit}"
+    let coOut ← gitIn tmpPath #["checkout", "--quiet", "--detach", pin.commit]
+    unless coOut.exitCode == 0 do
+      throw <| IO.userError s!"REGULA: git checkout {pin.commit} failed in {tmpPath}:\n{coOut.stderr}"
+    verifyRegulaCheckout pin tmpPath true true
+    checkDirChain "REGULA" regulaBasePrefixes
+    let preRename? ← try
+      some <$> cacheDir.symlinkMetadata
+    catch
+      | .noFileOrDirectory .. => pure none
+      | e => throw e
+    match preRename? with
+    | some info =>
+      unless info.type == .dir do
+        throw <| IO.userError s!"REGULA: cache path {cacheDir} is not a real directory (symlinks are rejected)"
+      verifyRegulaCheckout pin cacheDir true true
+      return cacheDir
+    | none =>
+      try
+        IO.FS.rename tmpPath cacheDir
+      catch e =>
+        let raced? ← try
+          some <$> cacheDir.symlinkMetadata
+        catch
+          | .noFileOrDirectory .. => pure none
+          | _ => pure none
+        match raced? with
+        | some info =>
+          unless info.type == .dir do
+            throw <| IO.userError s!"REGULA: cache path {cacheDir} is not a real directory (symlinks are rejected)"
+          verifyRegulaCheckout pin cacheDir true true
+          return cacheDir
+        | none =>
+          throw <| IO.userError s!"REGULA: failed to stage {cacheDir}: {e}"
+      checkDirChain "REGULA" (regulaCachePrefixes pin.commit)
+      verifyRegulaCheckout pin cacheDir true true
+      return cacheDir
+  finally
+    try
+      IO.FS.removeDirAll tmpPath
+    catch _ => pure ()
+
+def ensureRegulaDir (pin : RegulaPin) : IO System.FilePath := do
+  match ← IO.getEnv "REGULA_DIR" with
+  | some raw =>
+    let dir ← checkNoSymlinkDir "REGULA" "REGULA_DIR" raw
+    verifyRegulaCheckout pin dir false false
+    return dir
+  | none =>
+    if ← verifyExistingDirChain "REGULA" (regulaCachePrefixes pin.commit) then
+      let cacheDir := regulaCacheDirPath pin.commit
+      verifyRegulaCheckout pin cacheDir true true
+      return cacheDir
+    stageRegulaCheckout pin
+
+def regulaEnv (proofDir : String) : Array (String × Option String) :=
+  #[("REGULA_PROOF", some proofDir), ("REGULA_FULL", none),
+    ("LEAN_PATH", none), ("LEAN_SRC_PATH", none), ("LEAN_GITHASH", none),
+    ("LAKE_CACHE_DIR", some ""), ("LAKE_NO_CACHE", some "true"),
+    ("LAKE_ARTIFACT_CACHE", some "false"), ("LAKE_RESTORE_ARTIFACTS", some "false"),
+    ("LAKE_CONFIG", some ""), ("LAKE_CACHE_KEY", none),
+    ("LAKE_CACHE_ARTIFACT_ENDPOINT", none), ("LAKE_CACHE_REVISION_ENDPOINT", none),
+    ("LAKE_CACHE_SERVICE", none), ("LAKE_PKG_URL_MAP", none)]
+
+def splitNonEmptyLines (raw : String) : Array String :=
+  (((raw.splitOn "\n").map (·.trimAscii.toString)).filter (· ≠ "")).toArray
+
+inductive WalkItemKind where
+  | dir
+  | file (size : UInt64)
+  | symlink
+  | other
+  deriving BEq
+
+structure WalkItem where
+  relPath : String
+  kind : WalkItemKind
+
+partial def walkDirEntries (root : System.FilePath) (skipTopGit : Bool) : IO (Array WalkItem) := do
+  let rec go (curRel : String) (acc : Array WalkItem) : IO (Array WalkItem) := do
+    let dirPath := if curRel.isEmpty then root else root / curRel
+    let rawEntries ← dirPath.readDir
+    let entries := rawEntries.qsort (fun a b => a.fileName < b.fileName)
+    let mut out := acc
+    for ent in entries do
+      let name := ent.fileName
+      if skipTopGit && curRel.isEmpty && name == ".git" then
+        continue
+      let rel := if curRel.isEmpty then name else s!"{curRel}/{name}"
+      let finfo ← (root / rel).symlinkMetadata
+      match finfo.type with
+      | .dir =>
+        out := out.push { relPath := rel, kind := .dir }
+        out ← go rel out
+      | .file =>
+        out := out.push { relPath := rel, kind := .file finfo.byteSize }
+      | .symlink =>
+        out := out.push { relPath := rel, kind := .symlink }
+      | .other =>
+        out := out.push { relPath := rel, kind := .other }
+    return out
+  go "" #[]
+
+def checkExtractedRegulaTree (dir : System.FilePath) : IO Unit := do
+  checkRegularChildFile "REGULA" dir "lakefile.toml"
+  checkRegularChildFile "REGULA" dir "lean-toolchain"
+  checkAbsentPath "REGULA" dir "lakefile.lean"
+  for item in ← walkDirEntries dir false do
+    unless item.kind matches .dir | .file _ do
+      throw <| IO.userError s!"REGULA: extracted checkout entry {dir / item.relPath} is not a regular file or directory"
+
+inductive SnapshotEntry where
+  | dir (relPath : String)
+  | fileDigest (relPath : String) (size : UInt64) (sha256 : String)
+  | fileBytes (relPath : String) (bytes : ByteArray)
+  | symlink (relPath : String) (target : String)
+  | other (relPath : String)
+  deriving BEq
+
+structure WorkspaceSnapshot where
+  status : String
+  stage : String
+  workDiff : String
+  indexDiff : String
+  refs : String
+  headCode : UInt32
+  headOut : String
+  entries : Array SnapshotEntry
+  deriving BEq
+
+def isBatchHashablePath (relPath : String) : Bool :=
+  !relPath.contains '\n' && !relPath.contains '\r' && !relPath.contains '\\'
+
+def snapshotWorkspace : IO WorkspaceSnapshot := do
+  let status ← git #["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored"]
+  let stage ← git #["ls-files", "--stage", "-z"]
+  let workDiff ← git #["diff", "--no-color", "--binary"]
+  let indexDiff ← git #["diff", "--cached", "--no-color", "--binary"]
+  let refs ← git #["for-each-ref", "--format=%(refname) %(objectname)"]
+  let headRes ← IO.Process.output { cmd := "git", args := #["rev-parse", "--verify", "--quiet", "HEAD"] }
+  let items ← walkDirEntries "." true
+  let mut batchIndices : Array Nat := #[]
+  let mut batchPaths : Array String := #[]
+  for h : idx in [:items.size] do
+    let item := items[idx]
+    if let .file _ := item.kind then
+      if isBatchHashablePath item.relPath then
+        batchIndices := batchIndices.push idx
+        batchPaths := batchPaths.push ("./" ++ item.relPath)
+  let mut digests : Std.HashMap Nat String := {}
+  let mut pos := 0
+  while pos < batchPaths.size do
+    let stop := min (pos + 200) batchPaths.size
+    let chunkPaths := batchPaths.extract pos stop
+    let chunkDigests ← sha256Batch "REGULA" chunkPaths
+    for j in [:chunkPaths.size] do
+      digests := digests.insert batchIndices[pos + j]! chunkDigests[j]!
+    pos := stop
+  let mut entries : Array SnapshotEntry := #[]
+  for h : idx in [:items.size] do
+    let item := items[idx]
+    match item.kind with
+    | .dir => entries := entries.push (.dir item.relPath)
+    | .other => entries := entries.push (.other item.relPath)
+    | .symlink =>
+      let rl ← IO.Process.output { cmd := "readlink", args := #["--", "./" ++ item.relPath] }
+      unless rl.exitCode == 0 do
+        throw <| IO.userError s!"REGULA: readlink failed on {item.relPath}:\n{rl.stderr}"
+      entries := entries.push (.symlink item.relPath rl.stdout)
+    | .file size =>
+      match digests.get? idx with
+      | some digest => entries := entries.push (.fileDigest item.relPath size digest)
+      | none => entries := entries.push (.fileBytes item.relPath (← IO.FS.readBinFile item.relPath))
+  return { status, stage, workDiff, indexDiff, refs, headCode := headRes.exitCode, headOut := headRes.stdout, entries }
+
+def parseStrictNat (s : String) : Option Nat :=
+  if !s.isEmpty && s.all (fun c => '0' ≤ c && c ≤ '9') then s.toNat? else none
+
+def parseRegulaCoverageLine (line : String) : Option (Nat × Nat) := do
+  let body ← (line.dropPrefix? "  regula: read ").map (·.toString)
+  let rest ← (body.dropSuffix? " of their constants").map (·.toString)
+  match rest.splitOn " claimed modules and " with
+  | [modsStr, declsStr] =>
+    let nMods ← parseStrictNat modsStr
+    let nDecls ← parseStrictNat declsStr
+    return (nMods, nDecls)
+  | _ => none
+
+structure CanonicalPosixPath where
+  path : System.FilePath
+  abs : path.toString.startsWith "/" = true
+
+def pathSegments (p : System.FilePath) : List String :=
+  (p.toString.splitOn "/").filter (· ≠ "")
+
+def isSameOrSubpath (root target : CanonicalPosixPath) : Bool :=
+  (pathSegments root.path).isPrefixOf (pathSegments target.path)
+
+theorem isSameOrSubpath_eq_true_iff (root target : CanonicalPosixPath) :
+    isSameOrSubpath root target = true ↔
+      ∃ rest, pathSegments target.path = pathSegments root.path ++ rest := by
+  unfold isSameOrSubpath
+  exact List.isPrefixOf_iff_prefix.trans
+    ⟨fun ⟨rest, h⟩ => ⟨rest, h.symm⟩, fun ⟨rest, h⟩ => ⟨rest, h.symm⟩⟩
+
+def CanonicalPosixPath.ofRealPath (rule label : String) (raw : System.FilePath) (checkSymlinks : Bool) :
+    IO CanonicalPosixPath := do
+  let real ← IO.FS.realPath raw
+  let s := real.toString
+  if s.contains '\n' || s.contains '\r' || s.contains '\x00' then
+    throw <| IO.userError s!"{rule}: resolved {label} {s.quote} contains control characters"
+  if (pathSegments real).any (fun seg => seg == "." || seg == "..") then
+    throw <| IO.userError s!"{rule}: resolved {label} {s.quote} contains relative segments"
+  if checkSymlinks then
+    discard <| checkNoSymlinkDir rule label s
+  if h : s.startsWith "/" then
+    return ⟨real, h⟩
+  else
+    throw <| IO.userError s!"{rule}: resolved {label} {s.quote} is not an absolute POSIX path"
+
+def resolveScratchParent : IO System.FilePath := do
+  for var in ["TMPDIR", "TMP", "TEMP", "TEMPDIR"] do
+    if let some raw ← IO.getEnv var then
+      if raw.isEmpty then
+        throw <| IO.userError s!"REGULA: {var} is set to an empty scratch directory path"
+      return System.FilePath.mk raw
+  return System.FilePath.mk "/tmp"
+
+def checkRegula (mods : Array Name) : IO (Array Rejection) := do
+  if let some err ← checkCommittedRegularFile regulaPinFile then
+    return #[{ rule := "REGULA", message := err }]
+  let pin ← readRegulaPin
+  let regulaDir ← ensureRegulaDir pin
+  let pkg ← CanonicalPosixPath.ofRealPath "REGULA" "resolved package directory" "." false
+  let pkgRealStr := pkg.path.toString
+  let scratchParent ← CanonicalPosixPath.ofRealPath "REGULA" "scratch parent directory"
+    (← resolveScratchParent) true
+  if isSameOrSubpath pkg scratchParent then
+    throw <| IO.userError
+      s!"REGULA: scratch parent directory {scratchParent.path.toString.quote} overlaps target workspace {pkgRealStr.quote}"
+  let rawTmpBase ← IO.FS.createTempDir
+  let (preSnap, out, postSnap) ←
+    try
+      let tmpBase ← CanonicalPosixPath.ofRealPath "REGULA" "temporary build directory" rawTmpBase true
+      unless tmpBase.path.parent == some scratchParent.path do
+        throw <| IO.userError
+          s!"REGULA: temporary build directory {tmpBase.path.toString.quote} is not under scratch parent {scratchParent.path.toString.quote}"
+      if isSameOrSubpath pkg tmpBase || isSameOrSubpath tmpBase pkg then
+        throw <| IO.userError
+          s!"REGULA: temporary build directory {tmpBase.path.toString.quote} overlaps target workspace {pkgRealStr.quote}"
+      let tarPath := tmpBase.path / "regula.tar"
+      let srcDir := tmpBase.path / "src"
+      IO.FS.createDir srcDir
+      let archOut ← gitIn regulaDir #["archive", "--format=tar", s!"--output={tarPath}", pin.commit]
+      unless archOut.exitCode == 0 do
+        throw <| IO.userError s!"REGULA: git archive failed in {regulaDir}:\n{archOut.stderr}"
+      let tarOut ← IO.Process.output { cmd := "tar", args := #["-xf", tarPath.toString, "-C", srcDir.toString] }
+      unless tarOut.exitCode == 0 do
+        throw <| IO.userError s!"REGULA: tar extraction failed in {srcDir}:\n{tarOut.stderr}"
+      IO.FS.removeFile tarPath
+      checkExtractedRegulaTree srcDir
+      let preSnap ← snapshotWorkspace
+      let out ← IO.Process.output {
+        cmd := "lake"
+        args := #["exe", "lint", regulaProfile]
+        cwd := some srcDir
+        env := regulaEnv pkgRealStr
+      }
+      let postSnap ← snapshotWorkspace
+      pure (preSnap, out, postSnap)
+    finally
+      try
+        IO.FS.removeDirAll rawTmpBase
+      catch _ => pure ()
+  if preSnap != postSnap then
+    return #[{ rule := "REGULA", message := "Regula mutated the lean-intent workspace during proof-verdict checking" }]
+  let expectedVerdict :=
+    s!"regula: proof verdict: pass, which says nothing about what ran during the build, on {pkgRealStr}"
+  if out.exitCode == 0 then
+    if out.stdout.endsWith "\n" then
+      match (out.stdout.splitOn "\n").reverse with
+      | "" :: lastLine :: secondLastLine :: _ =>
+        if lastLine == expectedVerdict then
+          match parseRegulaCoverageLine secondLastLine with
+          | some (readMods, readDecls) =>
+            if readMods == mods.size && readDecls > 0 then
+              return #[]
+            return #[{ rule := "REGULA", message :=
+              s!"Regula covered {readMods} modules ({readDecls} constants), expected {mods.size} modules and > 0 constants" }]
+          | none =>
+            return #[{ rule := "REGULA", message :=
+              s!"Regula exited 0 without expected module coverage line before verdict; stdout:\n{out.stdout}" }]
+        return #[{ rule := "REGULA", message :=
+          s!"Regula exited 0 without expected exact final verdict {expectedVerdict.quote}; stdout:\n{out.stdout}" }]
+      | _ =>
+        return #[{ rule := "REGULA", message :=
+          s!"Regula exited 0 with incomplete stdout:\n{out.stdout}" }]
+    return #[{ rule := "REGULA", message :=
+      s!"Regula exited 0 without trailing newline after verdict; stdout:\n{out.stdout}" }]
+  let lines := splitNonEmptyLines (out.stdout ++ "\n" ++ out.stderr)
+  if lines.isEmpty then
+    return #[{ rule := "REGULA", message := s!"Regula exited with status {out.exitCode}" }]
+  return lines.map fun l => { rule := "REGULA", message := l }
+
 def check (opts : CheckOpts) : IO (Array Rejection) := do
   let config ← checkConfig
   unless config.isEmpty do
@@ -906,6 +1407,7 @@ def check (opts : CheckOpts) : IO (Array Rejection) := do
     return built
   let codes ← checkCodes pkg.leanLibDir mods
   let commentErrs ← checkComments opts
+  let regulaErrs ← checkRegula mods
   initSearchPath (← findSysroot) [pkg.leanLibDir]
   let env ← importModules (mods.map fun m => { module := m }) {}
   let idxs := mods.filterMap env.getModuleIdx?
@@ -921,7 +1423,7 @@ def check (opts : CheckOpts) : IO (Array Rejection) := do
           compiled := compiled.push c
   if audited == 0 then
     errs := errs.push { rule := "AXIOMS", message := "the library's modules declare no constant" }
-  return errs ++ checkProcess env compiled ++ codes ++ commentErrs
+  return errs ++ checkProcess env compiled ++ codes ++ commentErrs ++ regulaErrs
 
 def checkUsage : String :=
   "usage: lean --run tools/check.lean [--base-ref <ref>] | --tests | --tests-module <file> <out> | --comments [<file>]"

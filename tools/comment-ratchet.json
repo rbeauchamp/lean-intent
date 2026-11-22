@@ -809,7 +809,7 @@
     "ef50358de8f01187",
     "f8e6a534c2990ad9"
   ]},
-  {"file": "LeanIntent/Execution/Read.lean", "comments": 10, "lines": 136, "fingerprints": [
+  {"file": "LeanIntent/Execution/Read.lean", "comments": 9, "lines": 24, "fingerprints": [
     "3f836b13c79de2c0",
     "4b58465ee5045fa5",
     "8de3141dc56c37ed",
@@ -818,7 +818,6 @@
     "be6a46bd2a10ee71",
     "c771ddee8a71ed4e",
     "d15ec4ca311b838f",
-    "d5f256f12a96f62b",
     "e36006ac26ee9946"
   ]},
   {"file": "LeanIntent/Implementation.lean", "comments": 60, "lines": 170, "fingerprints": [

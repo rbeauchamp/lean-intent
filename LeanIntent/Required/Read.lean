@@ -136,7 +136,7 @@ declares it as anything else, such as an axiom that a module imported later prov
 constant. An error where that module's theorem differs in type or universe parameters. -/
 def citedOf (e : Expr) : MetaM Cited := do
   let args ← ctorArgs e ``Proof.mk 2
-  match constOf? args[1]! with
+  match constOf? args[1] with
   | none => return .term
   | some c =>
     let (m, own) ← ownDeclaration c
@@ -155,11 +155,11 @@ deliverable its type names, where that is a constant, and what it lists. An erro
 does not reduce to `Required.mk`'s application, or its list to a list. -/
 def entryOf (decl : Implementation.Constant) : MetaM Entry := do
   let t ← readWhnf (← getConstInfo decl.name).type
-  unless t.isAppOfArity ``Required 2 do
-    throwError "the type of {decl.name} is not `LeanIntent.Required` applied to a deliverable"
+  let .app (.app (.const ``Required _) _) d := t
+    | throwError "the type of {decl.name} is not `LeanIntent.Required` applied to a deliverable"
   let args ← ctorArgs (← Confirmation.Read.constOf decl.name) ``Required.mk 4
-  let theorems ← (← listElems args[2]!).mapM citedOf
-  return ⟨decl.name, decl.module, constOf? t.appArg!, theorems.toList⟩
+  let theorems ← (← listElems args[2]).mapM citedOf
+  return ⟨decl.name, decl.module, constOf? d, theorems.toList⟩
 
 /-- The definitions, opaque constants and axioms of every module the environment holds, the one
 being elaborated included, whose type, reduced through the kernel by unfolding every definition, is

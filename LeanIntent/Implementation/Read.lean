@@ -74,13 +74,13 @@ the deliverable its type names and the constant its subject is, each where it is
 error when its value does not reduce to `Implementation.mk`'s application. -/
 def entryOf (decl : Name) : MetaM Entry := do
   let t ← readWhnf (← getConstInfo decl).type
-  unless t.isAppOfArity ``Implementation 2 do
-    throwError "the type of {decl} is not `LeanIntent.Implementation` applied to a deliverable"
+  let .app (.app (.const ``Implementation _) _) d := t
+    | throwError "the type of {decl} is not `LeanIntent.Implementation` applied to a deliverable"
   let args ← ctorArgs (← Confirmation.Read.constOf decl) ``Implementation.mk 4
-  let subject ← match constOf? args[2]! with
+  let subject ← match constOf? args[2] with
     | some c => pure (some ⟨← moduleOf c, c⟩)
     | none => pure none
-  return ⟨decl, constOf? t.appArg!, subject⟩
+  return ⟨decl, constOf? d, subject⟩
 
 /-- What the build shows of the value `decl`, a constant whose type reduces to
 `AwaitingImplementation d`: the deliverable its type names, where that is a constant, and the reason
@@ -88,13 +88,13 @@ it gives. An error when its value does not reduce to `AwaitingImplementation.mk`
 its reason to a string literal. -/
 def awaitingEntryOf (decl : Name) : MetaM AwaitingEntry := do
   let t ← readWhnf (← getConstInfo decl).type
-  unless t.isAppOfArity ``AwaitingImplementation 2 do
-    throwError
-      "the type of {decl} is not `LeanIntent.AwaitingImplementation` applied to a deliverable"
+  let .app (.app (.const ``AwaitingImplementation _) _) d := t
+    | throwError
+        "the type of {decl} is not `LeanIntent.AwaitingImplementation` applied to a deliverable"
   let args ← ctorArgs (← Confirmation.Read.constOf decl) ``AwaitingImplementation.mk 4
-  let reason ← try strLit args[2]! catch e =>
+  let reason ← try strLit args[2] catch e =>
     throwError "the reason {decl} gives is not read as a string literal: {e.toMessageData}"
-  return ⟨decl, constOf? t.appArg!, reason⟩
+  return ⟨decl, constOf? d, reason⟩
 
 /-- **What a gate reads**, from the finished build: the report on the implementations of the project
 whose modules are `mods`. It is `Implementation.report` of the project's deliverables and the
