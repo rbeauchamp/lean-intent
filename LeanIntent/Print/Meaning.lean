@@ -52,166 +52,237 @@ inductive Gap where
   | fuel
   deriving @[expose] Inhabited, Repr, @[expose] DecidableEq
 
-@[expose] def collect (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr) (stop : Name → Bool) :
-    Nat → List Name → List (Name × ConstantInfo) → Except Gap (List (Name × ConstantInfo))
-  | 0, _, _ => .error .fuel
-  | _ + 1, [], done => .ok done
-  | f + 1, c :: work, done =>
-    if stop c = true ∨ c ∈ done.map Prod.fst then collect lookup eqn stop f work done
-    else
+@[expose] def nextActive (stop : Name → Bool) (visited : Std.HashSet Name) :
+    List Name → Option (Name × List Name)
+  | [] => none
+  | c :: rest =>
+    if stop c || visited.contains c then nextActive stop visited rest
+    else some (c, rest)
+
+@[expose] def collect (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr)
+    (stop : Name → Bool) : Nat → Std.HashSet Name → List Name →
+    List (Name × ConstantInfo) → Except Gap (List (Name × ConstantInfo))
+  | fuel, visited, work, done =>
+    match nextActive stop visited work with
+    | none => .ok done
+    | some (c, rest) =>
       match lookup c with
       | none => .error (.unknown c)
-      | some ci => collect lookup eqn stop f (refsVia eqn c ci ++ work) ((c, ci) :: done)
+      | some ci =>
+        match fuel with
+        | 0 => .error .fuel
+        | fuel + 1 =>
+          collect lookup eqn stop fuel (visited.insert c) (refsVia eqn c ci ++ rest)
+            ((c, ci) :: done)
 
-@[expose] def meaning (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr) (stop : Name → Bool)
-    (roots : List Name) : Except Gap (List (Name × ConstantInfo)) :=
-  (collect lookup eqn stop (2 ^ 64) roots []).map List.reverse
+@[expose] def meaning (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr)
+    (stop : Name → Bool) (fuel : Nat) (roots : List Name) :
+    Except Gap (List (Name × ConstantInfo)) :=
+  (collect lookup eqn stop fuel ∅ roots []).map List.reverse
+
+@[expose] def Within (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr)
+    (stop : Name → Bool) (roots : List Name) (fuel : Nat) : Prop :=
+  ∃ l : List Name, l.length ≤ fuel ∧ ∀ c, Reach lookup eqn stop roots c → c ∈ l
+
+@[expose] def Gap.Holds (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr)
+    (stop : Name → Bool) (roots : List Name) (fuel : Nat) : Gap → Prop
+  | .unknown c => Reach lookup eqn stop roots c ∧ lookup c = none
+  | .fuel => ¬ Within lookup eqn stop roots fuel
 
 section Proofs
 
 variable {lookup : Name → Option ConstantInfo} {eqn : Name → Option Expr} {stop : Name → Bool}
   {roots : List Name}
 
+theorem nextActive_eq_none {V : Std.HashSet Name} :
+    (W : List Name) → nextActive stop V W = none → ∀ w ∈ W, stop w = false → w ∈ V
+  | [], _, w, hw, _ => nomatch hw
+  | c :: rest, h, w, hw, hs => by
+    unfold nextActive at h
+    split at h
+    · rename_i hc
+      rcases List.mem_cons.mp hw with rfl | hw
+      · simp only [Bool.or_eq_true, Std.HashSet.contains_iff_mem] at hc
+        exact hc.elim (fun h1 => absurd hs (by simp [h1])) id
+      · exact nextActive_eq_none rest h w hw hs
+    · exact absurd h (by simp)
+
+theorem nextActive_eq_some {V : Std.HashSet Name} {c : Name} {rest : List Name} :
+    (W : List Name) → nextActive stop V W = some (c, rest) →
+      c ∈ W ∧ stop c = false ∧ c ∉ V ∧ (∀ w ∈ rest, w ∈ W) ∧
+        ∀ w ∈ W, stop w = true ∨ w ∈ V ∨ w = c ∨ w ∈ rest
+  | [], h => nomatch h
+  | d :: ds, h => by
+    unfold nextActive at h
+    split at h
+    · rename_i hd
+      obtain ⟨h1, h2, h3, h4, h5⟩ := nextActive_eq_some ds h
+      refine ⟨List.mem_cons_of_mem _ h1, h2, h3, fun w hw => List.mem_cons_of_mem _ (h4 w hw), ?_⟩
+      intro w hw
+      rcases List.mem_cons.mp hw with rfl | hw
+      · simp only [Bool.or_eq_true, Std.HashSet.contains_iff_mem] at hd
+        rcases hd with hst | hv
+        · exact .inl hst
+        · exact .inr (.inl hv)
+      · exact h5 w hw
+    · rename_i hd
+      cases h
+      simp only [Bool.or_eq_true, not_or, Bool.not_eq_true, Std.HashSet.contains_iff_mem] at hd
+      refine ⟨List.mem_cons_self .., hd.1, hd.2, fun w hw => List.mem_cons_of_mem _ hw, ?_⟩
+      intro w hw
+      rcases List.mem_cons.mp hw with rfl | hw
+      · exact .inr (.inr (.inl rfl))
+      · exact .inr (.inr (.inr hw))
+
 structure Inv (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr) (stop : Name → Bool)
-    (roots : List Name) (work : List Name) (done : List (Name × ConstantInfo)) : Prop where
+    (roots : List Name) (V : Std.HashSet Name) (work : List Name)
+    (done : List (Name × ConstantInfo)) : Prop where
   found : ∀ p ∈ done, lookup p.1 = some p.2
   reached : ∀ p ∈ done, Reach lookup eqn stop roots p.1
+  visited_mem : ∀ v ∈ V, v ∈ done.map Prod.fst
+  mem_visited : ∀ p ∈ done, p.1 ∈ V
   pending : ∀ c ∈ work, stop c = false → Reach lookup eqn stop roots c
   closed : ∀ p ∈ done, ∀ c ∈ refsVia eqn p.1 p.2, stop c = false →
     c ∈ done.map Prod.fst ∨ c ∈ work
 
-theorem collect_ok : (f : Nat) → {work : List Name} → {done out : List (Name × ConstantInfo)} →
-    collect lookup eqn stop f work done = .ok out → Inv lookup eqn stop roots work done →
-    Inv lookup eqn stop roots [] out ∧ (∀ c ∈ work, stop c = false → c ∈ out.map Prod.fst) ∧
-      ∀ p ∈ done, p ∈ out
-  | 0, _, _, _, h, _ => by simp [collect] at h
-  | _ + 1, [], done, out, h, hi => by
-    simp only [collect, Except.ok.injEq] at h
-    subst h
-    exact ⟨hi, by simp, fun _ hp => hp⟩
-  | f + 1, c :: work, done, out, h, hi => by
-    simp only [collect] at h
+theorem collect_ok : (f : Nat) → {V : Std.HashSet Name} → {work : List Name} →
+    {done out : List (Name × ConstantInfo)} →
+    collect lookup eqn stop f V work done = .ok out → Inv lookup eqn stop roots V work done →
+    ∃ V' : Std.HashSet Name, Inv lookup eqn stop roots V' [] out ∧ V'.size ≤ V.size + f ∧
+      (∀ c ∈ work, stop c = false → c ∈ out.map Prod.fst) ∧ ∀ p ∈ done, p ∈ out
+  | f, V, work, done, out, h, hi => by
+    unfold collect at h
     split at h
-    · next hskip =>
-      have hi' : Inv lookup eqn stop roots work done :=
-        { found := hi.found, reached := hi.reached
-          pending := fun x hx => hi.pending x (List.mem_cons_of_mem _ hx)
-          closed := fun p hp x hx hs => by
-            rcases hi.closed p hp x hx hs with h | h
-            · exact .inl h
-            · rcases List.mem_cons.mp h with rfl | h
-              · rcases hskip with h' | h'
-                · simp [hs] at h'
-                · exact .inl h'
-              · exact .inr h }
-      obtain ⟨ho, hw, hd⟩ := collect_ok f h hi'
-      refine ⟨ho, fun x hx hs => ?_, hd⟩
-      rcases List.mem_cons.mp hx with rfl | hx
-      · rcases hskip with h' | h'
-        · simp [hs] at h'
-        · obtain ⟨p, hp, rfl⟩ := List.mem_map.mp h'
-          exact List.mem_map.mpr ⟨p, hd p hp, rfl⟩
-      · exact hw x hx hs
-    · next hskip =>
-      have hs : stop c = false := by simpa using fun h => hskip (.inl h)
+    · rename_i hn
+      simp only [Except.ok.injEq] at h
+      subst h
+      have hW := nextActive_eq_none work hn
+      refine ⟨V, { hi with pending := by simp, closed := fun p hp c hc hs => ?_ },
+        Nat.le_add_right _ _, fun c hc hs => hi.visited_mem c (hW c hc hs), fun _ hp => hp⟩
+      rcases hi.closed p hp c hc hs with h' | h'
+      · exact .inl h'
+      · exact .inl (hi.visited_mem c (hW c h' hs))
+    · rename_i c rest hn
+      obtain ⟨hcW, hsc, hcV, hrest, hsplit⟩ := nextActive_eq_some work hn
       split at h
       · simp at h
-      · next ci hci =>
-        have hc : Reach lookup eqn stop roots c := hi.pending c (List.mem_cons_self ..) hs
-        have hi' : Inv lookup eqn stop roots (refsVia eqn c ci ++ work) ((c, ci) :: done) :=
-          { found := fun p hp => by
-              rcases List.mem_cons.mp hp with rfl | hp
-              · exact hci
-              · exact hi.found p hp
-            reached := fun p hp => by
-              rcases List.mem_cons.mp hp with rfl | hp
-              · exact hc
-              · exact hi.reached p hp
-            pending := fun x hx hxs => by
-              rcases List.mem_append.mp hx with hx | hx
-              · exact .step hc hci hx hxs
-              · exact hi.pending x (List.mem_cons_of_mem _ hx) hxs
-            closed := fun p hp x hx hxs => by
-              rcases List.mem_cons.mp hp with rfl | hp
-              · exact .inr (List.mem_append_left _ hx)
-              · rcases hi.closed p hp x hx hxs with h | h
-                · exact .inl (List.mem_cons_of_mem _ h)
-                · rcases List.mem_cons.mp h with rfl | h
-                  · exact .inl (List.mem_cons_self ..)
-                  · exact .inr (List.mem_append_right _ h) }
-        obtain ⟨ho, hw, hd⟩ := collect_ok f h hi'
-        refine ⟨ho, fun x hx hxs => ?_, fun p hp => hd p (List.mem_cons_of_mem _ hp)⟩
-        rcases List.mem_cons.mp hx with rfl | hx
-        · exact List.mem_map.mpr ⟨_, hd _ (List.mem_cons_self ..), rfl⟩
-        · exact hw x (List.mem_append_right _ hx) hxs
+      · rename_i ci hci
+        cases f with
+        | zero => simp at h
+        | succ f =>
+          have hc : Reach lookup eqn stop roots c := hi.pending c hcW hsc
+          have hi' : Inv lookup eqn stop roots (V.insert c) (refsVia eqn c ci ++ rest)
+              ((c, ci) :: done) :=
+            { found := fun p hp => by
+                rcases List.mem_cons.mp hp with rfl | hp
+                · exact hci
+                · exact hi.found p hp
+              reached := fun p hp => by
+                rcases List.mem_cons.mp hp with rfl | hp
+                · exact hc
+                · exact hi.reached p hp
+              visited_mem := fun v hv => by
+                rcases Cone.mem_insert.mp hv with rfl | hv
+                · exact List.mem_cons_self ..
+                · exact List.mem_cons_of_mem _ (hi.visited_mem v hv)
+              mem_visited := fun p hp => by
+                rcases List.mem_cons.mp hp with rfl | hp
+                · exact Cone.mem_insert.mpr (.inl rfl)
+                · exact Cone.mem_insert.mpr (.inr (hi.mem_visited p hp))
+              pending := fun x hx hxs => by
+                rcases List.mem_append.mp hx with hx | hx
+                · exact .step hc hci hx hxs
+                · exact hi.pending x (hrest x hx) hxs
+              closed := fun p hp x hx hxs => by
+                rcases List.mem_cons.mp hp with rfl | hp
+                · exact .inr (List.mem_append_left _ hx)
+                · rcases hi.closed p hp x hx hxs with h' | h'
+                  · exact .inl (List.mem_cons_of_mem _ h')
+                  · rcases hsplit x h' with hst | hxv | rfl | hxr
+                    · simp [hxs] at hst
+                    · exact .inl (List.mem_cons_of_mem _ (hi.visited_mem x hxv))
+                    · exact .inl (List.mem_cons_self ..)
+                    · exact .inr (List.mem_append_right _ hxr) }
+          obtain ⟨V', ho, hsize, hw, hd⟩ := collect_ok f h hi'
+          refine ⟨V', ho, ?_, fun x hx hxs => ?_, fun p hp => hd p (List.mem_cons_of_mem _ hp)⟩
+          · rw [Cone.size_insert_of_not_mem hcV] at hsize
+            omega
+          · rcases hsplit x hx with hst | hxv | rfl | hxr
+            · simp [hxs] at hst
+            · obtain ⟨p, hp, rfl⟩ := List.mem_map.mp (hi.visited_mem x hxv)
+              exact List.mem_map.mpr ⟨p, hd p (List.mem_cons_of_mem _ hp), rfl⟩
+            · exact List.mem_map.mpr ⟨_, hd _ (List.mem_cons_self ..), rfl⟩
+            · exact hw x (List.mem_append_right _ hxr) hxs
 
-theorem collect_unknown : (f : Nat) → {work : List Name} → {done : List (Name × ConstantInfo)} →
-    {c : Name} → collect lookup eqn stop f work done = .error (.unknown c) →
-    Inv lookup eqn stop roots work done → Reach lookup eqn stop roots c ∧ lookup c = none
-  | 0, _, _, _, h, _ => by simp [collect] at h
-  | _ + 1, [], _, _, h, _ => by simp [collect] at h
-  | f + 1, x :: work, done, c, h, hi => by
-    simp only [collect] at h
+theorem collect_error (fuel₀ : Nat) : (f : Nat) → (V : Std.HashSet Name) →
+    (work : List Name) → (done : List (Name × ConstantInfo)) →
+    (∀ v ∈ V, Reach lookup eqn stop roots v) →
+    (∀ w ∈ work, stop w = false → Reach lookup eqn stop roots w) →
+    V.size + f = fuel₀ → ∀ {g : Gap},
+    collect lookup eqn stop f V work done = .error g →
+    g.Holds lookup eqn stop roots fuel₀
+  | f, V, work, done, hV, hW, hfuel, g, h => by
+    unfold collect at h
     split at h
-    · next hskip =>
-      refine collect_unknown f h
-        { found := hi.found, reached := hi.reached
-          pending := fun y hy => hi.pending y (List.mem_cons_of_mem _ hy)
-          closed := fun p hp y hy hs => by
-            rcases hi.closed p hp y hy hs with h | h
-            · exact .inl h
-            · rcases List.mem_cons.mp h with rfl | h
-              · rcases hskip with h' | h'
-                · simp [hs] at h'
-                · exact .inl h'
-              · exact .inr h }
-    · next hskip =>
-      have hs : stop x = false := by simpa using fun h => hskip (.inl h)
-      have hx : Reach lookup eqn stop roots x := hi.pending x (List.mem_cons_self ..) hs
+    · exact nomatch h
+    · rename_i c rest hn
+      obtain ⟨hcW, hsc, hcV, hrest, -⟩ := nextActive_eq_some work hn
+      have hc : Reach lookup eqn stop roots c := hW c hcW hsc
       split at h
-      · next hnone =>
-        simp only [Except.error.injEq, Gap.unknown.injEq] at h
-        subst h
-        exact ⟨hx, hnone⟩
-      · next ci hci =>
-        refine collect_unknown f h
-          { found := fun p hp => by
-              rcases List.mem_cons.mp hp with rfl | hp
-              · exact hci
-              · exact hi.found p hp
-            reached := fun p hp => by
-              rcases List.mem_cons.mp hp with rfl | hp
-              · exact hx
-              · exact hi.reached p hp
-            pending := fun y hy hys => by
-              rcases List.mem_append.mp hy with hy | hy
-              · exact .step hx hci hy hys
-              · exact hi.pending y (List.mem_cons_of_mem _ hy) hys
-            closed := fun p hp y hy hys => by
-              rcases List.mem_cons.mp hp with rfl | hp
-              · exact .inr (List.mem_append_left _ hy)
-              · rcases hi.closed p hp y hy hys with h | h
-                · exact .inl (List.mem_cons_of_mem _ h)
-                · rcases List.mem_cons.mp h with rfl | h
-                  · exact .inl (List.mem_cons_self ..)
-                  · exact .inr (List.mem_append_right _ h) }
+      · rename_i hnone
+        cases h
+        exact ⟨hc, hnone⟩
+      · rename_i ci hci
+        cases f with
+        | zero =>
+          cases h
+          rintro ⟨l, hlen, hlc⟩
+          have := Cone.size_lt_length (fun v hv => hlc v (hV v hv)) hcV (hlc c hc)
+          omega
+        | succ f =>
+          refine collect_error fuel₀ f (V.insert c) (refsVia eqn c ci ++ rest) ((c, ci) :: done)
+            ?_ ?_ ?_ h
+          · intro v hv
+            rcases Cone.mem_insert.mp hv with rfl | hv
+            · exact hc
+            · exact hV v hv
+          · intro w hw hws
+            rcases List.mem_append.mp hw with hw | hw
+            · exact .step hc hci hw hws
+            · exact hW w (hrest w hw) hws
+          · rw [Cone.size_insert_of_not_mem hcV]
+            omega
 
-theorem inv_init : Inv lookup eqn stop roots roots [] where
+theorem collect_unknown : (f : Nat) → {V : Std.HashSet Name} → {work : List Name} →
+    {done : List (Name × ConstantInfo)} → {c : Name} →
+    collect lookup eqn stop f V work done = .error (.unknown c) →
+    Inv lookup eqn stop roots V work done → Reach lookup eqn stop roots c ∧ lookup c = none := by
+  intro f V work done c h hi
+  exact collect_error (V.size + f) f V work done
+    (fun v hv => by
+      obtain ⟨p, hp, rfl⟩ := List.mem_map.mp (hi.visited_mem v hv)
+      exact hi.reached p hp)
+    hi.pending rfl h
+
+theorem inv_init : Inv lookup eqn stop roots ∅ roots [] where
   found := by simp
   reached := by simp
+  visited_mem := fun _ h => absurd h Std.HashSet.not_mem_empty
+  mem_visited := by simp
   pending := fun _ hc hs => .root hc hs
   closed := by simp
 
-theorem meaning_ok {out : List (Name × ConstantInfo)} (h : meaning lookup eqn stop roots = .ok out) :
+theorem meaning_ok {fuel : Nat} {out : List (Name × ConstantInfo)}
+    (h : meaning lookup eqn stop fuel roots = .ok out) :
     (∀ p ∈ out, lookup p.1 = some p.2) ∧
       ∀ c, c ∈ out.map Prod.fst ↔ Reach lookup eqn stop roots c := by
   simp only [meaning] at h
-  cases hc : collect lookup eqn stop (2 ^ 64) roots [] with
+  cases hc : collect lookup eqn stop fuel ∅ roots [] with
   | error e => simp [hc] at h; cases h
   | ok out' =>
     simp only [hc, Except.map, Except.ok.injEq] at h
     subst h
-    obtain ⟨ho, hw, -⟩ := collect_ok (roots := roots) _ hc inv_init
+    obtain ⟨_, ho, -, hw, -⟩ := collect_ok (roots := roots) fuel hc inv_init
     refine ⟨fun p hp => ho.found p (List.mem_reverse.mp hp), fun c => ?_⟩
     simp only [List.map_reverse, List.mem_reverse]
     refine ⟨fun hm => ?_, fun hr => ?_⟩
@@ -225,34 +296,90 @@ theorem meaning_ok {out : List (Name × ConstantInfo)} (h : meaning lookup eqn s
         cases this
         simpa using ho.closed p hp _ hc hs
 
-theorem meaning_unknown {c : Name} (h : meaning lookup eqn stop roots = .error (.unknown c)) :
-    Reach lookup eqn stop roots c ∧ lookup c = none := by
+theorem meaning_within {fuel : Nat} {out : List (Name × ConstantInfo)}
+    (h : meaning lookup eqn stop fuel roots = .ok out) :
+    Within lookup eqn stop roots fuel := by
+  have hm := (meaning_ok h).2
   simp only [meaning] at h
-  cases hc : collect lookup eqn stop (2 ^ 64) roots [] with
+  cases hc : collect lookup eqn stop fuel ∅ roots [] with
+  | error e => simp [hc] at h; cases h
+  | ok out' =>
+    simp only [hc, Except.map, Except.ok.injEq] at h
+    subst h
+    obtain ⟨V', ho, hsize, -, -⟩ := collect_ok (roots := roots) fuel hc inv_init
+    have hreach : ∀ c, Reach lookup eqn stop roots c → c ∈ V' := by
+      intro c hrc
+      have hmem : c ∈ out'.reverse.map Prod.fst := (hm c).mpr hrc
+      simp only [List.map_reverse, List.mem_reverse, List.mem_map] at hmem
+      obtain ⟨p, hp, rfl⟩ := hmem
+      exact ho.mem_visited p hp
+    exact ⟨V'.toList, by simpa [Std.HashSet.length_toList] using hsize,
+      fun c hrc => Std.HashSet.mem_toList.mpr (hreach c hrc)⟩
+
+theorem meaning_error {fuel : Nat} {g : Gap}
+    (h : meaning lookup eqn stop fuel roots = .error g) :
+    g.Holds lookup eqn stop roots fuel := by
+  simp only [meaning] at h
+  cases hc : collect lookup eqn stop fuel ∅ roots [] with
   | error e =>
     simp only [hc, Except.map, Except.error.injEq] at h
     subst h
-    exact collect_unknown _ hc inv_init
+    exact collect_error fuel fuel ∅ roots [] (fun _ hv => absurd hv Std.HashSet.not_mem_empty)
+      (fun _ hw hs => .root hw hs) (by simp) hc
   | ok _ => simp [hc, Except.map] at h
 
-theorem reach_of_mem {out : List (Name × ConstantInfo)} (h : meaning lookup eqn stop roots = .ok out)
+theorem meaning_unknown {fuel : Nat} {c : Name}
+    (h : meaning lookup eqn stop fuel roots = .error (.unknown c)) :
+    Reach lookup eqn stop roots c ∧ lookup c = none :=
+  meaning_error h
+
+theorem meaning_fuel {fuel : Nat}
+    (h : meaning lookup eqn stop fuel roots = .error .fuel) :
+    ¬ Within lookup eqn stop roots fuel :=
+  meaning_error h
+
+theorem meaning_ok_iff {fuel : Nat} :
+    (∃ out, meaning lookup eqn stop fuel roots = .ok out) ↔
+      (∀ c, Reach lookup eqn stop roots c → (lookup c).isSome) ∧
+        Within lookup eqn stop roots fuel := by
+  constructor
+  · rintro ⟨out, h⟩
+    refine ⟨fun c hc => ?_, meaning_within h⟩
+    obtain ⟨p, hp, rfl⟩ := List.mem_map.mp (((meaning_ok h).2 c).mpr hc)
+    simp [(meaning_ok h).1 p hp]
+  · rintro ⟨hAll, hw⟩
+    cases hm : meaning lookup eqn stop fuel roots with
+    | ok out => exact ⟨out, rfl⟩
+    | error g =>
+      cases g with
+      | unknown c =>
+        obtain ⟨hc, hnone⟩ := meaning_unknown hm
+        have hsome := hAll c hc
+        simp [hnone] at hsome
+      | fuel => exact absurd hw (meaning_fuel hm)
+
+theorem reach_of_mem {fuel : Nat} {out : List (Name × ConstantInfo)}
+    (h : meaning lookup eqn stop fuel roots = .ok out)
     {c : Name} {ci : ConstantInfo} (hp : (c, ci) ∈ out) :
     Reach lookup eqn stop roots c ∧ lookup c = some ci :=
   ⟨((meaning_ok h).2 c).mp (List.mem_map.mpr ⟨_, hp, rfl⟩), (meaning_ok h).1 _ hp⟩
 
-theorem ctor_mem {out : List (Name × ConstantInfo)} (h : meaning lookup eqn stop roots = .ok out)
+theorem ctor_mem {fuel : Nat} {out : List (Name × ConstantInfo)}
+    (h : meaning lookup eqn stop fuel roots = .ok out)
     {c k : Name} {v : Lean.InductiveVal} (hp : (c, .inductInfo v) ∈ out) (hk : k ∈ v.ctors)
     (hs : stop k = false) : k ∈ out.map Prod.fst :=
   let ⟨hr, hl⟩ := reach_of_mem h hp
   ((meaning_ok h).2 k).mpr (.step hr hl (mem_declRefs_ctor hk) hs)
 
-theorem induct_mem {out : List (Name × ConstantInfo)} (h : meaning lookup eqn stop roots = .ok out)
+theorem induct_mem {fuel : Nat} {out : List (Name × ConstantInfo)}
+    (h : meaning lookup eqn stop fuel roots = .ok out)
     {c : Name} {v : Lean.ConstructorVal} (hp : (c, .ctorInfo v) ∈ out)
     (hs : stop v.induct = false) : v.induct ∈ out.map Prod.fst :=
   let ⟨hr, hl⟩ := reach_of_mem h hp
   ((meaning_ok h).2 _).mpr (.step hr hl mem_declRefs_induct hs)
 
-theorem block_mem {out : List (Name × ConstantInfo)} (h : meaning lookup eqn stop roots = .ok out)
+theorem block_mem {fuel : Nat} {out : List (Name × ConstantInfo)}
+    (h : meaning lookup eqn stop fuel roots = .ok out)
     {c i : Name} {v : Lean.RecursorVal} (hp : (c, .recInfo v) ∈ out) (hi : i ∈ v.all)
     (hs : stop i = false) : i ∈ out.map Prod.fst :=
   let ⟨hr, hl⟩ := reach_of_mem h hp

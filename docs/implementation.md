@@ -116,7 +116,7 @@ run_meta do
   unless implemented.findings.isEmpty do
     throwError "the deliverables are not implemented: {repr implemented.findings}"
   for (d, value, reason) in implemented.awaiting do
-    logInfo m!"{d} awaits its implementation ({value}): {reason}"
+    Lean.logInfo m!"{d} awaits its implementation ({value}): {reason}"
 ```
 
 ## Why the reader requires safe definitions

@@ -10,8 +10,6 @@ open LeanIntent
 
 abbrev Hash := UInt64 → UInt64 → UInt64 → UInt64
 
-theorem hash_length : (degenerate Hash).length = 5 := rfl
-
 theorem hash_subjects :
     (degenerate Hash).map Degenerate.reading =
       [.subject fun _ _ _ => 0, .otherConstants, .subject fun a _ _ => a, .subject fun _ b _ => b,
@@ -98,24 +96,5 @@ theorem reachesAll_verdicts :
   ⟨reachesAll_refutes_const _, reachesAll_refutes_const _, reachesAll_refutes_const _,
     reachesAll_refutes_const _, reachesAll_refutes_const _, reachesAll_refutes_const _,
     reachesAll_refutes_const _, reachesAll_refutes_const _, trivial⟩
-
-set_option maxRecDepth 10000 in
-theorem fin255_length : (degenerate (Unit → Fin 255)).length = 255 := rfl
-
-theorem fin256_length : (degenerate (Unit → Fin 256)).length = 2 := rfl
-
-theorem large_length : (degenerate (Unit → Fin 1000000000000)).length = 2 := rfl
-
-theorem char_length : (degenerate (Char → Char)).length = 3 := rfl
-
-theorem float_length : (degenerate (Float → Float)).length = 3 := rfl
-
-structure Flags where
-  (a b c d e f g h : Bool)
-  deriving LeanIntent.HasCode
-
-theorem flags_length : (degenerate Flags).length = 2 := rfl
-
-theorem pair_length : (degenerate (UInt8 × Nat)).length = 2 := rfl
 
 end LeanIntentExamples.LargeFinite

@@ -2,7 +2,6 @@ module
 
 public import LeanIntent.Answers
 public import LeanIntent.Codec.Text
-import all Init.Data.String.Defs
 
 public section
 
@@ -557,6 +556,7 @@ theorem print_injective {s s' : Statement} (h : print s = print s') : s = s' := 
 
 theorem fromUTF8?_eq_some_iff (b : ByteArray) (t : String) :
     String.fromUTF8? b = some t ↔ t.toUTF8 = b := by
+  rw [String.toUTF8_eq_toByteArray]
   constructor
   · intro h
     unfold String.fromUTF8? at h
