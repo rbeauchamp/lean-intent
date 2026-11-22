@@ -161,7 +161,7 @@ annotation, which Lean applies to the arguments written after them and nothing e
 
 /-- Whether `e` holds a `match`, by a constant Lean records as a matcher. -/
 @[expose] def holdsMatch (env : Environment) (e : Expr) : Bool :=
-  (e.find? fun x => x.isConst && isMatcherCore env x.constName!).isSome
+  (e.find? fun x => match x with | .const c _ => isMatcherCore env c | _ => false).isSome
 
 def elaboratesTo (text : String) (e : Expr) (ns : Name := .anonymous) : MetaM Bool := do
   match Parser.runParserCategory (← getEnv) `term text with
@@ -279,6 +279,11 @@ def Reader.delabWith (R : Reader) (extra : List (Name × Bool)) (e : Expr) :
         let text := (← PrettyPrinter.ppTerm stx).pretty 100
         return (text, ← R.foreignKinds stx)
 
+def fvarDecl (x : Expr) : MetaM LocalDecl := do
+  let some id := x.fvarId?
+    | throwError "expected local variable, found{indentExpr x}"
+  id.getDecl
+
 /-- `e` as the reader's form prints it. The exact form prints it by `printExact`. The readable form
 shows the first print of `readableOptions` that Lean reads back as `e`, binder names and metadata
 aside, in the reader's namespace, and records its foreign notation; when none is read back, it
@@ -289,7 +294,8 @@ def Reader.print (R : Reader) (e : Expr) : MetaM String := do
     throwError "cannot print{indentExpr e}\nas it has free or meta variables"
   if R.form == .exact then return ← R.printClosed e
   let locals ← R.params.toList.filterMapM fun x => do
-    if e.containsFVar x.fvarId! then return some (← x.fvarId!.getDecl).userName else return none
+    let d ← fvarDecl x
+    if e.containsFVar d.fvarId then return some d.userName else return none
   let ec := canon (constRoots e ++ locals) [] (eraseMData e)
   for extra in readableOptions do
     let attempt ← observing? (R.delabWith extra ec)
@@ -327,20 +333,28 @@ def readWhnf (e : Expr) : MetaM Expr := do
   | .error _ => throwError "Lean's kernel could not reduce{indentExpr e}"
 
 /-- The arguments of `e`, which must reduce to the constructor `ctor` applied to `n` arguments. -/
-def ctorArgs (e : Expr) (ctor : Name) (n : Nat) : MetaM (Array Expr) := do
+def ctorArgs (e : Expr) (ctor : Name) (n : Nat) : MetaM (Vector Expr n) := do
   let e ← readWhnf e
   unless e.isAppOfArity ctor n do
     throwError "expected {.ofConstName ctor} applied to {n} arguments, found{indentExpr e}"
-  return e.getAppArgs
+  let args := e.getAppArgs
+  if h : args.size = n then
+    return ⟨args, h⟩
+  throwError "expected {.ofConstName ctor} applied to {n} arguments, found {args.size}"
 
 /-- The elements of a list. -/
-partial def listElems (e : Expr) : MetaM (Array Expr) := do
-  let e ← readWhnf e
-  if e.isAppOfArity ``List.cons 3 then
-    return #[e.getArg! 1] ++ (← listElems (e.getArg! 2))
-  else if e.isAppOfArity ``List.nil 1 then
-    return #[]
-  else throwError "expected a list, found{indentExpr e}"
+def listElems (e : Expr) : MetaM (Array Expr) :=
+  go (2 ^ 64) #[] e
+where
+  go : Nat → Array Expr → Expr → MetaM (Array Expr)
+    | 0, _, _ => throwError "list has more than 2 ^ 64 elements"
+    | fuel + 1, acc, e => do
+      let e ← readWhnf e
+      match e with
+      | .app (.app (.app (.const ``List.cons _) _) head) tail =>
+        go fuel (acc.push head) tail
+      | .app (.const ``List.nil _) _ => return acc
+      | _ => throwError "expected a list, found{indentExpr e}"
 
 /-- The string a string literal is. -/
 def strLit (e : Expr) : MetaM String := do
@@ -350,15 +364,15 @@ def strLit (e : Expr) : MetaM String := do
 
 /-- A gloss's four parts, in order: what it requires, rules out, still allows, and the freedom it
 leaves. -/
-def readGloss (e : Expr) : MetaM (Array String) := do
+def readGloss (e : Expr) : MetaM (Vector String 4) := do
   let parts ← (← ctorArgs e ``Gloss.mk 4).mapM strLit
-  for (label, s) in #["requires", "rules out", "still allows", "freedom"].zip parts do
+  for (label, s) in #v["requires", "rules out", "still allows", "freedom"].zip parts do
     if s.trimAscii.isEmpty then throwError "the gloss's part on what it {label} is empty"
   return parts
 
 /-- The name `e` reduces to, whose characters are checked again as an identifier's. -/
 def readIdent (e : Expr) : MetaM Ident := do
-  let s ← strLit (← ctorArgs e ``Word.mk 3)[1]!
+  let s ← strLit (← ctorArgs e ``Word.mk 3)[1]
   if h : s.toList ≠ [] ∧ s.toList.all identChar = true then return ⟨s, h⟩
   throwError "expected a name of the owners' log, found {repr s}"
 
@@ -372,22 +386,23 @@ def readVerdict (e : Expr) : MetaM Verdict := do
 /-- The answerer `e` reduces to; refused when a decision on the owner's behalf gives no reason. -/
 def readAnswerer (e : Expr) : MetaM Answerer := do
   let e ← readWhnf e
-  if e.isAppOfArity ``Answerer.owner 1 then
-    return .owner (← readIdent e.appArg!)
-  if e.isAppOfArity ``Answerer.onBehalf 3 then
-    let a := e.getAppArgs
-    let reason ← strLit a[2]!
+  match e with
+  | .app (.const ``Answerer.owner _) arg =>
+    return .owner (← readIdent arg)
+  | .app (.app (.app (.const ``Answerer.onBehalf _) a0) a1) a2 =>
+    let reason ← strLit a2
     if reason.trimAscii.isEmpty then
-      throwError "the decision on the owner's behalf by{indentExpr a[0]!}\ngives no reason"
-    return .onBehalf (← readIdent a[0]!) (← readIdent a[1]!) reason
-  throwError "expected who gave an answer, found{indentExpr e}"
+      throwError "the decision on the owner's behalf by{indentExpr a0}\ngives no reason"
+    return .onBehalf (← readIdent a0) (← readIdent a1) reason
+  | _ => throwError "expected who gave an answer, found{indentExpr e}"
 
 /-- The standing of the record's restatement that `e` reduces to. -/
 def readRestatement (e : Expr) : MetaM Restatement := do
   let e ← readWhnf e
-  if e.isConstOf ``Restatement.unconfirmed then return .unconfirmed
-  if e.isAppOfArity ``Restatement.confirmed 1 then return .confirmed (← readIdent e.appArg!)
-  throwError "expected whether a restatement is confirmed, found{indentExpr e}"
+  match e with
+  | .const ``Restatement.unconfirmed _ => return .unconfirmed
+  | .app (.const ``Restatement.confirmed _) arg => return .confirmed (← readIdent arg)
+  | _ => throwError "expected whether a restatement is confirmed, found{indentExpr e}"
 
 /-- A consequence recorded as derived, of a record whose restatement stands as `s`. -/
 def readDerived : (s : Restatement) → MetaM (Settled s)
@@ -398,13 +413,13 @@ def readDerived : (s : Restatement) → MetaM (Settled s)
 /-- The status `e` reduces to, of a consequence of a record whose restatement stands as `s`. -/
 def readSettled (s : Restatement) (e : Expr) : MetaM (Settled s) := do
   let e ← readWhnf e
-  if e.isAppOfArity ``Settled.answered 3 then
-    let a := e.getAppArgs
-    return .answered (← readAnswerer a[1]!) (← readVerdict a[2]!)
-  if e.isAppOfArity ``Settled.fork 1 then return .fork
-  if e.isAppOfArity ``Settled.unsettled 1 then return .unsettled
-  if e.isAppOfArity ``Settled.derived 1 then return ← readDerived s
-  throwError "expected who settled a consequence, found{indentExpr e}"
+  match e with
+  | .app (.app (.app (.const ``Settled.answered _) _) a1) a2 =>
+    return .answered (← readAnswerer a1) (← readVerdict a2)
+  | .app (.const ``Settled.fork _) _ => return .fork
+  | .app (.const ``Settled.unsettled _) _ => return .unsettled
+  | .app (.const ``Settled.derived _) _ => return ← readDerived s
+  | _ => throwError "expected who settled a consequence, found{indentExpr e}"
 
 /-! ## The document -/
 
@@ -419,10 +434,10 @@ def readSettled (s : Restatement) (e : Expr) : MetaM (Settled s) := do
   let f := fence text
   s!"{f}lean\n{text}\n{f}\n"
 
-@[expose] def statement (heading text : String) (gloss : Array String) (settled : String := "") : String :=
-  s!"### {heading}\n\n{code text}\n{settled}- **Requires:** {gloss[0]!}\n\
-    - **Rules out:** {gloss[1]!}\n- **Still allows:** {gloss[2]!}\n\
-    - **Freedom O5 leaves:** {gloss[3]!}\n\n"
+@[expose] def statement (heading text : String) (gloss : Vector String 4) (settled : String := "") : String :=
+  s!"### {heading}\n\n{code text}\n{settled}- **Requires:** {gloss[0]}\n\
+    - **Rules out:** {gloss[1]}\n- **Still allows:** {gloss[2]}\n\
+    - **Freedom O5 leaves:** {gloss[3]}\n\n"
 
 /-! ## The declarations a meaning reaches -/
 
@@ -610,8 +625,9 @@ and `r`, where `c` is the constant `c` at the universe levels `us`: an equation 
 of `c` at every argument. -/
 @[expose] def unfoldsTo (c : Name) (us : List Level) : Nat → Expr → Bool
   | k, .forallE _ _ b _ => unfoldsTo c us (k + 1) b
-  | k, e => e.isAppOfArity ``Eq 3 &&
-      e.appFn!.appArg! == mkAppN (.const c us) ((List.range k).reverse.map Expr.bvar).toArray
+  | k, .app (.app (.app (.const ``Eq _) _) lhs) _ =>
+      lhs == mkAppN (.const c us) ((List.range k).reverse.map Expr.bvar).toArray
+  | _, _ => false
 
 /-- The equation Lean proves for the definition `c` by recursion (`Lean.Meta.getUnfoldEqnFor?`),
 `c.eq_def`, and its statement, `∀ x₁ … xₙ, c x₁ … xₙ = r`, with the universe parameters `levels`
@@ -747,8 +763,10 @@ followed through its equation. Each pass but the last adds the equation of a dec
 environment, so there are finitely many. -/
 def definitions (R : Reader) (roots : List Name) (shown : NameSet) : MetaM String := do
   let own := R.own
+  let env₀ ← getEnv
+  let limit := env₀.constants.map₂.foldl (fun k _ _ => k + 1) env₀.constants.map₁.size + 1
   let mut eqns : NameMap (Name × Expr) := {}
-  repeat
+  for _ in [0 : limit] do
     let env ← getEnv
     let lookup := fun c => (env.setExporting false).find? c
     let stop := stopAt env own shown
@@ -786,7 +804,7 @@ def definitions (R : Reader) (roots : List Name) (shown : NameSet) : MetaM Strin
           one, the same in every rendering that reaches them." library
     for (c, ci) in todo do
       eqns := eqns.insert c (← unfoldEqn c ci.levelParams)
-  throwError "unreachable: the loop returns when no equation is left to find"
+  throwError "cannot print the definitions: unfolding equations exceeded constant bound"
 
 /-- The kind of a consequence, `e` reduced to its constructor, and what it is shown as. -/
 def kindWords (e : Expr) : MetaM (Expr × String) := do
@@ -823,7 +841,7 @@ what they do not establish of the family they come from, `f`. -/
 
 /-- One binder of a generic explanation, `x`, written as a binder is, by the reader. -/
 def binderText (R : Reader) (x : Expr) : MetaM String := do
-  let d ← x.fvarId!.getDecl
+  let d ← fvarDecl x
   let type ← R.print d.type
   let (l, r) := match d.binderInfo with
     | .default => ("(", ")")
@@ -860,11 +878,11 @@ what the record's values are, when they need saying. -/
 def recordPart (R : Reader) (exTerm : Expr) (note : String := "") (statuses : Statuses := .recorded) :
     MetaM (String × List Name × NameSet) := do
   let ex ← ctorArgs exTerm ``Explanation.mk 11
-  let r ← ctorArgs ex[1]! ``IntentRecord.mk 5
-  let restatement ← readRestatement ex[6]!
-  let note := match ex[1]!.getAppFn with
+  let r ← ctorArgs ex[1] ``IntentRecord.mk 5
+  let restatement ← readRestatement ex[6]
+  let note := match ex[1].getAppFn with
     | .const f _ =>
-      if note.isEmpty && R.form == Form.readable && R.params.isEmpty && ex[1]!.isApp &&
+      if note.isEmpty && R.form == Form.readable && R.params.isEmpty && ex[1].isApp &&
           f != ``IntentRecord.mk then instanceNote f else note
     | _ => note
   let confirmedPart (intro words : String) : String × String :=
@@ -877,17 +895,17 @@ def recordPart (R : Reader) (exTerm : Expr) (note : String := "") (statuses : St
     | .omitted => ("", "")
     | .given words _ => confirmedPart "Who settled each thing is printed as the project's owners' \
         log holds it for this revision." words
-  let mut doc := s!"# The intent record {← R.print ex[1]!}\n\n{formWords R} The plain words after \
+  let mut doc := s!"# The intent record {← R.print ex[1]}\n\n{formWords R} The plain words after \
     it are written by a model and are trusted, not proved.{standing}\n\n{note}\
     {← paramsPart R}{confirmed}## Shape\n\n"
-  let mut printed : Array Expr := #[ex[1]!]
+  let mut printed : Array Expr := #[ex[1]]
   for x in R.params do
-    printed := printed.push (← x.fvarId!.getDecl).type
-  doc := doc ++ statement "The subject" (← R.print r[1]!) (← readGloss ex[2]!)
-  printed := printed.push r[1]!
+    printed := printed.push (← fvarDecl x).type
+  doc := doc ++ statement "The subject" (← R.print r[1]) (← readGloss ex[2])
+  printed := printed.push r[1]
   for (title, items, glosses, ctor) in
-      [("Domain hypotheses", r[2]!, ex[3]!, ``Clause.mk), ("Properties", r[3]!, ex[4]!, ``Clause.mk),
-        ("Vocabulary", r[4]!, ex[5]!, ``Pred.mk)] do
+      [("Domain hypotheses", r[2], ex[3], ``Clause.mk), ("Properties", r[3], ex[4], ``Clause.mk),
+        ("Vocabulary", r[4], ex[5], ``Pred.mk)] do
     let items ← listElems items
     let glosses ← listElems glosses
     unless items.size == glosses.size do
@@ -897,16 +915,16 @@ def recordPart (R : Reader) (exTerm : Expr) (note : String := "") (statuses : St
     for (item, gloss) in items.zip glosses do
       let a ← ctorArgs item ctor 3
       if ctor == ``Pred.mk then
-        let heading := s!"{← strLit a[0]!}, a predicate over `{← R.print a[1]!}`"
-        doc := doc ++ statement heading (← R.print a[2]!) (← readGloss gloss)
-        printed := printed ++ #[a[1]!, a[2]!]
+        let heading := s!"{← strLit a[0]}, a predicate over `{← R.print a[1]}`"
+        doc := doc ++ statement heading (← R.print a[2]) (← readGloss gloss)
+        printed := printed ++ #[a[1], a[2]]
       else
-        doc := doc ++ statement (← strLit a[1]!) (← R.print a[2]!) (← readGloss gloss)
-        printed := printed.push a[2]!
+        doc := doc ++ statement (← strLit a[1]) (← R.print a[2]) (← readGloss gloss)
+        printed := printed.push a[2]
   doc := doc ++ match statuses with
     | .omitted => "## Consequences\n\n"
     | _ => "## Consequences, each with who settled it\n\n"
-  let consequences ← listElems ex[7]!
+  let consequences ← listElems ex[7]
   if consequences.isEmpty then doc := doc ++ "None.\n\n"
   if let .given _ words := statuses then
     unless words.size == consequences.size do
@@ -914,16 +932,19 @@ def recordPart (R : Reader) (exTerm : Expr) (note : String := "") (statuses : St
   for h : i in [:consequences.size] do
     let shown := consequences[i]
     let s ← ctorArgs shown ``Shown.mk 7
-    let c ← ctorArgs s[3]! ``Consequence.mk 4
-    let (_, shownAs) ← kindWords c[2]!
+    let c ← ctorArgs s[3] ``Consequence.mk 4
+    let (_, shownAs) ← kindWords c[2]
     let settled ← match statuses with
-      | .recorded => pure s!"- **Settled:** {String.ofList (← readSettled restatement s[6]!).words}"
+      | .recorded => pure s!"- **Settled:** {String.ofList (← readSettled restatement s[6]).words}"
       | .omitted => pure ""
-      | .given _ words => pure s!"- **Settled:** {words[i]!}"
-    doc := doc ++ statement s!"{← strLit c[1]!}, {shownAs}" (← R.print c[3]!) (← readGloss s[5]!)
+      | .given _ words =>
+        let some w := words[i]?
+          | throwError "{consequences.size} consequences and words for {words.size}"
+        pure s!"- **Settled:** {w}"
+    doc := doc ++ statement s!"{← strLit c[1]}, {shownAs}" (← R.print c[3]) (← readGloss s[5])
       settled
-    printed := printed.push c[3]!
-  let shown : NameSet := if let .const c _ := ex[1]!.getAppFn then ({} : NameSet).insert c else {}
+    printed := printed.push c[3]
+  let shown : NameSet := if let .const c _ := ex[1].getAppFn then ({} : NameSet).insert c else {}
   let roots := printed.toList.flatMap (exprRefs · []) ++ [``IntentRecord.Meets] ++
     if consequences.isEmpty then [] else [``Consequence.HoldsOf]
   return (doc, roots, shown)
@@ -936,7 +957,10 @@ def notationPart (R : Reader) : MetaM String := do
   let env ← getEnv
   let lines := kinds.map fun k =>
     match env.getModuleIdxFor? k with
-    | some idx => s!"- `{k}`, declared in {env.header.modules[idx.toNat]!.module}\n"
+    | some idx =>
+      match env.header.modules[idx.toNat]? with
+      | some md => s!"- `{k}`, declared in {md.module}\n"
+      | none => s!"- `{k}`, declared in unknown module index {idx.toNat}\n"
     | none => s!"- `{k}`, declared in the file that made this text\n"
   return s!"## Notation from outside Lean's own libraries\n\nThe statements above use this notation, \
     whose declaration this text does not print. Lean read each statement back as the term its \
@@ -992,7 +1016,7 @@ def renderAt (decl : Name) (us : List Level) (args : Array Expr) : MetaM String 
     fun params _ => do
       unless params.size == args.size do
         throwError "{decl} takes {params.size} parameters here, and was given {args.size}"
-      params.mapM fun x => return (← x.fvarId!.getDecl).userName.eraseMacroScopes
+      params.mapM fun x => return (← fvarDecl x).userName.eraseMacroScopes
   let mut lines : Array String := #[]
   let mut roots : List Name := []
   for (name, a) in binders.zip args do
@@ -1042,19 +1066,21 @@ later revision, each printed in full by one call of `definitions`; and the toolc
 naming what cannot be printed, when any of it cannot be. -/
 def answerText (ex : Name) (a : Expr) : MetaM String := do
   let attributed ← ctorArgs a ``Attributed.mk 3
-  let answerer ← readAnswerer attributed[2]!
-  let ans ← ctorArgs attributed[1]! ``Answer.mk 3
-  let c ← ctorArgs ans[1]! ``Consequence.mk 4
-  let aus := (← readWhnf attributed[1]!).getAppFn.constLevels!
-  let cus := (← readWhnf ans[1]!).getAppFn.constLevels!
-  let name ← readWhnf c[1]!
+  let answerer ← readAnswerer attributed[2]
+  let ans ← ctorArgs attributed[1] ``Answer.mk 3
+  let c ← ctorArgs ans[1] ``Consequence.mk 4
+  let .const _ aus := (← readWhnf attributed[1]).getAppFn
+    | throwError "expected `Answer.mk` constant head"
+  let .const _ cus := (← readWhnf ans[1]).getAppFn
+    | throwError "expected `Consequence.mk` constant head"
+  let name ← readWhnf c[1]
   unless name matches .lit (.strVal _) do
     throwError "expected a string literal, found{indentExpr name}"
-  let (kind, shownAs) ← kindWords c[2]!
-  let verdict ← readWhnf ans[2]!
+  let (kind, shownAs) ← kindWords c[2]
+  let verdict ← readWhnf ans[2]
   let attribution := answerer.says (← readVerdict verdict)
-  let term := mkApp3 (.const ``Answer.mk aus) ans[0]!
-    (mkApp4 (.const ``Consequence.mk cus) c[0]! name kind c[3]!) verdict
+  let term := mkApp3 (.const ``Answer.mk aus) ans[0]
+    (mkApp4 (.const ``Consequence.mk cus) c[0] name kind c[3]) verdict
   let answer := s!"# {answerer.title}\n\n{String.ofList attribution}\nThe consequence \
     answered is {repr (← strLit name)}, shown as {shownAs}. Who gave the answer is printed as this \
     record holds it; `LeanIntent.Trace` decides, from a project's owners' log, whether its \

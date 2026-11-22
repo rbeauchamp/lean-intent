@@ -170,20 +170,20 @@ def constName (e : Expr) (what : String) : MetaM Name := do
 /-- The question of the consequence `c`, a term of type `LeanIntent.Consequence W`. -/
 def questionOf (c : Expr) : MetaM Question := do
   let args ← ctorArgs c ``Consequence.mk 4
-  let (kind, _) ← kindWords args[2]!
-  return ⟨← strLit args[1]!,
+  let (kind, _) ← kindWords args[2]
+  return ⟨← strLit args[1],
     if kind.isConstOf ``Consequence.Kind.entailment then .entailment else .possibility,
-    ← consequenceText args[3]!⟩
+    ← consequenceText args[3]⟩
 
 /-- The kept answer of `a`, a term of type `LeanIntent.Attributed W`. -/
 def keptOf (a : Expr) : MetaM (Question × Verdict × Answerer) := do
   let attributed ← ctorArgs a ``Attributed.mk 3
-  let args ← ctorArgs attributed[1]! ``Answer.mk 3
-  return (← questionOf args[1]!, ← readVerdict args[2]!, ← readAnswerer attributed[2]!)
+  let args ← ctorArgs attributed[1] ``Answer.mk 3
+  return (← questionOf args[1], ← readVerdict args[2], ← readAnswerer attributed[2])
 
-def deliverableParts (decl : Name) : MetaM (Name × Name × Array Expr) := do
+def deliverableParts (decl : Name) : MetaM (Name × Name × Vector Expr 5) := do
   let d ← ctorArgs (← constOf decl) ``Deliverable.mk 5
-  return (← constName d[1]! s!"the record of {decl}", ← constName d[2]! s!"the explanation of {decl}",
+  return (← constName d[1] s!"the record of {decl}", ← constName d[2] s!"the explanation of {decl}",
     d)
 
 /-- The current revision of the deliverable `decl`, a definition of type `LeanIntent.Deliverable W`,
@@ -191,17 +191,17 @@ as the build shows it. An error, naming what cannot be read or printed, when any
 def revisionOf (decl : Name) : MetaM Revision := do
   let (record, explanation, d) ← deliverableParts decl
   let ex ← ctorArgs (← constOf explanation) ``Explanation.mk 11
-  let standing ← readRestatement ex[6]!
-  let shown ← (← listElems ex[7]!).mapM fun e => do
+  let standing ← readRestatement ex[6]
+  let shown ← (← listElems ex[7]).mapM fun e => do
     let s ← ctorArgs e ``Shown.mk 7
-    return (← questionOf s[3]!, ← readSettled standing s[6]!)
-  let kept ← (← listElems d[3]!).mapM keptOf
+    return (← questionOf s[3], ← readSettled standing s[6])
+  let kept ← (← listElems d[3]).mapM keptOf
   return ⟨record.toString, ← revisionText explanation, standing, shown.toList, kept.toList⟩
 
 /-- The texts of the owners' log `decl`, a definition of type `LeanIntent.OwnersLog`. -/
 def logTexts (decl : Name) : MetaM (List String) := do
   let args ← ctorArgs (← constOf decl) ``OwnersLog.mk 1
-  return (← (← listElems args[0]!).mapM strLit).toList
+  return (← (← listElems args[0]).mapM strLit).toList
 
 /-- The statements of the project's one owners' log among `mods`, or what is wrong. -/
 def projectLog (mods : Array Name) : MetaM (Except (List Finding) (List String)) := do
@@ -214,9 +214,9 @@ def projectLog (mods : Array Name) : MetaM (Except (List Finding) (List String))
 of the restatement, or an answer, or a derived consequence. -/
 def explanationClaims (ex : Name) : MetaM Bool := do
   let args ← ctorArgs (← constOf ex) ``Explanation.mk 11
-  let standing ← readRestatement args[6]!
-  let claims ← (← listElems args[7]!).mapM fun e => do
-    return (← readSettled standing (← ctorArgs e ``Shown.mk 7)[6]!) matches .answered .. | .derived
+  let standing ← readRestatement args[6]
+  let claims ← (← listElems args[7]).mapM fun e => do
+    return (← readSettled standing (← ctorArgs e ``Shown.mk 7)[6]) matches .answered .. | .derived
   return standing != .unconfirmed || claims.any id
 
 /-- The answers the constant `decl` holds, of type `LeanIntent.Attributed W` or a list of them. -/
@@ -232,8 +232,8 @@ def undeclaredIn (mods decls : Array Name) (revs : Array Revision) : MetaM (List
     return !held.contains e && (← explanationClaims e)
   let answers ← declaredWhere mods fun t => do
     if t.getAppFn.isConstOf ``Attributed then return true
-    unless t.isAppOfArity ``List 1 do return false
-    return (← readWhnf t.appArg!).getAppFn.isConstOf ``Attributed
+    let .app (.const ``List _) arg := t | return false
+    return (← readWhnf arg).getAppFn.isConstOf ``Attributed
   let strayAnswers ← answers.filterM fun a =>
     return (← attributedOf a).any fun x => !kept.contains x
   return (explanations ++ strayAnswers).toList.map toString

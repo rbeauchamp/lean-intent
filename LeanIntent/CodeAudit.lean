@@ -238,16 +238,17 @@ other modules, as `env`'s header records each module's imports. -/
     for imp in env.header.moduleData[i].imports do
       if let some j := env.getModuleIdx? imp.module then
         importedBy := importedBy.insert j.toNat ((importedBy.getD j.toNat #[]).push i)
-  let mut found : Std.HashSet Nat := {}
+  let mut found : Std.HashSet Nat := ({} : Std.HashSet Nat).insert m.toNat
   let mut work := [m.toNat]
-  repeat
+  for _ in [0 : env.header.moduleData.size + 1] do
     match work with
     | [] => break
     | i :: rest =>
       work := rest
-      unless found.contains i do
-        found := found.insert i
-        work := (importedBy.getD i #[]).toList ++ work
+      for next in importedBy.getD i #[] do
+        unless found.contains next do
+          found := found.insert next
+          work := next :: work
   return found
 
 /-- Whether the declaration `c` of `env` can hold an attestation: its module is one of `mods`, or it
@@ -392,23 +393,33 @@ def audit (first : Name) (rest : List Name) : MetaM Outcome := do
   let relevant := relevantIn env (importers env m)
   let exempt := generatedBy env ``Ty.Stands
   let lookup := lookupIn env
+  let baseConsts := (env.setExporting false).constants
+  let constBound := baseConsts.map₂.foldl (fun k _ _ => k + 1) baseConsts.map₁.size
   let mut visited : Std.HashSet Name := {}
   let mut refs : Std.HashMap Name (List Name) := {}
   let mut candidates : Array (Name × ConstantInfo) := #[]
-  let mut work := first :: rest
-  repeat
+  let mut initial : Array Name := #[]
+  for c in first :: rest do
+    if !visited.contains c && (lookup c).isSome then
+      visited := visited.insert c
+      initial := initial.push c
+  let mut work := initial.toList
+  for _ in [0 : constBound] do
     match work with
     | [] => break
-    | c :: rest =>
-      work := rest
-      unless visited.contains c do
-        visited := visited.insert c
-        if let some ci := lookup c then
-          let ds := follow relevant ci
-          refs := refs.insert c ds
-          work := ds ++ work
-          if relevant c && !exempt c && applies ctor ci then
-            candidates := candidates.push (c, ci)
+    | c :: tl =>
+      work := tl
+      if let some ci := lookup c then
+        let ds := follow relevant ci
+        refs := refs.insert c ds
+        let mut push : Array Name := #[]
+        for d in ds do
+          if !visited.contains d && (lookup d).isSome then
+            visited := visited.insert d
+            push := push.push d
+        work := push.toList ++ work
+        if relevant c && !exempt c && applies ctor ci then
+          candidates := candidates.push (c, ci)
   let mut verified : Std.HashSet Name := {}
   let mut refused : Array (Name × Option String × String) := #[]
   for (c, ci) in candidates do
@@ -431,16 +442,19 @@ def audit (first : Name) (rest : List Name) : MetaM Outcome := do
           dependents := dependents.insert d (c :: dependents.getD d [])
   let mut findings := #[]
   for (c, ty, why) in refused do
-    let mut seen : Std.HashSet Name := {}
+    let mut seen : Std.HashSet Name := ({} : Std.HashSet Name).insert c
     let mut up := [c]
-    repeat
+    for _ in [0 : visited.size] do
       match up with
       | [] => break
-      | d :: rest =>
-        up := rest
-        unless seen.contains d do
-          seen := seen.insert d
-          up := dependents.getD d [] ++ up
+      | d :: tl =>
+        up := tl
+        let mut push : Array Name := #[]
+        for p in dependents.getD d [] do
+          unless seen.contains p do
+            seen := seen.insert p
+            push := push.push p
+        up := push.toList ++ up
     let mut carriers := #[]
     for d in seen.toArray.qsort Name.lt do
       if let some ci := lookup d then

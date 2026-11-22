@@ -30,4 +30,4 @@ Two verification readers bridge compiled Lean/Lake artifacts into pure proved de
 ## Consequences
 
 - Toolchain upgrades (#80) must re-check `ReduceArity.lean` line 172 and `Init/Data/ToString/Name.lean` lines 55–64.
-- Fixing `Execution.Read.reachesIn`'s arbitrary `2 ^ 64` fuel and `executableIn`'s environment mismatch is tracked in #87; distinguishing dependency packages via `Environment.getModulePackageByIdx?` is tracked in #78.
+- Proving `Within` for `Execution.Read.reachesIn`'s `table.size + 1` bound and resolving `executableIn`'s environment mismatch is tracked in #87; distinguishing dependency packages via `Environment.getModulePackageByIdx?` is tracked in #78.

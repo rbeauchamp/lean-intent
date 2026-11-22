@@ -126,29 +126,34 @@ open Lean Meta LeanIntent.Render LeanIntent.Confirmation.Read
 
 /-- The name `e` reduces to, through the kernel: `Name.anonymous`, or `Name.str` or `Name.num`
 applied to a name and a literal. An error when it reduces to anything else. -/
-partial def nameLit (e : Expr) : MetaM Name := do
-  let e ← readWhnf e
-  if e.isConstOf ``Name.anonymous then
-    return .anonymous
-  else if e.isAppOfArity ``Name.str 2 then
-    return .str (← nameLit e.appFn!.appArg!) (← strLit e.appArg!)
-  else if e.isAppOfArity ``Name.num 2 then
-    match ← readWhnf e.appArg! with
-    | .lit (.natVal n) => return .num (← nameLit e.appFn!.appArg!) n
-    | n => throwError "expected a natural number literal, found{indentExpr n}"
-  else throwError "expected a name, found{indentExpr e}"
+def nameLit (e : Expr) : MetaM Name :=
+  go (2 ^ 64) e
+where
+  go : Nat → Expr → MetaM Name
+    | 0, _ => throwError "name has more than 2 ^ 64 components"
+    | fuel + 1, e => do
+      let e ← readWhnf e
+      match e with
+      | .const ``Name.anonymous _ => return .anonymous
+      | .app (.app (.const ``Name.str _) parent) s =>
+        return .str (← go fuel parent) (← strLit s)
+      | .app (.app (.const ``Name.num _) parent) n =>
+        match ← readWhnf n with
+        | .lit (.natVal k) => return .num (← go fuel parent) k
+        | n' => throwError "expected a natural number literal, found{indentExpr n'}"
+      | _ => throwError "expected a name, found{indentExpr e}"
 
 /-- What the build shows of the value `decl`, a constant whose type reduces to `Runs d`: the
 deliverable its type names, where that is a constant, and the executable it names. An error when
 its value does not reduce to `Runs.mk`'s application, or the executable to a name. -/
 def claimOf (decl : Name) : MetaM Claim := do
   let t ← readWhnf (← getConstInfo decl).type
-  unless t.isAppOfArity ``Runs 2 do
-    throwError "the type of {decl} is not `LeanIntent.Runs` applied to a deliverable"
+  let .app (.app (.const ``Runs _) _) d := t
+    | throwError "the type of {decl} is not `LeanIntent.Runs` applied to a deliverable"
   let args ← ctorArgs (← Confirmation.Read.constOf decl) ``Runs.mk 3
-  let executable ← try nameLit args[2]! catch e =>
+  let executable ← try nameLit args[2] catch e =>
     throwError "the executable {decl} names is not read as a name: {e.toMessageData}"
-  return ⟨decl, Implementation.Read.constOf? t.appArg!, executable⟩
+  return ⟨decl, Implementation.Read.constOf? d, executable⟩
 
 /-- The values of `Runs d` the modules `mods` declare, as the build shows them. -/
 def claims (mods : Array Name) : MetaM (Array Claim) := do
@@ -161,16 +166,23 @@ def claims (mods : Array Name) : MetaM (Array Claim) := do
   | .ctor .. | .reset .. | .reuse .. | .proj .. | .uproj .. | .sproj .. | .ap .. | .box ..
   | .unbox .. | .lit .. | .isShared .. => []
 
+mutual
+
 /-- The declarations the IR body `b` calls or makes a closure of, in each of its instructions, join
 points and alternatives. -/
-partial def bodyRefs : IR.FnBody → List Name
+@[expose] def bodyRefs : IR.FnBody → List Name
   | .vdecl _ _ e b => exprRefs e ++ bodyRefs b
   | .jdecl _ _ v b => bodyRefs v ++ bodyRefs b
   | .set _ _ _ b | .setTag _ _ b | .uset _ _ _ b | .sset _ _ _ _ _ b | .inc _ _ _ _ b
   | .dec _ _ _ _ b | .del _ b => bodyRefs b
-  | .case _ _ _ cs => cs.toList.flatMap fun
-    | .ctor _ b | .default b => bodyRefs b
+  | .case _ _ _ cs => altsRefs cs.toList
   | .ret _ | .jmp _ _ | .unreachable => []
+
+@[expose] def altsRefs : List IR.Alt → List Name
+  | [] => []
+  | .ctor _ b :: rest | .default b :: rest => bodyRefs b ++ altsRefs rest
+
+end
 
 /-- The declarations that the IR the build stored for `n`, as Lean finds it (`IR.findEnvDecl`),
 calls or makes a closure of: none where Lean finds no IR for `n`, or where its IR declares it
@@ -189,16 +201,17 @@ call a declaration of `m`. -/
     for imp in (env.header.moduleData[i]?.map (·.imports)).getD #[] do
       importers := importers.insert imp.module
         ((importers.getD imp.module #[]).push mods[i].module)
-  let mut found : Std.HashSet Name := {}
+  let mut found : Std.HashSet Name := ({} : Std.HashSet Name).insert m
   let mut work := [m]
-  repeat
+  for _ in [0 : mods.size + 1] do
     match work with
     | [] => break
     | n :: rest =>
       work := rest
-      unless found.contains n do
-        found := found.insert n
-        work := (importers.getD n #[]).toList ++ work
+      for next in importers.getD n #[] do
+        unless found.contains next do
+          found := found.insert next
+          work := next :: work
   return found
 
 /-- The module of `env` that `n` belongs to, where `env` imports it: the module that declares the
@@ -211,24 +224,31 @@ def reachesIn (c : Implementation.Constant) : CoreM Bool := do
   let env ← getEnv
   unless importedModuleOf env c.name == some c.module do return false
   let up := importersOf env c.module
+  let inCone (n : Name) : Bool := (importedModuleOf env n).any up.contains
+  unless inCone `main do return false
   let code (n : Name) : List Name :=
     if n != c.name && isCompiledCodeOf (env.contains ·) c.name n && (IR.findEnvDecl env n).isSome
     then [c.name] else []
   let mut table : Std.HashMap Name (List Name) := {}
+  let mut queued : Std.HashSet Name := ({} : Std.HashSet Name).insert `main
   let mut work := [`main]
-  repeat
+  for _ in [0 : env.const2ModIdx.size + 1] do
     match work with
     | [] => break
     | n :: rest =>
       work := rest
-      unless table.contains n do
-        let refs := if (importedModuleOf env n).any up.contains then irRefs env n ++ code n else []
-        table := table.insert n refs
-        work := refs ++ work
-  match reach (fun n => table.getD n []) `main c.name (2 ^ 64) with
+      let refs := (irRefs env n ++ code n).filter inCone
+      table := table.insert n refs
+      let mut push : Array Name := #[]
+      for r in refs do
+        unless queued.contains r do
+          queued := queued.insert r
+          push := push.push r
+      work := push.toList ++ work
+  match reach (fun n => table.getD n []) `main c.name (table.size + 1) with
   | .reached => return true
   | .unreached => return false
-  | .exhausted => throwError "`main` reaches more than 2 ^ 64 declarations"
+  | .exhausted => throwError "`main` reaches more than {table.size + 1} declarations"
 
 def executableIn (env : Environment) (name root : Name) (targets : List Implementation.Constant) :
     CoreM Executable := do

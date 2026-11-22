@@ -210,20 +210,20 @@ def ctors (indVal : InductiveVal) (xs : Array Expr) : TermElabM (List Ctor) := d
   let us := indVal.levelParams.map fun _ => Level.zero
   indVal.ctors.mapM fun c => do
     let info ← getConstInfoCtor c
-    let mut type ← instantiateForall (info.type.instantiateLevelParams info.levelParams us) xs
-    let mut fields := #[]
-    repeat
-      match type with
-      | .forallE n t b _ =>
-        let t := t.cleanupAnnotations
-        if b.hasLooseBVars then
-          throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: the type of a field after `{n}` of `{.ofConstName c}` depends on `{n}`"
-        unless ← isType0 (← inferType t) do
-          throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: the field `{n}` of `{.ofConstName c}` has type `{t}`, which is not a type of `Type`"
-        fields := fields.push (n, t)
-        type := b
-      | _ => break
-    return { name := c, fields }
+    let type ← instantiateForall (info.type.instantiateLevelParams info.levelParams us) xs
+    return { name := c, fields := ← ctorFields indVal.name c type #[] }
+where
+  ctorFields (indName ctorName : Name) (type : Expr) (fields : Array (Name × Expr)) :
+      TermElabM (Array (Name × Expr)) := do
+    match type with
+    | .forallE n t b _ =>
+      let t := t.cleanupAnnotations
+      if b.hasLooseBVars then
+        throwError "LeanIntent.HasCode: `{.ofConstName indName}` is not covered: the type of a field after `{n}` of `{.ofConstName ctorName}` depends on `{n}`"
+      unless ← isType0 (← inferType t) do
+        throwError "LeanIntent.HasCode: `{.ofConstName indName}` is not covered: the field `{n}` of `{.ofConstName ctorName}` has type `{t}`, which is not a type of `Type`"
+      ctorFields indName ctorName b (fields.push (n, t))
+    | _ => return fields
 
 /-- The code of the declaration `indVal` with parameters `xs` and constructors `cs`: `Ty.decl` of
 its name, its parameters' chain and its representation, where the code of each parameter, and then
@@ -294,6 +294,9 @@ structure GCtor where
 /-- Whether no field of the constructor holds a value of a type of the group. -/
 @[expose] def GCtor.isBase (c : GCtor) : Bool := !c.fields.any GField.isRef
 
+def containsAnyExprFVar (e : Expr) (xs : Array Expr) : Bool :=
+  xs.any fun x => match x.fvarId? with | some id => e.containsFVar id | none => false
+
 /-- The types of the group of the declaration `indVal`, with the parameters `xs`, and their
 constructors, as the declaration's recursor presents them: one type for each motive of the recursor,
 the types the declaration declares and then those its nested occurrences make, such as `List T`;
@@ -311,9 +314,10 @@ def readGroup (indVal : InductiveVal) (xs : Array Expr) : TermElabM (Array (Expr
     let mut sorts : Array Expr := #[]
     for m in motives do
       let s ← forallTelescope (← inferType m) fun as _ => do
-        unless as.size == 1 do
+        if h : as.size = 1 then
+          inferType as[0]
+        else
           notCovered m!"a type of its group, nested or declared, is an inductive family with indices"
-        inferType as[0]!
       unless ← isType0 (← inferType s) do
         notCovered m!"the type `{s}` of its group does not live in `Type`"
       sorts := sorts.push s
@@ -323,38 +327,42 @@ def readGroup (indVal : InductiveVal) (xs : Array Expr) : TermElabM (Array (Expr
         let (k, ctor) ← forallTelescope (← inferType minor) fun args concl => do
           let some k := motives.idxOf? concl.getAppFn
             | notCovered m!"a minor premise of its recursor is not about a motive"
-          let .const cname _ := concl.appArg!.getAppFn
+          let .app _ conclArg := concl
+            | notCovered m!"a minor premise of its recursor is not about a constructor"
+          let .const cname _ := conclArg.getAppFn
             | notCovered m!"a minor premise of its recursor is not about a constructor"
           let cinfo ← getConstInfoCtor cname
           let rule : RecursorRule := { ctor := cname, nfields := cinfo.numFields, rhs := default }
           let fs := args.extract 0 rule.nfields
-          let mut refs : Array (Option (Nat × Array Expr)) := fs.map fun _ => none
+          let mut refs : Vector (Option (Nat × Array Expr)) fs.size := Vector.replicate fs.size none
           for ih in args.extract rule.nfields args.size do
             let (fi, r) ← forallTelescope (← inferType ih) fun ys body => do
               let some l := motives.idxOf? body.getAppFn
                 | notCovered m!"an induction hypothesis of `{.ofConstName rule.ctor}` is not about a motive"
-              let x := body.appArg!
-              let some fi := fs.idxOf? x.getAppFn
+              let .app _ x := body
                 | notCovered m!"an induction hypothesis of `{.ofConstName rule.ctor}` is not about a field"
+              let some fi := fs.finIdxOf? x.getAppFn
+                | notCovered m!"an induction hypothesis of `{.ofConstName rule.ctor}` is not about a field"
+              let field := fs[fi]
               unless x.getAppArgs == ys do
                 notCovered m!"a recursive field of `{.ofConstName rule.ctor}` is not applied to its arguments"
               let dom ← ys.mapM fun y => inferType y
-              if dom.any fun d => fs.any fun f => d.containsFVar f.fvarId! then
-                notCovered m!"an argument of the field `{fs[fi]!}` of `{.ofConstName rule.ctor}` depends on a field"
-              if dom.any fun d => ys.any fun y => d.containsFVar y.fvarId! then
-                notCovered m!"an argument of the field `{fs[fi]!}` of `{.ofConstName rule.ctor}` depends on an earlier argument"
+              if dom.any (containsAnyExprFVar · fs) then
+                notCovered m!"an argument of the field `{field}` of `{.ofConstName rule.ctor}` depends on a field"
+              if dom.any (containsAnyExprFVar · ys) then
+                notCovered m!"an argument of the field `{field}` of `{.ofConstName rule.ctor}` depends on an earlier argument"
               for d in dom do
                 unless ← isType0 (← inferType d) do
-                  notCovered m!"an argument of the field `{fs[fi]!}` of `{.ofConstName rule.ctor}` is not a type of `Type`"
+                  notCovered m!"an argument of the field `{field}` of `{.ofConstName rule.ctor}` is not a type of `Type`"
               return (fi, (l, dom))
-            refs := refs.set! fi (some r)
+            refs := refs.set fi (some r)
           let mut fields := #[]
           for h : fi in [0:fs.size] do
-            match refs[fi]! with
+            match refs[fi] with
             | some (l, dom) => fields := fields.push (.ref l dom)
             | none =>
               let t := (← inferType fs[fi]).cleanupAnnotations
-              if (fs.extract 0 fi).any fun f => t.containsFVar f.fvarId! then
+              if containsAnyExprFVar t (fs.extract 0 fi) then
                 notCovered m!"the type of the field `{fs[fi]}` of `{.ofConstName rule.ctor}` depends on an earlier field"
               unless ← isType0 (← inferType t) do
                 notCovered m!"the field `{fs[fi]}` of `{.ofConstName rule.ctor}` has type `{t}`, which is not a type of `Type`"
@@ -374,18 +382,20 @@ steps as the group has types; `none`, which the callers refuse, if it were not. 
   let mut seen : Array Bool := group.map fun _ => false
   let mut todo : List Nat := []
   for l in next i do
-    if !(seen[l]?.getD true) then
-      seen := seen.set! l true
-      todo := l :: todo
+    if hl : l < seen.size then
+      if !seen[l] then
+        seen := seen.set l true hl
+        todo := l :: todo
   for _ in [0:group.size] do
     match todo with
     | [] => return some seen
     | l :: rest =>
       todo := rest
       for m in next l do
-        if !(seen[m]?.getD true) then
-          seen := seen.set! m true
-          todo := m :: todo
+        if hm : m < seen.size then
+          if !seen[m] then
+            seen := seen.set m true hm
+            todo := m :: todo
   return if todo.isEmpty then some seen else none
 
 /-- Whether the `i`-th type of the group reaches itself (`reached`): `none`, which the caller
@@ -400,7 +410,8 @@ and otherwise the first type of the group, in the order of the recursor's motive
 has a value. -/
 @[expose] def rootOf (group : Array (Expr × Array GCtor)) (seen : Array Bool) (i : Nat) : Option Nat :=
   if (group[i]?.map (·.2.any GCtor.isBase)).getD false then some i
-  else (List.range group.size).find? fun l => seen[l]?.getD false && group[l]!.2.any GCtor.isBase
+  else (List.range group.size).find? fun l =>
+    seen[l]?.getD false && (group[l]?.map (·.2.any GCtor.isBase)).getD false
 
 /-- The representation of the `i`-th type of the recursive group `group`, `Ty.mu b g r i` where the
 type is its own root (`rootOf`) and otherwise `Ty.muAt b g r j i` for its root `j`, as its base `b`,
@@ -437,7 +448,9 @@ group with a constructor of the first kind, or that its root's base values do no
     | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: which types of its group it reaches was not settled"
   let some root := rootOf group seen i
     | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: it has no value, since each constructor of each type of its group that it reaches has a field that holds a value of a type of the group"
-  let bases := group[root]!.2.toList.filter GCtor.isBase
+  let some rootEntry := group[root]?
+    | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` has invalid root index {root}"
+  let bases := rootEntry.2.toList.filter GCtor.isBase
   let b := sumCode (← bases.mapM fun c => return chainCode (← dataCodes c))
   let others : List (List GCtor) := group.toList.mapIdx fun k (entry : Expr × Array GCtor) =>
     if k == root then entry.2.toList.filter fun c => !c.isBase else entry.2.toList
@@ -545,8 +558,14 @@ def checkRecMaps (group : Array (Expr × Array GCtor)) (root i : Nat) (f : Expr)
         let some inst ← instOf t | return none
         parts := parts.push (codeOf t inst, carry ``Iso.to t inst x)
     return some parts.toList
+  let iFin? : Option (Fin group.size) :=
+    if hi : i < group.size then some ⟨i, hi⟩ else none
+  let some iFin := iFin?
+    | return some "invalid group index"
+  let some rootEntry := group[root]?
+    | return some "invalid root index"
   let mut baseAlts := #[]
-  for c in group[root]!.2.filter GCtor.isBase do
+  for c in rootEntry.2.filter GCtor.isBase do
     let mut codes := #[]
     for fld in c.fields do
       if let .data t := fld then
@@ -559,55 +578,69 @@ def checkRecMaps (group : Array (Expr × Array GCtor)) (root i : Nat) (f : Expr)
     match Kernel.whnf (← getEnv) (← getLCtx) e with
     | .ok k => return k
     | .error _ => return w
-  let mut maps : Array (Option Expr) := group.map fun _ => none
-  maps := maps.set! i (some f)
-  let mut todo : List Nat := [i]
+  let mut maps : Vector (Option Expr) group.size := Vector.replicate group.size none
+  maps := maps.set iFin (some f)
+  let mut todo : List (Fin group.size) := [iFin]
   for _ in [0:group.size] do
     let k :: rest := todo | return none
     todo := rest
-    let some F := maps[k]! | return some "a map of the group is missing"
-    let (τ, cs) := group[k]!
+    let some F := maps[k] | return some "a map of the group is missing"
+    let (τ, cs) := group[k]
     let .const tName tUs := τ.getAppFn | return some s!"`{τ}` is not an inductive type applied to its parameters"
     let _ := tName
     let mut nb := 0
     let mut nn := 0
     for c in cs do
-      let isBase := k == root && c.isBase
-      let types ← c.fields.mapM fun
-        | .data t => pure t
-        | .ref l doms => doms.foldrM (fun d acc => mkArrow d acc) group[l]!.1
-      let outcome : Except String (Array (Nat × Expr)) ←
+      let isBase := k.1 == root && c.isBase
+      let mut types : Array Expr := #[]
+      for fld in c.fields do
+        match fld with
+        | .data t => types := types.push t
+        | .ref l doms =>
+          let some entry := group[l]?
+            | return some s!"invalid group index {l}"
+          types := types.push (← doms.foldrM (fun d acc => mkArrow d acc) entry.1)
+      let outcome : Except String (Array (Fin group.size × Expr)) ←
           withLocalDeclsDND (types.mapIdx fun j t => (Name.mkSimple s!"x{j}", t)) fun xs => do
         let lhs ← reduce (mkApp F (mkAppN (mkConst c.name tUs) (τ.getAppArgs ++ xs)))
         let some parts ← dataParts c xs | return .error s!"a field of `{c.name}` has no code"
         if isBase then
           unless lhs.isAppOfArity ``MuVal.base 8 do
             return .error s!"the map does not take `{c.name}` to a base value"
-          unless ← kernelEq lhs.appArg! (injExpr baseAlts.toList nb (chainExpr parts)) do
+          let .app _ baseVal := lhs
+            | return .error s!"the map does not take `{c.name}` to a base value"
+          unless ← kernelEq baseVal (injExpr baseAlts.toList nb (chainExpr parts)) do
             return .error s!"the map does not take `{c.name}` to base alternative {nb} holding its fields, each carried through its own type's isomorphism"
           return .ok #[]
         unless lhs.isAppOfArity ``MuVal.node 11 do
           return .error s!"the map does not take `{c.name}` to a node"
-        let args := lhs.getAppArgs
-        let (cE, d, kids) := (args[8]!, args[9]!, args[10]!)
+        let .app (.app (.app _ cE) d) kids := lhs
+          | return .error s!"the map does not take `{c.name}` to a node"
         let some nE := (← whnf (← inferType cE)).app1? ``Fin
           | return .error s!"the node of `{c.name}` has no constructor number"
         unless ← kernelEq (mkApp2 (mkConst ``Fin.val) nE cE) (mkNatLit nn) do
           return .error s!"the map does not take `{c.name}` to the node of constructor {nn}"
         unless ← kernelEq d (chainExpr parts) do
           return .error s!"the node of `{c.name}` does not hold its other fields, each carried through its own type's isomorphism"
-        let some aE := (← whnf (← inferType kids)).bindingDomain!.app1? ``Fin
+        let .forallE _ kidsDom _ _ ← whnf (← inferType kids)
+          | return .error s!"the children of `{c.name}` are not numbered"
+        let some aE := kidsDom.app1? ``Fin
           | return .error s!"the children of `{c.name}` are not numbered"
         let mut found := #[]
         let mut r := 0
         for (fld, x) in c.fields.zip xs do
           let .ref l doms := fld | continue
+          let lFin? : Option (Fin group.size) :=
+            if hl : l < group.size then some ⟨l, hl⟩ else none
+          let some lFin := lFin?
+            | return .error s!"invalid group index {l}"
           let lt := mkApp4 (mkConst ``LT.lt [Level.zero]) (mkConst ``Nat) (mkConst ``instLTNat)
             (mkNatLit r) aE
           let h := mkApp3 (mkConst ``of_decide_eq_true) lt (mkApp2 (mkConst ``Nat.decLt) (mkNatLit r) aE)
             (mkApp2 (mkConst ``Eq.refl [Level.one]) (mkConst ``Bool) (mkConst ``Bool.true))
           let pos := mkApp3 (mkConst ``Fin.mk) aE (mkNatLit r) h
-          let yTy := (← whnf (← inferType (mkApp kids pos))).bindingDomain!
+          let .forallE _ yTy _ _ ← whnf (← inferType (mkApp kids pos))
+            | return .error s!"the children of `{c.name}` take no element"
           let res : Except String (Option Expr) ← withLocalDeclD `y yTy fun y => do
             let mut argVals := #[]
             for h : q in [0:doms.size] do
@@ -620,7 +653,9 @@ def checkRecMaps (group : Array (Expr × Array GCtor)) (root i : Nat) (f : Expr)
               argVals := argVals.push (carry ``Iso.inv d inst v)
             let arg := mkAppN x argVals
             let child ← whnfR (mkApp2 kids pos y)
-            match maps[l]!, found.find? (·.1 == l) with
+            let some yId := y.fvarId?
+              | return .error s!"a child of `{c.name}` has no local variable"
+            match maps[lFin], found.find? (·.1 == lFin) with
             | some G, _ | none, some (_, G) =>
               return if ← kernelEq child (mkApp G arg) then .ok none
                 else .error s!"a child of `{c.name}` is not the map of its type at the field"
@@ -628,25 +663,27 @@ def checkRecMaps (group : Array (Expr × Array GCtor)) (root i : Nat) (f : Expr)
               if let some G ← candidate l then
                 return if ← kernelEq child (mkApp G arg) then .ok (some G)
                   else .error s!"a child of `{c.name}` is not the map of its type at the field"
-              unless child.isApp && (← kernelEq child.appArg! arg) do
+              let .app childFn childArg := child
+                | return .error s!"a child of `{c.name}` is not a map applied to the field"
+              unless ← kernelEq childArg arg do
                 return .error s!"a child of `{c.name}` is not a map applied to the field"
-              let G := child.appFn!
-              if G.hasAnyFVar fun v => v == y.fvarId! || xs.any (·.fvarId! == v) then
+              let G := childFn
+              if G.hasAnyFVar fun v => v == yId || xs.any (fun x => x.fvarId? == some v) then
                 return .error s!"a child of `{c.name}` is not a map of its type"
               return .ok (some G)
           match res with
           | .error why => return .error why
-          | .ok (some G) => found := found.push (l, G)
+          | .ok (some G) => found := found.push (lFin, G)
           | .ok none => pure ()
           r := r + 1
         return .ok found
       match outcome with
       | .error why => return some why
       | .ok found =>
-        for (l, G) in found do
-          if maps[l]!.isNone then
-            maps := maps.set! l (some G)
-            todo := todo ++ [l]
+        for (lFin, G) in found do
+          if maps[lFin].isNone then
+            maps := maps.set lFin (some G)
+            todo := todo ++ [lFin]
       if isBase then nb := nb + 1 else nn := nn + 1
   return if todo.isEmpty then none else some "the maps of the group were not all read"
 
@@ -659,7 +696,8 @@ def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String ×
   lambdaTelescope v.value fun binders body => do
     unless body.isAppOfArity ctor 5 do
       return (none, some "its value is not one application of the constructor under `fun` binders")
-    let #[α, n, ps, r, e] := body.getAppArgs | unreachable!
+    let .app (.app (.app (.app (.app _ α) n) ps) r) e := body
+      | return (none, some "its value is not one application of the constructor under `fun` binders")
     let ty := toString (← ppExpr α)
     let fail (why : String) : MetaM (Option String × Option String) := return (some ty, some why)
     let α' ← whnf α
@@ -743,16 +781,15 @@ def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String ×
     unless ← kernelEq given derived do
       return ← fail "Lean's kernel does not find its code to be the one the declaration fixes"
     let mut k := as.size
-    let mut chains : Array (List (Name × Expr × Expr)) := #[]
+    let mut chains : Array (Ctor × List (Name × Expr × Expr)) := #[]
     for c in cs do
-      chains := chains.push <| (c.fields.toList.zip (insts.extract k (k + c.fields.size)).toList).map
-        fun ((x, t), i) => (x, t, i)
+      chains := chains.push (c, (c.fields.toList.zip (insts.extract k (k + c.fields.size)).toList).map
+        fun ((x, t), i) => (x, t, i))
       k := k + c.fields.size
     let codeOf (t i : Expr) : Expr := mkApp2 (mkConst ``HasCode.code) t i
-    let alts := chains.toList.map fun fs => denoteE (chainCode (fs.map fun (_, t, i) => codeOf t i))
-    for h : j in [0:cs.length] do
-      let c := cs[j]
-      let fs := chains[j]!
+    let alts := chains.toList.map fun (_, fs) => denoteE (chainCode (fs.map fun (_, t, i) => codeOf t i))
+    for h : j in [0:chains.size] do
+      let (c, fs) := chains[j]
       let ok ← withLocalDeclsDND (fs.map fun (x, t, _) => (x, t)).toArray fun xs => do
         let lhs := mkApp4 (mkConst ``Iso.to) α (denoteE given) e
           (mkAppN (mkConst c.name us) (as ++ xs))
@@ -864,11 +901,13 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
       (chainCode ps) rep) false
     let fam ← withLocalDeclD `k (mkConst ``Nat) fun k => do
       let mut body := Lean.mkConst ``Empty
-      for j in (List.range group.size).reverse do
-        body ← mkAppOptM ``cond #[none, mkApp2 (mkConst ``Nat.beq) k (toExpr j), group[j]!.1, body]
+      for j in (List.finRange group.size).reverse do
+        body ← mkAppOptM ``cond #[none, mkApp2 (mkConst ``Nat.beq) k (toExpr (j : Nat)), group[j].1, body]
       mkLambdaFVars #[k] body
     addFun (act sortName) binders (← mkArrow (mkConst ``Nat) (mkSort Level.one)) fam false
-    let kb := (group[root]!.2.filter GCtor.isBase).size
+    let some rootEntry := group[root]?
+      | throwError "LeanIntent.HasCode: `{.ofConstName declName}` has invalid root index {root}"
+    let kb := (rootEntry.2.filter GCtor.isBase).size
     return (· , root) <| group.mapIdx fun k (entry : Expr × Array GCtor) => Id.run do
       let cs := entry.2
       let mut out : Array CtorPlan := #[]
@@ -884,7 +923,8 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
         out := out.push ⟨c.name, c.numParams, fields, role, p + 1⟩
       return out
   let K := plans.size
-  let nodes (k : Nat) : Nat := (plans[k]!.filter fun (c : CtorPlan) => c.role matches .node _).size
+  let nodes (k : Nat) (hk : k < plans.size := by get_elem_tactic) : Nat :=
+    (plans[k].filter fun (c : CtorPlan) => c.role matches .node _).size
   let binderStx ← liftTermElabM <| (List.range indVal.numParams).toArray.mapM fun _ => do
     return (mkIdent (← mkFreshUserName `α), mkIdent (← mkFreshUserName `inst))
   let binders ← binderStx.flatMapM fun (a, i) => do

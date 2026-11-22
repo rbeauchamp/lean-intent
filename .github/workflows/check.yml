@@ -6,9 +6,10 @@
 # Security & merge-base hardening: runs with read-only contents permissions, persist-credentials:
 # false, full Git history (fetch-depth: 0) with explicit `--base-ref` on pull_request
 # (`github.event.pull_request.base.sha`) and push (`github.event.before`) events for NO-COMMENTS
-# merge-base verification, a commit-SHA-pinned checkout action, and SHA-256 verification of both
-# the Lean release archive paired with lean-toolchain and the pinned no-comments binary paired with
-# tools/no-comments.pin (without running an unverified curl | sh installer).
+# merge-base verification, a commit-SHA-pinned checkout action, SHA-256 verification of both the
+# Lean release archive paired with lean-toolchain and the pinned no-comments binary paired with
+# tools/no-comments.pin (without running an unverified curl | sh installer), and exact release tag +
+# commit-SHA verification of out-of-tree Regula paired with tools/regula.pin.
 name: check
 
 on:
@@ -118,12 +119,87 @@ jobs:
           printf '%s  %s\n' "$pin_linux_sha256" "$RUNNER_TEMP/no-comments" | sha256sum --check --strict
           chmod 0755 "$RUNNER_TEMP/no-comments"
           echo "NO_COMMENTS_BIN=$RUNNER_TEMP/no-comments" >> "$GITHUB_ENV"
-      # LAKE-CONFIG, LEAN-BUILD, LEAN-MODULE, AXIOMS, PROCESS, CODES and NO-COMMENTS: no other
-      # package is required, every library module builds with no error and no warning, every Lean
-      # file is a `module` file, every declaration rests only on Lean's axioms, the library's
+      - name: Install and build Regula matching tools/regula.pin with commit verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f tools/regula.pin ] || [ -L tools/regula.pin ] || [ -L tools ]; then
+            echo "::error::tools/regula.pin must be a regular file with no symlink components"
+            exit 1
+          fi
+          seen_version=0
+          seen_commit=0
+          pin_version=""
+          pin_commit=""
+          while IFS= read -r line || [ -n "$line" ]; do
+            case "$line" in
+              *$'\r'*)
+                echo "::error::tools/regula.pin must use LF line endings"
+                exit 1
+                ;;
+              VERSION=*)
+                if [ "$seen_version" -ne 0 ]; then
+                  echo "::error::tools/regula.pin has duplicate VERSION key"
+                  exit 1
+                fi
+                seen_version=1
+                pin_version="${line#VERSION=}"
+                ;;
+              COMMIT=*)
+                if [ "$seen_commit" -ne 0 ]; then
+                  echo "::error::tools/regula.pin has duplicate COMMIT key"
+                  exit 1
+                fi
+                seen_commit=1
+                pin_commit="${line#COMMIT=}"
+                ;;
+              *)
+                echo "::error::tools/regula.pin contains unexpected line"
+                exit 1
+                ;;
+            esac
+          done < tools/regula.pin
+          if [ "$seen_version" -ne 1 ] || [ "$seen_commit" -ne 1 ]; then
+            echo "::error::tools/regula.pin is missing required keys"
+            exit 1
+          fi
+          if ! [[ "$pin_version" =~ ^v[A-Za-z0-9.-]+$ ]] || [[ "$pin_version" == *..* ]]; then
+            echo "::error::tools/regula.pin has invalid VERSION: $pin_version"
+            exit 1
+          fi
+          if ! [[ "$pin_commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::tools/regula.pin has invalid or missing COMMIT SHA"
+            exit 1
+          fi
+          if [ -L "$RUNNER_TEMP" ] || [ -e "$RUNNER_TEMP/regula" ] || [ -L "$RUNNER_TEMP/regula" ]; then
+            echo "::error::RUNNER_TEMP regula destination must not exist or be a symlink"
+            exit 1
+          fi
+          regula_dir="$RUNNER_TEMP/regula"
+          mkdir -p "$regula_dir"
+          git -C "$regula_dir" init --quiet
+          git -C "$regula_dir" fetch --quiet --depth 1 --no-tags -- \
+            https://github.com/rbeauchamp/regula.git "refs/tags/${pin_version}:refs/tags/${pin_version}"
+          actual_tag_commit="$(git -C "$regula_dir" rev-parse --verify --quiet --end-of-options "refs/tags/${pin_version}^{commit}")"
+          if [ "$actual_tag_commit" != "$pin_commit" ]; then
+            echo "::error::Regula tag ${pin_version} resolved to ${actual_tag_commit}, expected ${pin_commit}"
+            exit 1
+          fi
+          git -C "$regula_dir" checkout --quiet --detach "$pin_commit"
+          actual_head="$(git -C "$regula_dir" rev-parse --verify --quiet --end-of-options "HEAD^{commit}")"
+          if [ "$actual_head" != "$pin_commit" ] || [ -n "$(git -C "$regula_dir" status --porcelain=v1 -z --untracked-files=all)" ]; then
+            echo "::error::Regula checkout verification failed at ${pin_commit}"
+            exit 1
+          fi
+          (cd "$regula_dir" && lake build lint)
+          echo "REGULA_DIR=$regula_dir" >> "$GITHUB_ENV"
+      # LAKE-CONFIG, LEAN-BUILD, LEAN-MODULE, AXIOMS, PROCESS, CODES, NO-COMMENTS, and REGULA: no
+      # other package is required, every library module builds with no error and no warning, every
+      # Lean file is a `module` file, every declaration rests only on Lean's axioms, the library's
       # compiled code neither starts a process nor asks where it runs, no declaration depends on a
-      # declared type's code other than the one its deriving handler writes, and every tracked Lean
-      # file obeys the comment ratchet in tools/comment-ratchet.json.
+      # declared type's code other than the one its deriving handler writes, every tracked Lean file
+      # obeys the comment ratchet in tools/comment-ratchet.json, and out-of-tree Regula passes
+      # `standard-logical` proof-verdict checking.
       - name: Build the library and audit its axioms
         shell: bash
         env:
