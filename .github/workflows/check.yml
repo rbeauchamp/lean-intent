@@ -6,9 +6,9 @@
 # Security & merge-base hardening: runs with read-only contents permissions, persist-credentials:
 # false, full Git history (fetch-depth: 0) with explicit `--base-ref` on pull_request
 # (`github.event.pull_request.base.sha`) and push (`github.event.before`) events for NO-COMMENTS
-# merge-base verification, a commit-SHA-pinned checkout action, and SHA-256 verification of the
-# Lean release archive paired with the exact pin in lean-toolchain (without running an unverified
-# curl | sh installer).
+# merge-base verification, a commit-SHA-pinned checkout action, and SHA-256 verification of both
+# the Lean release archive paired with lean-toolchain and the pinned no-comments binary paired with
+# tools/no-comments.pin (without running an unverified curl | sh installer).
 name: check
 
 on:
@@ -46,6 +46,78 @@ jobs:
           echo "${sha256}  $RUNNER_TEMP/lean.zip" | sha256sum --check --strict
           unzip -q "$RUNNER_TEMP/lean.zip" -d "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/lean-${version}-linux/bin" >> "$GITHUB_PATH"
+      - name: Install no-comments matching tools/no-comments.pin with SHA-256 verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f tools/no-comments.pin ] || [ -L tools/no-comments.pin ] || [ -L tools ]; then
+            echo "::error::tools/no-comments.pin must be a regular file with no symlink components"
+            exit 1
+          fi
+          seen_version=0
+          seen_darwin=0
+          seen_linux=0
+          pin_version=""
+          pin_darwin_sha256=""
+          pin_linux_sha256=""
+          while IFS= read -r line || [ -n "$line" ]; do
+            case "$line" in
+              *$'\r'*)
+                echo "::error::tools/no-comments.pin must use LF line endings"
+                exit 1
+                ;;
+              VERSION=*)
+                if [ "$seen_version" -ne 0 ]; then
+                  echo "::error::tools/no-comments.pin has duplicate VERSION key"
+                  exit 1
+                fi
+                seen_version=1
+                pin_version="${line#VERSION=}"
+                ;;
+              DARWIN_ARM64_SHA256=*)
+                if [ "$seen_darwin" -ne 0 ]; then
+                  echo "::error::tools/no-comments.pin has duplicate DARWIN_ARM64_SHA256 key"
+                  exit 1
+                fi
+                seen_darwin=1
+                pin_darwin_sha256="${line#DARWIN_ARM64_SHA256=}"
+                ;;
+              LINUX_X86_64_SHA256=*)
+                if [ "$seen_linux" -ne 0 ]; then
+                  echo "::error::tools/no-comments.pin has duplicate LINUX_X86_64_SHA256 key"
+                  exit 1
+                fi
+                seen_linux=1
+                pin_linux_sha256="${line#LINUX_X86_64_SHA256=}"
+                ;;
+              *)
+                echo "::error::tools/no-comments.pin contains unexpected line"
+                exit 1
+                ;;
+            esac
+          done < tools/no-comments.pin
+          if [ "$seen_version" -ne 1 ] || [ "$seen_darwin" -ne 1 ] || [ "$seen_linux" -ne 1 ]; then
+            echo "::error::tools/no-comments.pin is missing required keys"
+            exit 1
+          fi
+          if ! [[ "$pin_version" =~ ^v[A-Za-z0-9.-]+$ ]] || [[ "$pin_version" == *..* ]]; then
+            echo "::error::tools/no-comments.pin has invalid VERSION: $pin_version"
+            exit 1
+          fi
+          if ! [[ "$pin_darwin_sha256" =~ ^[0-9a-f]{64}$ ]] || ! [[ "$pin_linux_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::tools/no-comments.pin has invalid or missing SHA-256 digest"
+            exit 1
+          fi
+          if [ -L "$RUNNER_TEMP" ] || [ -L "$RUNNER_TEMP/no-comments" ]; then
+            echo "::error::RUNNER_TEMP no-comments destination must not be a symlink"
+            exit 1
+          fi
+          curl -sSfL --proto '=https' --tlsv1.2 --connect-timeout 15 --retry 2 --retry-delay 2 \
+            -o "$RUNNER_TEMP/no-comments" \
+            "https://github.com/rbeauchamp/lean-no-comments/releases/download/${pin_version}/no-comments-linux-x86_64"
+          printf '%s  %s\n' "$pin_linux_sha256" "$RUNNER_TEMP/no-comments" | sha256sum --check --strict
+          chmod 0755 "$RUNNER_TEMP/no-comments"
+          echo "NO_COMMENTS_BIN=$RUNNER_TEMP/no-comments" >> "$GITHUB_ENV"
       # LAKE-CONFIG, LEAN-BUILD, LEAN-MODULE, AXIOMS, PROCESS, CODES and NO-COMMENTS: no other
       # package is required, every library module builds with no error and no warning, every Lean
       # file is a `module` file, every declaration rests only on Lean's axioms, the library's

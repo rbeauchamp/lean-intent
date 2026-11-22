@@ -1,0 +1,10 @@
+{
+  "workspaces": [
+    {
+      "dir": ".",
+      "toolPrefixes": ["tools/"]
+    }
+  ],
+  "exclude": [],
+  "ratchet": "tools/comment-ratchet.json"
+}
