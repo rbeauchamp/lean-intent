@@ -109,8 +109,9 @@ def projectPackage : IO Lake.Package := do
   let lakeEnv ← match ← (Lake.Env.compute lake lean elan?).toBaseIO with
     | .ok env => pure env
     | .error e => throw <| IO.userError e
-  let some pkg ← (Lake.loadPackage { lakeEnv, wsDir := ← IO.currentDir,
-      relConfigFile := "lakefile.toml", configLang? := some .toml }).toBaseIO
+  let wsDir ← IO.currentDir
+  let some pkg ← (Lake.loadPackage
+      { lakeEnv, wsDir, relConfigFile := "lakefile.toml", configLang? := some .toml }).toBaseIO
     | throw <| IO.userError "Lake could not load lakefile.toml"
   return pkg
 
@@ -121,7 +122,7 @@ run_meta do
   unless run.findings.isEmpty do
     throwError "the executables do not run what they claim: {repr run.findings}"
   for d in run.notRun do
-    logInfo m!"{d} is run by no executable"
+    Lean.logInfo m!"{d} is run by no executable"
 ```
 
 Every executable's root module must be built before the gate runs (`lake build` of the executables, or of their root modules), since the reader imports it.

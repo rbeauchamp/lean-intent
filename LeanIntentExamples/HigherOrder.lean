@@ -46,8 +46,6 @@ theorem handler_subjects :
       [.subject fun _ _ => 0, .subject fun h _ => h.run 0, .subject fun h _ => h.run h.limit,
         .subject fun h n => h.run n, .subject fun h _ => h.limit, .subject fun _ n => n] := rfl
 
-theorem data_length : (degenerate (Nat → (Bool → Bool) × Unit)).length = 2 := rfl
-
 theorem not_is_other :
     (Degenerate.others : Degenerate (Covered.sig (W := Nat → (Bool → Bool) × Unit))).Is
       fun _ => (not, ()) :=

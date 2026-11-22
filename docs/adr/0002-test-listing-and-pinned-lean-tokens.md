@@ -33,6 +33,6 @@ Accepted
 
 ## Known limitations and consequences
 
-- Kernel-checked `theorem`/`example` declarations on concrete inputs (e.g. `example : f 3 = 9 := by decide`) are not listed; avoiding value-pinning examples is tracked in #83.
+- Kernel-checked `theorem`/`example` declarations on concrete inputs (e.g. `example : f 3 = 9 := by decide`) are not listed; avoiding value-pinning examples rests on review under [`README.md`](../../README.md#adding-a-feature) rather than a mechanical guard (#83 removed the count-only precedent theorems from `LeanIntentExamples/HigherOrder.lean` and `LeanIntentExamples/LargeFinite.lean`).
 - `testsOfModule` currently sets `debug.byAsSorry true` so `Prop`-typed `by` blocks are not elaborated; macros or project-declared tactic elaborators inside `by` blocks are therefore not expanded or inspected (tracked in #94).
 - Project-declared deriving handlers are not elaborators and their generated commands use Lean's own elaborators, so `deriving` clauses are not listed (the library's `LeanIntent.Declared` handler generates kernel-checked code and isomorphisms).
