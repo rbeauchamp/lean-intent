@@ -31,7 +31,7 @@ Two verification readers bridge compiled Lean/Lake artifacts into pure proved de
 
 - `Execution.Read.buildTable` builds the finite reachability table for `reachesIn` by structural recursion over a fuel bound (`env.const2ModIdx.size + 1`), returning `none` if fuel expires with non-empty work (so `reachesIn` fails closed with an error rather than returning a truncated table; `Environment.getModuleIdxFor?` is unexposed in Lean's module system, so relating `inCone` directly to `env.const2ModIdx.size` is left outside the module proof).
 - Whenever `buildTable` returns `some table`, `buildTable_within` and `buildTable_within_succ` prove `Execution.Within (fun n => table.getD n []) root table.size` and `table.size + 1`, `buildTable_reach_eq_reached_iff` proves `Execution.reach` with `table.size + 1` fuel agrees with `Execution.Reaches`, and `buildTable_reach_ne_exhausted` rules out `.exhausted`, eliminating the unreachable `.exhausted` branch in `reachesIn`.
-- `executableIn` reads `getEnv` once and threads that single environment to both `env.contains `main` and `reachesIn env`.
+- `executableIn` reads `getEnv` once and threads that single environment to both ``env.contains `main`` and `reachesIn env`.
 
 ## Consequences
 
