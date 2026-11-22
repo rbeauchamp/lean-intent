@@ -16,7 +16,9 @@ structure Rejection where
 
 def allowedAxioms : List Name := [``propext, ``Classical.choice, ``Quot.sound]
 
-def ratchetFile : String := "tools/comment-ratchet.json"
+def noCommentsPinFile : String := "tools/no-comments.pin"
+
+def noCommentsConfigFile : String := ".no-comments.json"
 
 def run (cmd : String) (args : Array String) : IO (UInt32 × String) := do
   let out ← IO.Process.output { cmd, args }
@@ -374,524 +376,60 @@ def checkProcess (env : Environment) (roots : Array Name) : Array Rejection := I
         queue := queue.push used
   return errs
 
-structure Comment where
-  kind : String
-  startLine : Nat
-  endLine : Nat
-  fingerprint : String
+def isSha256 (s : String) : Bool :=
+  s.length == 64 && s.all fun c => c.isDigit || ('a' ≤ c && c ≤ 'f')
 
-structure CommentAcc where
-  spans : Std.HashMap Nat (Nat × Comment) := {}
+def isValidReleaseTag (s : String) : Bool :=
+  s.startsWith "v" && s.length > 1 && !s.contains ".." &&
+    s.all fun c => c.isAlphanum || c == '.' || c == '-'
 
-def commentKinds : List String := ["line", "block", "doc", "moddoc"]
+structure NoCommentsPin where
+  version : String
+  darwinArm64Sha256 : String
+  linuxX86_64Sha256 : String
 
-def fingerprint (text : String) : String :=
-  let h := text.toUTF8.foldl (fun h b => (h ^^^ b.toUInt64) * 1099511628211)
-    (14695981039346656037 : UInt64)
-  let digits := Nat.toDigits 16 h.toNat
-  String.ofList (List.replicate (16 - digits.length) '0' ++ digits)
-
-def isFingerprint (s : String) : Bool :=
-  s.length == 16 && s.all fun c => c.isDigit || ('a' ≤ c && c ≤ 'f')
-
-def recordSpan (fileMap : FileMap) (kind : String) (startPos stopPos : String.Pos.Raw)
-    (acc : CommentAcc) : Except String CommentAcc :=
-  let sb := startPos.byteIdx
-  let eb := stopPos.byteIdx
-  match acc.spans.get? sb with
-  | some (prevStop, prev) =>
-    if prevStop == eb && prev.kind == kind then .ok acc
-    else .error s!"inconsistent overlapping comment span at byte {sb}"
-  | none =>
-    let lastPos := if eb > sb then String.Pos.Raw.prev fileMap.source stopPos else stopPos
-    let text := (⟨fileMap.source, startPos, stopPos⟩ : Substring.Raw).toString
-    .ok { spans := acc.spans.insert sb (eb,
-      { kind, startLine := (fileMap.toPosition startPos).line,
-        endLine := (fileMap.toPosition lastPos).line, fingerprint := fingerprint text }) }
-
-partial def scanTrivia (fileMap : FileMap) (sub : Substring.Raw) (acc : CommentAcc) :
-    Except String CommentAcc :=
-  go sub.startPos acc
-where
-  finishBlock (nesting : Nat) (pos : String.Pos.Raw) : Except String String.Pos.Raw :=
-    if pos ≥ sub.stopPos then
-      .error "unterminated block comment in Lean parser trivia"
-    else
-      let c := String.Pos.Raw.get sub.str pos
-      let next := String.Pos.Raw.next sub.str pos
-      if c == '-' && next < sub.stopPos && String.Pos.Raw.get sub.str next == '/' then
-        let after := String.Pos.Raw.next sub.str next
-        if nesting == 1 then .ok after
-        else finishBlock (nesting - 1) after
-      else if c == '/' && next < sub.stopPos && String.Pos.Raw.get sub.str next == '-' then
-        finishBlock (nesting + 1) (String.Pos.Raw.next sub.str next)
-      else
-        finishBlock nesting next
-  go (pos : String.Pos.Raw) (acc : CommentAcc) : Except String CommentAcc :=
-    if pos ≥ sub.stopPos then
-      .ok acc
-    else
-      let c := String.Pos.Raw.get sub.str pos
-      let next := String.Pos.Raw.next sub.str pos
-      if c.isWhitespace then
-        go next acc
-      else if c == '-' && next < sub.stopPos && String.Pos.Raw.get sub.str next == '-' then
-        let rec toEol (p : String.Pos.Raw) : String.Pos.Raw :=
-          if p ≥ sub.stopPos then p
-          else if String.Pos.Raw.get sub.str p == '\n' then p
-          else toEol (String.Pos.Raw.next sub.str p)
-        let eol := toEol (String.Pos.Raw.next sub.str next)
-        match recordSpan fileMap "line" pos eol acc with
-        | .ok acc' => go eol acc'
-        | .error e => .error e
-      else if c == '/' && next < sub.stopPos && String.Pos.Raw.get sub.str next == '-' then
-        let afterOpen := String.Pos.Raw.next sub.str next
-        if afterOpen ≥ sub.stopPos then
-          .error "unterminated block comment in Lean parser trivia"
-        else
-          let third := String.Pos.Raw.get sub.str afterOpen
-          if third == '-' || third == '!' then
-            .error "unexpected doc comment opener in Lean parser trivia"
-          else
-            match finishBlock 1 (String.Pos.Raw.next sub.str afterOpen) with
-            | .error e => .error e
-            | .ok endPos =>
-              match recordSpan fileMap "block" pos endPos acc with
-              | .ok acc' => go endPos acc'
-              | .error e => .error e
-      else
-        .error s!"unexpected non-whitespace character {repr c} at byte {pos.byteIdx} in Lean parser trivia"
-
-def checkSlice (fileMap : FileMap) (startPos stopPos : String.Pos.Raw)
-    (acc : CommentAcc) : Except String CommentAcc :=
-  if startPos < stopPos then
-    scanTrivia fileMap ⟨fileMap.source, startPos, stopPos⟩ acc
-  else
-    .ok acc
-
-def matchesLiteralToken (env : Environment) (token : Syntax) (raw : String) : Bool := Id.run do
-  let parse (p : Parser.ParserFn) (input : String) : Option Syntax := do
-    let s := p.run (Parser.InputContext.mk input "<token>") { env, options := {} } {}
-      (Parser.mkParserState input)
-    guard (!s.hasError && s.stackSize == 1)
-    return s.stxStack.back
-  match token with
-  | .ident _ spelling .. =>
-    let some (.ident _ parsed ..) := parse (Parser.tokenFn []) raw | return false
-    return spelling.toString == raw && parsed.toString == raw
-  | .node _ k _ =>
-    unless token.isLit? k == some raw do return false
-    if k == interpolatedStrLitKind then
-      let chunk := if raw.startsWith "}" then "\"" ++ (raw.drop 1).toString else raw
-      let emptyHole : Parser.ParserFn := fun _ s => s.pushSyntax .missing
-      let some parsed := parse (Parser.interpolatedStrFn emptyHole) (chunk ++ "}\"") | return false
-      return parsed[0].isLit? k == some chunk
-    return ((parse (Parser.tokenFn []) raw).bind (·.isLit? k)) == some raw
-  | _ => return false
-
-def containsOpener (raw : String) : Bool :=
-  raw.contains "--" || raw.contains "/-"
-
-def crossesBoundary (raw : String) (next : Char) : Bool :=
-  next == '-' && (raw.endsWith "-" || raw.endsWith "/")
-
-def matchesRegisteredSymbol (ctx : Parser.ParserContextCore) (token : Syntax) : Bool := Id.run do
-  let leaf := match token with
-    | .node _ _ #[arg] => arg
-    | _ => token
-  let .atom (.original _ start _ stop) spelling := leaf | return false
-  let parsed := (Parser.symbolFn spelling).run ctx.toInputContext ctx.toParserModuleContext ctx.tokens
-    { pos := start, cache := Parser.initCacheForInput ctx.inputString }
-  return !parsed.hasError && parsed.stackSize == 1 && parsed.stxStack.back.getTailPos? == some stop
-
-def checkToken (ctx : Parser.ParserContextCore) (token : Syntax) (raw : String) (next : Char)
-    (start : String.Pos.Raw) : Except String Unit :=
-  if (containsOpener raw || crossesBoundary raw next) &&
-      !matchesLiteralToken ctx.env token raw &&
-      !matchesRegisteredSymbol ctx token then
-    .error s!"cannot account for a possible comment in the parser token at byte {start.byteIdx}"
-  else .ok ()
-
-theorem checkToken_ok_iff (ctx : Parser.ParserContextCore) (token : Syntax) (raw : String) (next : Char)
-    (start : String.Pos.Raw) :
-    checkToken ctx token raw next start = .ok () ↔
-      matchesLiteralToken ctx.env token raw = true ∨
-      matchesRegisteredSymbol ctx token = true ∨
-      (containsOpener raw = false ∧ crossesBoundary raw next = false) := by
-  simp only [checkToken]
-  split <;> simp_all <;> grind
-
-partial def collectSyntax (ctx : Parser.ParserContextCore) (prevPos nextPos : String.Pos.Raw) (stx : Syntax)
-    (acc : CommentAcc) : Except String CommentAcc := do
-  unless prevPos ≤ nextPos && nextPos ≤ ctx.endPos do
-    throw "Lean's parser returned an invalid command range"
-  let (pos, acc) ← walk stx prevPos acc
-  checkSlice ctx.fileMap pos nextPos acc
-where
-  consume (pos start stop : String.Pos.Raw) (account : CommentAcc → Except String CommentAcc) (acc : CommentAcc) :
-      Except String (String.Pos.Raw × CommentAcc) := do
-    unless pos ≤ start && start ≤ stop && stop ≤ nextPos do
-      throw s!"source range [{start.byteIdx}, {stop.byteIdx}) outside unread bytes [{pos.byteIdx}, {nextPos.byteIdx})"
-    let acc ← checkSlice ctx.fileMap pos start acc
-    return (stop, ← account acc)
-  consumeToken (s : Syntax) (pos start stop : String.Pos.Raw) (acc : CommentAcc) :=
-    consume pos start stop (fun a => do
-      checkToken ctx s (ctx.extract start stop) (ctx.get stop) start
-      return a) acc
-  walk (s : Syntax) (pos : String.Pos.Raw) (acc : CommentAcc) :
-      Except String (String.Pos.Raw × CommentAcc) := do
-    match s with
-    | .atom (.original _ start _ stop) _ | .ident (.original _ start _ stop) .. =>
-      consumeToken s pos start stop acc
-    | .node _ k args =>
-      if k == ``Parser.Command.docComment || k == ``Parser.Command.plainDocComment ||
-          k == ``Parser.Command.moduleDoc then
-        let some (.original _ start ..) := s.getHeadInfo? | throw "docstring has no original start"
-        let some (.original _ _ _ stop) := s.getTailInfo? | throw "docstring has no original end"
-        let kind := if k == ``Parser.Command.moduleDoc then "moddoc" else "doc"
-        consume pos start stop (recordSpan ctx.fileMap kind start stop) acc
-      else if k == choiceKind then
-        let some first := args[0]? | throw "empty parser choice"
-        let (stop, acc) ← walk first pos acc
-        let mut acc := acc
-        for alt in args[1...*] do
-          let (altStop, altAcc) ← walk alt pos acc
-          unless altStop == stop do throw "parser alternatives cover different source ranges"
-          acc := altAcc
-        return (stop, acc)
-      else if let #[.atom (.original _ start _ stop) _] := args then
-        consumeToken s pos start stop acc
-      else
-        args.foldlM (fun (p, a) arg => walk arg p a) (pos, acc)
-    | _ => return (pos, acc)
-
-def sourceOrder (acc : CommentAcc) : Array Comment :=
-  (acc.spans.toArray.qsort fun a b => a.1 < b.1).map (·.2.2)
-
-def distinctCommentLines (comments : Array Comment) : Nat := Id.run do
-  let mut ls : Std.HashSet Nat := {}
-  for c in comments do
-    for l in [c.startLine : c.endLine + 1] do
-      ls := ls.insert l
-  return ls.size
-
-unsafe def commentsOfModule (file : String) (mod : Name) : IO (Array Comment) := do
-  let input ← IO.FS.readFile file
-  let inputCtx := Parser.mkInputContext input file
-  let fileMap := inputCtx.fileMap
-  let endPos := fileMap.source.rawEndPos
-  let opts := (({} : Options).setBool `Elab.async false).setBool `debug.byAsSorry true
-  let fail (what : String) (messages : MessageLog) : IO (Array Comment) := do
-    let shown ← messages.toList.mapM (·.toString)
-    throw <| IO.userError s!"{file}: {what}, so its comments cannot be read:\n{String.join shown}"
-  let scan (step : Except String CommentAcc) : IO CommentAcc :=
-    match step with
-    | .ok acc => pure acc
-    | .error e => throw <| IO.userError s!"{file}: {e}"
-  let headerEnv ← mkEmptyEnvironment
-  let headerCtx : Parser.ParserContextCore := {
-    toInputContext := inputCtx, env := headerEnv, options := {}, prec := 0
-    tokens := Parser.Module.updateTokens (Parser.getTokenTable headerEnv) }
-  let (header, parserState, messages) ← Parser.parseHeader inputCtx
-  if messages.hasErrors then
-    return ← fail "Lean's parser could not read its header" messages
-  enableInitializersExecution
-  let (env, messages) ← Elab.processHeader header opts messages inputCtx (mainModule := mod)
-  if messages.hasErrors then
-    return ← fail "Lean could not process its header" messages
-  let mut cmdState := Elab.Command.mkState env messages opts
-  let s ← Elab.IO.processCommandsIncrementally inputCtx parserState cmdState none
-  if s.commandState.messages.hasErrors then
-    return ← fail "Lean could not elaborate it" s.commandState.messages
-  let mut acc ← scan <| collectSyntax headerCtx ⟨0⟩ parserState.pos header.raw {}
-  let mut snap := s.initialSnap
-  let mut prevPos := parserState.pos
-  repeat
-    let nextPos := snap.parserState.pos
-    let scope := cmdState.scopes.head!
-    let ctx : Parser.ParserContextCore := {
-      toInputContext := inputCtx, env := cmdState.env, options := scope.opts
-      currNamespace := scope.currNamespace, openDecls := scope.openDecls
-      prec := 0, tokens := Parser.getTokenTable cmdState.env }
-    acc ← scan <| collectSyntax ctx prevPos nextPos snap.stx acc
-    prevPos := nextPos
-    match snap.nextCmdSnap? with
-    | some next =>
-      cmdState := snap.elabSnap.resultSnap.get.cmdState
-      snap := next.get
-    | none => break
-  unless prevPos == endPos do
-    throw <| IO.userError s!"{file}: Lean's frontend stopped reading at byte {prevPos.byteIdx}, before the file's end at byte {endPos.byteIdx}, so what follows cannot be read for comments"
-  return sourceOrder acc
-
-unsafe def moduleComments (file : String) (toolDir libDir : System.FilePath) : IO Unit := do
-  let files ← trackedLeanFiles
-  let mods ← moduleNames files
-  let some mod := (files.zip mods).find? (·.1 == file) |>.map (·.2)
-    | throw <| IO.userError s!"{file} is not a Lean file Git's index lists here"
-  initSearchPath (← findSysroot) [toolDir, libDir]
-  for c in ← commentsOfModule file mod do
-    IO.println s!"{c.fingerprint} {c.kind} {c.startLine} {c.endLine}"
-
-def fileComments (toolDir libDir : System.FilePath) (file : String) : IO (Array Comment) := do
-  let lines ← runSelf #["--comments-module", file, toolDir.toString, libDir.toString]
-  lines.mapM fun line => do
-    let unread : IO Comment :=
-      throw <| IO.userError s!"{file}: --comments-module printed a line that is not a comment's: {line}"
-    let [fp, kind, startLine, endLine] := line.splitOn " " | unread
-    let (some startLine, some endLine) := (startLine.toNat?, endLine.toNat?) | unread
-    unless isFingerprint fp && commentKinds.contains kind do
-      return ← unread
-    return { kind, startLine, endLine, fingerprint := fp }
-
-def commentReaders : Nat := 3
-
-partial def prepareToolImports (tools : Std.HashMap Name String) (out : System.FilePath)
-    (searchPath : SearchPath) (imports : Array Name) (visiting : List Name := []) : IO Unit := do
-  for mod in imports do
-    let some file := tools.get? mod | continue
-    if visiting.contains mod then
-      throw <| IO.userError s!"{file}: cycle in tracked tool imports"
-    let olean := modToFilePath out mod "olean"
-    if ← olean.pathExists then continue
-    prepareToolImports tools out searchPath (← importsOf file) (mod :: visiting)
-    if let some dir := olean.parent then IO.FS.createDirAll dir
-    let result ← IO.Process.output {
-      cmd := "lean", args := #["-o", olean.toString, file],
-      env := #[("LEAN_PATH", some searchPath.toString)] }
-    unless result.exitCode == 0 do
-      throw <| IO.userError s!"{file}: could not build imported tool:\n{result.stdout}{result.stderr}"
-
-def projectComments (libDir : System.FilePath) (allFiles : Array String)
-    (target? : Option String := none) :
-    IO (Array (Array Comment)) := do
-  let files ← match target? with
-    | none => pure allFiles
-    | some file => do
-      unless allFiles.contains file do
-        throw <| IO.userError s!"{file} is not a Lean file Git's index lists here"
-      pure #[file]
-  let toolFiles := allFiles.filter isToolFile
-  let tools := Std.HashMap.ofList (((← moduleNames toolFiles).zip toolFiles).toList)
-  IO.FS.withTempDir fun out => do
-    let libPath := libDir :: (← addSearchPathFromEnv [])
-    for file in files do
-      prepareToolImports tools out (out :: libPath) (← importsOf file)
-    let readers ← (Array.range commentReaders).mapM fun k => IO.asTask (prio := .dedicated) <|
-      ((Array.range files.size).filter (· % commentReaders == k)).mapM fun i =>
-        fileComments out libDir files[i]!
-    let results ← readers.mapM fun reader => do pure (← IO.wait reader)
-    let parts ← results.mapM IO.ofExcept
-    return (Array.range files.size).map fun i => parts[i % commentReaders]![i / commentReaders]!
-
-structure SortedFingerprints where
-  values : Array String
-  sorted : values.toList.Pairwise (· ≤ ·)
-
-def SortedFingerprints.empty : SortedFingerprints :=
-  ⟨#[], .nil⟩
-
-def firstOutOfOrder : List String → Option String
-  | [] | [_] => none
-  | a :: b :: rest => if b < a then some b else firstOutOfOrder (b :: rest)
-
-theorem firstOutOfOrder_eq_none_iff :
-    ∀ l : List String, firstOutOfOrder l = none ↔ l.Pairwise (· ≤ ·)
-  | [] => by simp [firstOutOfOrder]
-  | [_] => by simp [firstOutOfOrder]
-  | a :: b :: rest => by
-    constructor
-    · intro h
-      unfold firstOutOfOrder at h
-      split at h
-      · cases h
-      · rename_i hba
-        have hab : a ≤ b := Std.not_lt.mp hba
-        have htail := (firstOutOfOrder_eq_none_iff (b :: rest)).mp h
-        have ⟨hb, _⟩ := List.pairwise_cons.mp htail
-        refine List.pairwise_cons.mpr ⟨?_, htail⟩
-        intro z hz
-        rcases List.mem_cons.mp hz with rfl | hz
-        · exact hab
-        · exact Std.le_trans hab (hb z hz)
-    · intro h
-      have ⟨ha, htail⟩ := List.pairwise_cons.mp h
-      have hab : a ≤ b := ha b List.mem_cons_self
-      have hnba : ¬(b < a) := Std.not_lt.mpr hab
-      simp [firstOutOfOrder, hnba, (firstOutOfOrder_eq_none_iff (b :: rest)).mpr htail]
-
-def sortFingerprints (xs : Array String) : SortedFingerprints :=
-  ⟨(xs.toList.mergeSort (fun a b => decide (a ≤ b))).toArray, by
-    simpa only [decide_eq_true_eq] using
-      List.pairwise_mergeSort
-        (le := fun a b : String => decide (a ≤ b))
-        (fun _ _ _ h1 h2 => decide_eq_true (Std.le_trans (of_decide_eq_true h1) (of_decide_eq_true h2)))
-        (fun a b => by
-          by_cases h : a < b
-          · simp [(Std.lt_iff_le_and_ne.mp h).1]
-          · simp [Std.not_lt.mp h])
-        xs.toList⟩
-
-theorem sortFingerprints_count (xs : Array String) (a : String) :
-    (sortFingerprints xs).values.toList.count a = xs.toList.count a :=
-  (List.mergeSort_perm xs.toList (fun a b => decide (a ≤ b))).count_eq a
-
-structure RatchetEntry where
-  lines : Nat
-  fingerprints : SortedFingerprints
-
-def parsePosNat (j : Json) (ctx : String) : IO Nat := do
-  match j with
-  | .num n =>
-    if n.exponent == 0 && n.mantissa > 0 then
-      return n.mantissa.toNat
-    throw <| IO.userError s!"{ctx}: expected a positive integer, got {j}"
-  | _ => throw <| IO.userError s!"{ctx}: expected a positive integer, got {j}"
-
-def parseRatchet (source raw : String) : IO (Std.HashMap String RatchetEntry) := do
-  let json ← match Json.parse raw with
-    | .ok j => pure j
-    | .error e => throw <| IO.userError s!"{source}: invalid JSON: {e}"
-  let .arr entries := json
-    | throw <| IO.userError s!"{source}: top-level JSON value must be an array"
-  let mut map : Std.HashMap String RatchetEntry := {}
-  for idx in [0 : entries.size] do
-    let entry := s!"{source}[{idx}]"
-    let .obj kvs := entries[idx]!
-      | throw <| IO.userError s!"{entry}: entry must be a JSON object"
-    let keys := kvs.toList.map (·.1)
-    unless keys.length == 4 && ["file", "comments", "lines", "fingerprints"].all keys.contains do
-      throw <| IO.userError s!"{entry}: entry must have exactly the keys file, comments, lines, fingerprints"
-    let some (.str file) := kvs.get? "file"
-      | throw <| IO.userError s!"{entry}: file must be a string"
-    if file.isEmpty then
-      throw <| IO.userError s!"{entry}: file must not be empty"
-    if map.contains file then
-      throw <| IO.userError s!"{entry}: duplicate entry for {file}"
-    let some cJson := kvs.get? "comments"
-      | throw <| IO.userError s!"{entry}: missing comments"
-    let some lJson := kvs.get? "lines"
-      | throw <| IO.userError s!"{entry}: missing lines"
-    let some (.arr fpJson) := kvs.get? "fingerprints"
-      | throw <| IO.userError s!"{entry}: fingerprints must be an array"
-    let comments ← parsePosNat cJson s!"{entry}.comments ({file})"
-    let lines ← parsePosNat lJson s!"{entry}.lines ({file})"
-    let fingerprints ← fpJson.mapM fun j =>
-      match j with
-      | .str fp =>
-        if isFingerprint fp then pure fp
-        else throw <| IO.userError s!"{entry}.fingerprints ({file}): {fp} is not 16 lowercase hexadecimal digits"
-      | _ => throw <| IO.userError s!"{entry}.fingerprints ({file}): expected a string, got {j}"
-    unless fingerprints.size == comments do
-      throw <| IO.userError s!"{entry} ({file}): comments is {comments}, but fingerprints holds {fingerprints.size}"
-    match h : firstOutOfOrder fingerprints.toList with
-    | some bad =>
-      throw <| IO.userError s!"{entry}.fingerprints ({file}): not in ascending order at {bad}"
-    | none =>
-      map := map.insert file {
-        lines,
-        fingerprints := ⟨fingerprints, (firstOutOfOrder_eq_none_iff fingerprints.toList).mp h⟩
-      }
-  return map
-
-def missingFromListAux (acc : List String) : List String → List String → List String
-  | [], _ => acc.reverse
-  | xs, [] => acc.reverse ++ xs
-  | x :: xs, y :: ys =>
-    if y < x then missingFromListAux acc (x :: xs) ys
-    else if y == x then missingFromListAux acc xs ys
-    else missingFromListAux (x :: acc) xs (y :: ys)
-termination_by xs ys => xs.length + ys.length
-
-def missingFrom (xs ys : SortedFingerprints) : Array String :=
-  (missingFromListAux [] xs.values.toList ys.values.toList).toArray
-
-theorem count_eq_zero_of_lt_all {l : List String} {a : String} (h : ∀ z ∈ l, a < z) :
-    l.count a = 0 :=
-  List.count_eq_zero.mpr fun hm => Std.lt_irrefl (h a hm)
-
-theorem missingFromListAux_count (acc xs ys : List String)
-    (hxs : xs.Pairwise (· ≤ ·)) (hys : ys.Pairwise (· ≤ ·)) (a : String) :
-    (missingFromListAux acc xs ys).count a = acc.count a + (xs.count a - ys.count a) := by
-  match xs, ys with
-  | [], _ =>
-    simp [missingFromListAux]
-  | x :: xs, [] =>
-    simp [missingFromListAux]
-  | x :: xs, y :: ys =>
-    rw [missingFromListAux]
-    have ⟨hx, hxs'⟩ := List.pairwise_cons.mp hxs
-    have ⟨hy, hys'⟩ := List.pairwise_cons.mp hys
-    split
-    · rename_i hyx
-      rw [missingFromListAux_count acc (x :: xs) ys hxs hys' a]
-      by_cases hay : y = a
-      · subst hay
-        have h0 : (x :: xs).count y = 0 := count_eq_zero_of_lt_all fun z hz => by
-          rcases List.mem_cons.mp hz with rfl | hz
-          · exact hyx
-          · exact Std.lt_of_lt_of_le hyx (hx z hz)
-        simp [h0]
-      · simp [List.count_cons_of_ne hay]
-    · rename_i hnyx
-      split
-      · rename_i heq
-        have hyx : y = x := eq_of_beq heq
-        subst hyx
-        rw [missingFromListAux_count acc xs ys hxs' hys' a]
-        by_cases hax : y = a
-        · subst hax
-          simp
-        · simp [List.count_cons_of_ne hax]
-      · rename_i hneq
-        have hne : x ≠ y := fun h => hneq (beq_iff_eq.mpr h.symm)
-        have hxy : x < y := Std.lt_iff_le_and_ne.mpr ⟨Std.not_lt.mp hnyx, hne⟩
-        rw [missingFromListAux_count (x :: acc) xs (y :: ys) hxs' hys a]
-        by_cases hax : x = a
-        · subst hax
-          have h0 : (y :: ys).count x = 0 := count_eq_zero_of_lt_all fun z hz => by
-            rcases List.mem_cons.mp hz with rfl | hz
-            · exact hxy
-            · exact Std.lt_of_lt_of_le hxy (hy z hz)
-          simp [h0]
-          omega
-        · simp [List.count_cons_of_ne hax]
-termination_by xs.length + ys.length
-
-theorem missingFrom_count (xs ys : SortedFingerprints) (a : String) :
-    (missingFrom xs ys).toList.count a = xs.values.toList.count a - ys.values.toList.count a := by
-  simp [missingFrom, missingFromListAux_count [] xs.values.toList ys.values.toList xs.sorted ys.sorted a]
-
-theorem missingFrom_isEmpty_iff (xs ys : SortedFingerprints) :
-    (missingFrom xs ys).isEmpty = true ↔
-      ∀ a, xs.values.toList.count a ≤ ys.values.toList.count a := by
-  have hiff : (missingFrom xs ys).isEmpty = true ↔ (missingFrom xs ys).toList = [] := by
-    cases h : missingFrom xs ys with
-    | mk l => simp [Array.isEmpty, List.length_eq_zero_iff]
-  rw [hiff]
-  constructor
-  · intro hnil a
-    have hcnt := missingFrom_count xs ys a
-    rw [hnil, List.count_nil] at hcnt
-    omega
-  · intro h
-    cases hl : (missingFrom xs ys).toList with
-    | nil => rfl
-    | cons a rest =>
-      have hcnt := missingFrom_count xs ys a
-      rw [hl, List.count_cons_self] at hcnt
-      have := h a
-      omega
-
-theorem missingFrom_both_isEmpty_iff (xs ys : SortedFingerprints) :
-    ((missingFrom xs ys).isEmpty && (missingFrom ys xs).isEmpty) = true ↔
-      ∀ a, xs.values.toList.count a = ys.values.toList.count a := by
-  simp only [Bool.and_eq_true, missingFrom_isEmpty_iff]
-  constructor
-  · intro ⟨h1, h2⟩ a
-    exact Nat.le_antisymm (h1 a) (h2 a)
-  · intro h
-    exact ⟨fun a => Nat.le_of_eq (h a), fun a => Nat.le_of_eq (h a).symm⟩
+def parseNoCommentsPin (raw : String) : Except String NoCommentsPin := do
+  if raw.contains '\r' then
+    throw s!"{noCommentsPinFile}: expected LF line endings"
+  let lines := if raw.endsWith "\n" then (raw.splitOn "\n").dropLast else raw.splitOn "\n"
+  if lines.isEmpty then
+    throw s!"{noCommentsPinFile}: file is empty"
+  let mut version? : Option String := none
+  let mut darwin? : Option String := none
+  let mut linux? : Option String := none
+  for line in lines do
+    match line.splitOn "=" with
+    | [k, v] =>
+      match k with
+      | "VERSION" =>
+        if version?.isSome then
+          throw s!"{noCommentsPinFile}: duplicate VERSION key"
+        unless isValidReleaseTag v do
+          throw s!"{noCommentsPinFile}: invalid VERSION {v.quote}"
+        version? := some v
+      | "DARWIN_ARM64_SHA256" =>
+        if darwin?.isSome then
+          throw s!"{noCommentsPinFile}: duplicate DARWIN_ARM64_SHA256 key"
+        unless isSha256 v do
+          throw s!"{noCommentsPinFile}: invalid DARWIN_ARM64_SHA256 {v.quote}"
+        darwin? := some v
+      | "LINUX_X86_64_SHA256" =>
+        if linux?.isSome then
+          throw s!"{noCommentsPinFile}: duplicate LINUX_X86_64_SHA256 key"
+        unless isSha256 v do
+          throw s!"{noCommentsPinFile}: invalid LINUX_X86_64_SHA256 {v.quote}"
+        linux? := some v
+      | _ =>
+        throw s!"{noCommentsPinFile}: unknown key {k.quote}"
+    | _ =>
+      throw s!"{noCommentsPinFile}: expected KEY=VALUE line, got {line.quote}"
+  let some version := version?
+    | throw s!"{noCommentsPinFile}: missing VERSION"
+  let some darwinArm64Sha256 := darwin?
+    | throw s!"{noCommentsPinFile}: missing DARWIN_ARM64_SHA256"
+  let some linuxX86_64Sha256 := linux?
+    | throw s!"{noCommentsPinFile}: missing LINUX_X86_64_SHA256"
+  return { version, darwinArm64Sha256, linuxX86_64Sha256 }
 
 structure BaseRef where
   value : String
@@ -908,100 +446,6 @@ def BaseRef.parse (raw : String) : Except String BaseRef :=
 
 structure CheckOpts where
   baseRef? : Option BaseRef := none
-  bootstrap : Bool := false
-
-def isRegularGitMode (mode : String) : Bool :=
-  mode == "100644" || mode == "100755"
-
-inductive GitRatchetEntry where
-  | absent
-  | regular (oid : String)
-  | invalid (detail : String)
-
-def parseGitRatchetHeader (isTree : Bool) (expectedPath path : String) (fields : List String) :
-    Option String :=
-  match isTree, fields with
-  | true, [mode, "blob", oid] =>
-    if path == expectedPath && isRegularGitMode mode && oid != "" then some oid else none
-  | false, [mode, oid, "0"] =>
-    if path == expectedPath && isRegularGitMode mode && oid != "" then some oid else none
-  | _, _ => none
-
-def parseGitRatchetEntry (isTree : Bool) (expectedPath raw : String) : GitRatchetEntry :=
-  match raw.splitOn "\x00" with
-  | [""] => .absent
-  | [entry, ""] =>
-    match entry.splitOn "\t" with
-    | [header, path] =>
-      match parseGitRatchetHeader isTree expectedPath path (header.splitOn " ") with
-      | some oid => .regular oid
-      | none => .invalid entry
-    | _ => .invalid entry
-  | _ => .invalid (raw.replace "\x00" "; ")
-
-theorem parseGitRatchetHeader_eq_some_iff (isTree : Bool) (expectedPath path oid : String)
-    (fields : List String) :
-    parseGitRatchetHeader isTree expectedPath path fields = some oid ↔
-      path = expectedPath ∧
-      oid ≠ "" ∧
-      ∃ mode, (mode = "100644" ∨ mode = "100755") ∧
-        ((isTree = true ∧ fields = [mode, "blob", oid]) ∨
-         (isTree = false ∧ fields = [mode, oid, "0"])) := by
-  unfold parseGitRatchetHeader isRegularGitMode
-  constructor
-  · intro h
-    split at h
-    · split at h
-      · rename_i mode _ hc
-        simp only [Option.some.injEq] at h
-        subst h
-        simp only [Bool.and_eq_true, Bool.or_eq_true, beq_iff_eq, bne_iff_ne] at hc
-        exact ⟨hc.1.1, hc.2, mode, hc.1.2, Or.inl ⟨rfl, rfl⟩⟩
-      · cases h
-    · split at h
-      · rename_i mode _ hc
-        simp only [Option.some.injEq] at h
-        subst h
-        simp only [Bool.and_eq_true, Bool.or_eq_true, beq_iff_eq, bne_iff_ne] at hc
-        exact ⟨hc.1.1, hc.2, mode, hc.1.2, Or.inr ⟨rfl, rfl⟩⟩
-      · cases h
-    · cases h
-  · rintro ⟨rfl, hoid, mode, hmode, ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩⟩
-    · rcases hmode with rfl | rfl <;> simp [hoid]
-    · rcases hmode with rfl | rfl <;> simp [hoid]
-
-theorem parseGitRatchetEntry_regular_iff (isTree : Bool) (expectedPath raw oid : String) :
-    parseGitRatchetEntry isTree expectedPath raw = .regular oid ↔
-      ∃ entry header mode,
-        raw.splitOn "\x00" = [entry, ""] ∧
-        entry.splitOn "\t" = [header, expectedPath] ∧
-        (mode = "100644" ∨ mode = "100755") ∧
-        oid ≠ "" ∧
-        ((isTree = true ∧ header.splitOn " " = [mode, "blob", oid]) ∨
-         (isTree = false ∧ header.splitOn " " = [mode, oid, "0"])) := by
-  unfold parseGitRatchetEntry
-  constructor
-  · intro h
-    split at h
-    · cases h
-    · rename_i entry hr
-      split at h
-      · rename_i header path ht
-        split at h
-        · rename_i oid' hh
-          cases h
-          have ⟨hp, hoid, mode, hmode, hf⟩ :=
-            (parseGitRatchetHeader_eq_some_iff isTree expectedPath path oid (header.splitOn " ")).mp hh
-          subst hp
-          exact ⟨entry, header, mode, hr, ht, hmode, hoid, hf⟩
-        · cases h
-      · cases h
-    · cases h
-  · rintro ⟨entry, header, mode, hr, ht, hmode, hoid, hf⟩
-    have hh :=
-      (parseGitRatchetHeader_eq_some_iff isTree expectedPath expectedPath oid (header.splitOn " ")).mpr
-        ⟨rfl, hoid, mode, hmode, hf⟩
-    simp [hr, ht, hh]
 
 def checkWorkingTreeRegularFile (path : String) : IO (Option String) := do
   let comps := path.splitOn "/"
@@ -1029,132 +473,155 @@ where
         return some s!"{next} is not a directory in the working tree"
       walk nextSeg tl next
 
-def checkCandidateRatchetFile : IO (Option String) := do
-  let staged ← git #["ls-files", "--stage", "-z", "--full-name", "--", ratchetFile]
-  match parseGitRatchetEntry false ratchetFile staged with
-  | .absent =>
-    return some s!"{ratchetFile} is not tracked at that exact path in Git's index"
-  | .invalid detail =>
-    return some s!"{ratchetFile} is not a regular staged file at that exact path in Git's index ({detail})"
-  | .regular _ =>
-    checkWorkingTreeRegularFile ratchetFile
+def readNoCommentsPin : IO NoCommentsPin := do
+  let raw ← IO.FS.readFile noCommentsPinFile
+  match parseNoCommentsPin raw with
+  | .ok pin => return pin
+  | .error e => throw <| IO.userError s!"NO-COMMENTS: {e}"
 
-def defaultBaseRefs : List String :=
-  ["refs/remotes/origin/main", "refs/heads/main"]
+def platformAsset (pin : NoCommentsPin) : IO (String × String) := do
+  let target := System.Platform.target
+  let arch ←
+    if target.isEmpty then
+      let o ← IO.Process.output { cmd := "uname", args := #["-m"] }
+      if o.exitCode == 0 then pure o.stdout.trimAscii.toString else pure ""
+    else pure ""
+  if System.Platform.isOSX then
+    if target.startsWith "arm64-" || target.startsWith "aarch64-" ||
+        (target.isEmpty && (arch == "arm64" || arch == "aarch64")) then
+      return ("no-comments-darwin-arm64", pin.darwinArm64Sha256)
+    throw <| IO.userError s!"NO-COMMENTS: unsupported macOS target {target.quote} (pinned release supports darwin-arm64 and linux-x86_64)"
+  if System.Platform.isLinux then
+    if target.startsWith "x86_64-" || (target.isEmpty && arch == "x86_64") then
+      return ("no-comments-linux-x86_64", pin.linuxX86_64Sha256)
+    throw <| IO.userError s!"NO-COMMENTS: unsupported Linux target {target.quote} (pinned release supports darwin-arm64 and linux-x86_64)"
+  throw <| IO.userError s!"NO-COMMENTS: unsupported platform target {target.quote} (pinned release supports darwin-arm64 and linux-x86_64)"
 
-def resolveCommit (ref : String) : IO (Option String) := do
-  let known ← IO.Process.output
-    { cmd := "git", args := #["rev-parse", "--verify", "--quiet", "--end-of-options", ref ++ "^{commit}"] }
-  if known.exitCode == 0 then
-    return some known.stdout.trimAscii.toString
-  else if known.exitCode == 1 then
-    return none
-  else
-    throw <| IO.userError s!"NO-COMMENTS: git rev-parse for {ref} failed:\n{known.stderr}"
+def parseSha256Output (tool raw : String) : IO String := do
+  let firstLine := (raw.splitOn "\n").headD ""
+  let tokens := ((firstLine.replace "\t" " ").splitOn " ").filter (· ≠ "")
+  match tokens with
+  | digest :: _ =>
+    if isSha256 digest then
+      return digest
+    throw <| IO.userError s!"NO-COMMENTS: {tool} produced invalid SHA-256 digest {digest.quote}"
+  | [] =>
+    throw <| IO.userError s!"NO-COMMENTS: {tool} produced empty output"
 
-def exactRefExists (fullRef : String) : IO Bool := do
-  let res ← IO.Process.output
-    { cmd := "git", args := #["show-ref", "--verify", "--quiet", "--", fullRef] }
-  if res.exitCode == 0 then
-    return true
-  else if res.exitCode == 1 then
-    return false
-  else
-    throw <| IO.userError s!"NO-COMMENTS: git show-ref for {fullRef} failed:\n{res.stderr}"
-
-def resolveBaseRef (baseRef? : Option BaseRef) : IO (String × String) := do
-  match baseRef? with
-  | some ref =>
-    let some sha ← resolveCommit ref.value
-      | throw <| IO.userError s!"NO-COMMENTS: base ref {ref.value} is not a known commit"
-    return (ref.value, sha)
+def sha256File (path : System.FilePath) : IO String := do
+  let sha256sumRes? ← try
+    some <$> IO.Process.output { cmd := "sha256sum", args := #["--", path.toString] }
+  catch _ =>
+    pure none
+  match sha256sumRes? with
+  | some o =>
+    unless o.exitCode == 0 do
+      throw <| IO.userError s!"NO-COMMENTS: sha256sum failed on {path}:\n{o.stderr}"
+    parseSha256Output "sha256sum" o.stdout
   | none =>
-    for ref in defaultBaseRefs do
-      if ← exactRefExists ref then
-        let some sha ← resolveCommit ref
-          | throw <| IO.userError s!"NO-COMMENTS: default base ref {ref} does not name a commit"
-        return (ref, sha)
-    throw <| IO.userError "NO-COMMENTS: neither refs/remotes/origin/main nor refs/heads/main names a commit; fetch the base branch or pass --base-ref <ref>"
+    let o ← IO.Process.output { cmd := "shasum", args := #["-a", "256", "--", path.toString] }
+    unless o.exitCode == 0 do
+      throw <| IO.userError s!"NO-COMMENTS: shasum failed on {path}:\n{o.stderr}"
+    parseSha256Output "shasum" o.stdout
 
-def baseRatchet (opts : CheckOpts) :
-    IO (Option (String × Std.HashMap String RatchetEntry)) := do
-  let (ref, refSha) ← resolveBaseRef opts.baseRef?
-  let merge ← IO.Process.output { cmd := "git", args := #["merge-base", "HEAD", refSha] }
-  if merge.exitCode == 1 then
-    throw <| IO.userError s!"NO-COMMENTS: Git found no merge base of HEAD with {ref} ({refSha}); fetch full history or pass --base-ref <ref>"
-  unless merge.exitCode == 0 do
-    throw <| IO.userError s!"git merge-base HEAD {ref} failed:\n{merge.stderr}"
-  let base := merge.stdout.trimAscii.toString
-  let listed ← git #["ls-tree", "--full-tree", "-z", base, "--", ratchetFile]
-  match parseGitRatchetEntry true ratchetFile listed with
-  | .absent =>
-    if opts.bootstrap then
-      return none
-    throw <| IO.userError s!"NO-COMMENTS: merge base {base} (with {ref}) does not hold {ratchetFile}; pass --bootstrap only when introducing {ratchetFile}"
-  | .invalid detail =>
-    throw <| IO.userError s!"NO-COMMENTS: {base}:{ratchetFile} is not a regular file in Git ({detail})"
-  | .regular oid =>
-    let source := s!"{base}:{ratchetFile}"
-    return some (base, ← parseRatchet source (← git #["cat-file", "blob", oid]))
+def ensureNoCommentsBin (pin : NoCommentsPin) : IO System.FilePath := do
+  let (assetName, expectedSha) ← platformAsset pin
+  let envBin? := (← IO.getEnv "NO_COMMENTS_BIN").bind fun s =>
+    let trimmed := s.trimAscii.toString
+    if trimmed.isEmpty then none else some trimmed
+  if let some raw := envBin? then
+    let bin ← try IO.FS.realPath raw catch _ =>
+      throw <| IO.userError s!"NO-COMMENTS: NO_COMMENTS_BIN ({raw}) does not exist or cannot be resolved"
+    let info ← try bin.metadata catch _ =>
+      throw <| IO.userError s!"NO-COMMENTS: NO_COMMENTS_BIN ({raw}) cannot be inspected"
+    unless info.type == .file do
+      throw <| IO.userError s!"NO-COMMENTS: NO_COMMENTS_BIN ({raw}) is not a regular file"
+    let actual ← sha256File bin
+    unless actual == expectedSha do
+      throw <| IO.userError s!"NO-COMMENTS: NO_COMMENTS_BIN ({raw}) SHA-256 mismatch: expected {expectedSha}, got {actual}"
+    return bin
+  let cacheDir := System.FilePath.mk ".lake" / "cache" / "no-comments" / expectedSha
+  let cacheBin := cacheDir / "no-comments"
+  let existing? ← try some <$> cacheBin.symlinkMetadata catch _ => pure none
+  if let some info := existing? then
+    unless info.type == .file do
+      throw <| IO.userError s!"NO-COMMENTS: cached binary path {cacheBin} is not a regular file"
+    let actual ← sha256File cacheBin
+    unless actual == expectedSha do
+      throw <| IO.userError s!"NO-COMMENTS: cached binary {cacheBin} SHA-256 mismatch: expected {expectedSha}, got {actual}"
+    return cacheBin
+  IO.FS.createDirAll cacheDir
+  let mk ← IO.Process.output { cmd := "mktemp", args := #[(cacheDir / "no-comments.tmp.XXXXXX").toString] }
+  unless mk.exitCode == 0 do
+    throw <| IO.userError s!"NO-COMMENTS: mktemp failed in {cacheDir}:\n{mk.stderr}"
+  let tmpPath := System.FilePath.mk mk.stdout.trimAscii.toString
+  try
+    let url := s!"https://github.com/rbeauchamp/lean-no-comments/releases/download/{pin.version}/{assetName}"
+    let dl ← IO.Process.output {
+      cmd := "curl"
+      args := #[
+        "-sSfL", "--proto", "=https", "--tlsv1.2",
+        "--connect-timeout", "15", "--retry", "2", "--retry-delay", "2",
+        "--speed-time", "30", "--speed-limit", "1024",
+        "-o", tmpPath.toString, "--", url
+      ]
+    }
+    unless dl.exitCode == 0 do
+      throw <| IO.userError s!"NO-COMMENTS: failed to download {url}:\n{dl.stderr}"
+    let actual ← sha256File tmpPath
+    unless actual == expectedSha do
+      throw <| IO.userError s!"NO-COMMENTS: downloaded {assetName} ({pin.version}) SHA-256 mismatch: expected {expectedSha}, got {actual}"
+    IO.setAccessRights tmpPath {
+      user := { read := true, write := true, execution := true }
+      group := { read := true, execution := true }
+      other := { read := true, execution := true }
+    }
+    IO.FS.rename tmpPath cacheBin
+    let cachedActual ← sha256File cacheBin
+    unless cachedActual == expectedSha do
+      throw <| IO.userError s!"NO-COMMENTS: cached binary {cacheBin} SHA-256 mismatch after staging: expected {expectedSha}, got {cachedActual}"
+    return cacheBin
+  finally
+    try
+      if ← tmpPath.pathExists then
+        IO.FS.removeFile tmpPath
+    catch _ => pure ()
 
-def checkComments (libDir : System.FilePath) (allFiles : Array String) (opts : CheckOpts) :
-    IO (Array Rejection) := do
-  let reject (message : String) : Rejection := { rule := "NO-COMMENTS", message }
-  if allFiles.isEmpty then
-    return #[reject "Git's index lists no Lean file"]
-  if let some err ← checkCandidateRatchetFile then
-    return #[reject err]
-  let ratchet ← parseRatchet ratchetFile (← IO.FS.readFile ratchetFile)
-  let mut errs : Array Rejection := #[]
-  for (f, _) in ratchet.toList do
-    unless allFiles.contains f do
-      errs := errs.push (reject s!"{ratchetFile} lists {f}, which is not a Lean file Git's index lists")
-  if let some (base, accepted) ← baseRatchet opts then
-    for (f, entry) in ratchet.toList do
-      let added := missingFrom entry.fingerprints ((accepted.get? f).elim .empty (·.fingerprints))
-      unless added.isEmpty do
-        errs := errs.push (reject s!"{ratchetFile} records for {f} {added.size} comment(s) that its copy at the merge base {base} does not record for that file, with the fingerprint(s) {" ".intercalate added.toList}; a file gains no comment")
-  for (f, comments) in allFiles.zip (← projectComments libDir allFiles) do
-    let actual := sortFingerprints (comments.map (·.fingerprint))
-    let lines := distinctCommentLines comments
-    let entry := ratchet.getD f { lines := 0, fingerprints := .empty }
-    let added := missingFrom actual entry.fingerprints
-    let gone := missingFrom entry.fingerprints actual
-    unless added.isEmpty do
-      let shown := (comments.filter (added.contains ·.fingerprint)).map fun c =>
-        s!"{c.kind} L{c.startLine}-L{c.endLine} {c.fingerprint}"
-      errs := errs.push (reject s!"{f} has {added.size} comment(s) that {ratchetFile} does not record for it, among: {", ".intercalate shown.toList}; a comment may be neither added nor edited, so delete them")
-    unless gone.isEmpty do
-      let fix := if actual.values.isEmpty then "remove its entry"
-        else s!"set its comments to {actual.values.size} and its lines to {lines}, and remove the fingerprint(s) {" ".intercalate gone.toList}"
-      errs := errs.push (reject s!"{f} no longer has {gone.size} comment(s) that {ratchetFile} records for it; {fix}")
-    if added.isEmpty && gone.isEmpty && lines != entry.lines then
-      errs := errs.push (reject s!"{f} has its comments across {lines} line(s), not the {entry.lines} that {ratchetFile} records; set its lines to {lines}")
-  return errs
+def checkComments (opts : CheckOpts) : IO (Array Rejection) := do
+  if let some err ← checkWorkingTreeRegularFile noCommentsPinFile then
+    return #[{ rule := "NO-COMMENTS", message := err }]
+  if let some err ← checkWorkingTreeRegularFile noCommentsConfigFile then
+    return #[{ rule := "NO-COMMENTS", message := err }]
+  let pin ← readNoCommentsPin
+  let bin ← ensureNoCommentsBin pin
+  let mut args := #["check"]
+  if let some ref := opts.baseRef? then
+    args := args ++ #["--base-ref", ref.value]
+  let out ← IO.Process.output { cmd := bin.toString, args }
+  if out.exitCode == 0 then
+    return #[]
+  let raw := (out.stderr ++ "\n" ++ out.stdout).trimAscii.toString
+  let lines := (((raw.splitOn "\n").map (·.trimAscii.toString)).filter (· ≠ "")).toArray
+  if lines.isEmpty then
+    return #[{ rule := "NO-COMMENTS", message := s!"{bin} check exited with status {out.exitCode}" }]
+  return lines.map fun l => { rule := "NO-COMMENTS", message := l }
 
 def listComments (target? : Option String) : IO Unit := do
-  let allFiles ← trackedLeanFiles
-  if allFiles.isEmpty then
-    throw <| IO.userError "the project tracks no Lean file"
-  let libDir := (← loadConfig).leanLibDir
-  match target? with
-  | some file =>
-    let comments := (← projectComments libDir allFiles (some file))[0]!
-    IO.println s!"{file}: {comments.size} comment(s), {distinctCommentLines comments} line(s)"
-    for c in comments do
-      IO.println s!"  {c.kind} L{c.startLine}-L{c.endLine} {c.fingerprint}"
-  | none =>
-    let mut files := 0
-    let mut totComments := 0
-    let mut totLines := 0
-    for (f, comments) in allFiles.zip (← projectComments libDir allFiles) do
-      unless comments.isEmpty do
-        let lines := distinctCommentLines comments
-        IO.println s!"{f}: {comments.size} comment(s), {lines} line(s)"
-        files := files + 1
-        totComments := totComments + comments.size
-        totLines := totLines + lines
-    IO.println s!"total: {files}/{allFiles.size} files with comments, {totComments} comment(s), {totLines} line(s)"
+  if let some err ← checkWorkingTreeRegularFile noCommentsPinFile then
+    throw <| IO.userError s!"NO-COMMENTS: {err}"
+  if let some err ← checkWorkingTreeRegularFile noCommentsConfigFile then
+    throw <| IO.userError s!"NO-COMMENTS: {err}"
+  let pin ← readNoCommentsPin
+  let bin ← ensureNoCommentsBin pin
+  let args := match target? with
+    | none => #["inventory"]
+    | some file => #["inventory", "--file", file]
+  let out ← IO.Process.output { cmd := bin.toString, args }
+  unless out.stdout.isEmpty do
+    IO.print out.stdout
+  unless out.exitCode == 0 do
+    let detail := out.stderr.trimAscii.toString
+    throw <| IO.userError (if detail.isEmpty then s!"{bin} inventory exited with status {out.exitCode}" else detail)
 
 def check (opts : CheckOpts) : IO (Array Rejection) := do
   let config ← checkConfig
@@ -1176,7 +643,7 @@ def check (opts : CheckOpts) : IO (Array Rejection) := do
   unless built.isEmpty do
     return built
   let codes ← checkCodes pkg.leanLibDir mods
-  let commentErrs ← checkComments pkg.leanLibDir allFiles opts
+  let commentErrs ← checkComments opts
   initSearchPath (← findSysroot) [pkg.leanLibDir]
   let env ← importModules (mods.map fun m => { module := m }) {}
   let idxs := mods.filterMap env.getModuleIdx?
@@ -1195,7 +662,7 @@ def check (opts : CheckOpts) : IO (Array Rejection) := do
   return errs ++ checkProcess env compiled ++ codes ++ commentErrs
 
 def checkUsage : String :=
-  "usage: lean --run tools/check.lean [--base-ref <ref>] [--bootstrap] | --tests | --tests-module <file> <out> | --comments [<file>] | --comments-module <file> <toolDir> <libDir>"
+  "usage: lean --run tools/check.lean [--base-ref <ref>] | --tests | --tests-module <file> <out> | --comments [<file>]"
 
 def parseCheckArgs (args : List String) : Except String CheckOpts :=
   go args {}
@@ -1203,10 +670,6 @@ where
   go (rest : List String) (opts : CheckOpts) : Except String CheckOpts := do
     match rest with
     | [] => return opts
-    | "--bootstrap" :: tl =>
-      if opts.bootstrap then
-        throw "duplicate --bootstrap option"
-      go tl { opts with bootstrap := true }
     | "--base-ref" :: ref :: tl =>
       if opts.baseRef?.isSome then
         throw "duplicate --base-ref option"
@@ -1226,9 +689,6 @@ public unsafe def main (args : List String) : IO UInt32 := do
     return 0
   | ["--tests-module", file, out] =>
     Check.moduleTests file out
-    return 0
-  | ["--comments-module", file, toolDir, libDir] =>
-    Check.moduleComments file toolDir libDir
     return 0
   | ["--comments"] =>
     Check.listComments none

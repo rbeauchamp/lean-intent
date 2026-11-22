@@ -1,0 +1,13 @@
+{
+  "workspaces": [
+    {
+      "dir": ".",
+      "srcDir": ".",
+      "lakeArgs": [],
+      "toolPrefixes": ["tools/"],
+      "excludePrefixes": []
+    }
+  ],
+  "exclude": [],
+  "ratchet": "tools/comment-ratchet.json"
+}

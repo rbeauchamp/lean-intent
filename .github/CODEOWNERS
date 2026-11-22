@@ -6,6 +6,7 @@
 /tools/ @rbeauchamp
 /.github/ @rbeauchamp
 /.no-mistakes.yaml @rbeauchamp
+/.no-comments.json @rbeauchamp
 
 # Core formal verification library and repository governance/instructions.
 /LeanIntent/ @rbeauchamp

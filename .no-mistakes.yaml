@@ -37,7 +37,13 @@
 # sampled every 0.1 seconds: `tools/check.lean` peaked at 5.523 GiB (5,790,928 KiB, 154.3 seconds
 # in across 4 processes during the readers), and `--tests` peaked at 3.065 GiB (3,213,552 KiB) in
 # the unbuilt clean tree and 3.059 GiB (3,207,232 KiB) after the build, all well below the kept
-# 9 GiB and 6 GiB bounds with > 15% margin.
+# 9 GiB and 6 GiB bounds with > 15% margin. After migrating NO-COMMENTS onto compiled
+# `rbeauchamp/lean-no-comments` `v0.2.0` on 2026-11-21 (pinned in `tools/no-comments.pin`,
+# configured in `.no-comments.json`), sampling summed process-group RSS every 0.1 seconds on the
+# same machine: standalone `no-comments check` peaked at 1.821 GiB (1,909,072 KiB across 5
+# processes), clean empty-cache `lean --run tools/check.lean` (including downloading the v0.2.0
+# binary) peaked at 4.733 GiB (4,963,136 KiB during the initial build), built `tools/check.lean`
+# peaked at 2.535 GiB (2,658,528 KiB), and `--tests` peaked at 2.965 GiB (3,108,880 KiB).
 #
 # Time. Each check also runs under a wall-clock limit, so that a check that stalls fails and gives
 # back its share of the memory budget instead of holding the share and the run until someone stops
@@ -78,7 +84,13 @@
 # seconds (3 * 330.65 = 991.95 seconds, below the kept 1020-second limit), and `lean --run
 # tools/check.lean --tests` took 125.28 seconds in the clean unbuilt tree and 126.07 seconds after
 # the build (3 * 126.07 = 378.21 seconds, below the kept 420-second limit), so neither limit needed
-# raising.
+# raising. After migrating NO-COMMENTS onto compiled `rbeauchamp/lean-no-comments` `v0.2.0` on
+# 2026-11-21 on the same machine through `no-mistakes admit`: clean empty-cache
+# `lean --run tools/check.lean` (including downloading the v0.2.0 binary) took 328.00 seconds
+# (`3 * 328.00 = 984.00` seconds, below 1020), built `lean --run tools/check.lean` took 312.22
+# seconds, standalone `no-comments check` took 23.73 seconds, and
+# `lean --run tools/check.lean --tests` took 106.40 seconds (`3 * 106.40 = 319.20` seconds, below
+# 420).
 test:
   instructions: |
     On lean-intent this step is verification. A change's claims are established by machine-checked proof, by derivation and by reading; lean-intent has no running product to drive.
