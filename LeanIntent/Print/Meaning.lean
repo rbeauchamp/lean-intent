@@ -253,41 +253,16 @@ theorem collect_error (fuel₀ : Nat) : (f : Nat) → (V : Std.HashSet Name) →
           · rw [Cone.size_insert_of_not_mem hcV]
             omega
 
-theorem collect_ok_of (hAll : ∀ c, Reach lookup eqn stop roots c → (lookup c).isSome)
-    {l : List Name} (hl : ∀ c, Reach lookup eqn stop roots c → c ∈ l) :
-    (f : Nat) → (V : Std.HashSet Name) → (work : List Name) →
-    (done : List (Name × ConstantInfo)) →
-    (∀ v ∈ V, Reach lookup eqn stop roots v) →
-    (∀ w ∈ work, stop w = false → Reach lookup eqn stop roots w) →
-    l.length ≤ V.size + f → ∃ out, collect lookup eqn stop f V work done = .ok out
-  | f, V, work, done, hV, hW, hfuel => by
-    unfold collect
-    split
-    · exact ⟨done, rfl⟩
-    · rename_i c rest hn
-      obtain ⟨hcW, hsc, hcV, hrest, -⟩ := nextActive_eq_some work hn
-      have hc : Reach lookup eqn stop roots c := hW c hcW hsc
-      have hsome := hAll c hc
-      cases hci : lookup c with
-      | none => simp [hci] at hsome
-      | some ci =>
-        cases f with
-        | zero =>
-          have := Cone.size_lt_length (fun v hv => hl v (hV v hv)) hcV (hl c hc)
-          omega
-        | succ f =>
-          refine collect_ok_of hAll hl f (V.insert c) (refsVia eqn c ci ++ rest) ((c, ci) :: done)
-            ?_ ?_ ?_
-          · intro v hv
-            rcases Cone.mem_insert.mp hv with rfl | hv
-            · exact hc
-            · exact hV v hv
-          · intro w hw hws
-            rcases List.mem_append.mp hw with hw | hw
-            · exact .step hc hci hw hws
-            · exact hW w (hrest w hw) hws
-          · rw [Cone.size_insert_of_not_mem hcV]
-            omega
+theorem collect_unknown : (f : Nat) → {V : Std.HashSet Name} → {work : List Name} →
+    {done : List (Name × ConstantInfo)} → {c : Name} →
+    collect lookup eqn stop f V work done = .error (.unknown c) →
+    Inv lookup eqn stop roots V work done → Reach lookup eqn stop roots c ∧ lookup c = none := by
+  intro f V work done c h hi
+  exact collect_error (V.size + f) f V work done
+    (fun v hv => by
+      obtain ⟨p, hp, rfl⟩ := List.mem_map.mp (hi.visited_mem v hv)
+      exact hi.reached p hp)
+    hi.pending rfl h
 
 theorem inv_init : Inv lookup eqn stop roots ∅ roots [] where
   found := by simp
@@ -372,11 +347,16 @@ theorem meaning_ok_iff {fuel : Nat} :
     refine ⟨fun c hc => ?_, meaning_within h⟩
     obtain ⟨p, hp, rfl⟩ := List.mem_map.mp (((meaning_ok h).2 c).mpr hc)
     simp [(meaning_ok h).1 p hp]
-  · rintro ⟨hAll, l, hlen, hl⟩
-    obtain ⟨out, hout⟩ := collect_ok_of hAll hl fuel ∅ roots []
-      (fun _ hv => absurd hv Std.HashSet.not_mem_empty)
-      (fun _ hw hs => .root hw hs) (by simpa using hlen)
-    exact ⟨out.reverse, by simp [meaning, hout, Except.map]⟩
+  · rintro ⟨hAll, hw⟩
+    cases hm : meaning lookup eqn stop fuel roots with
+    | ok out => exact ⟨out, rfl⟩
+    | error g =>
+      cases g with
+      | unknown c =>
+        obtain ⟨hc, hnone⟩ := meaning_unknown hm
+        have hsome := hAll c hc
+        simp [hnone] at hsome
+      | fuel => exact absurd hw (meaning_fuel hm)
 
 theorem reach_of_mem {fuel : Nat} {out : List (Name × ConstantInfo)}
     (h : meaning lookup eqn stop fuel roots = .ok out)
