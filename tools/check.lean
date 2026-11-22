@@ -1137,8 +1137,8 @@ def ensureRegulaDir (pin : RegulaPin) : IO System.FilePath := do
       return cacheDir
     stageRegulaCheckout pin
 
-def regulaEnv (proofDir? : Option String) : Array (String × Option String) :=
-  #[("REGULA_PROOF", proofDir?), ("REGULA_FULL", none),
+def regulaEnv (proofDir : String) : Array (String × Option String) :=
+  #[("REGULA_PROOF", some proofDir), ("REGULA_FULL", none),
     ("LEAN_PATH", none), ("LEAN_SRC_PATH", none), ("LEAN_GITHASH", none),
     ("LAKE_CACHE_DIR", some ""), ("LAKE_NO_CACHE", some "true"),
     ("LAKE_ARTIFACT_CACHE", some "false"), ("LAKE_RESTORE_ARTIFACTS", some "false"),
@@ -1299,7 +1299,7 @@ def checkRegula (mods : Array Name) : IO (Array Rejection) := do
         cmd := "lake"
         args := #["exe", "lint", regulaProfile]
         cwd := some srcDir
-        env := regulaEnv (some pkgRealStr)
+        env := regulaEnv pkgRealStr
       }
       let postSnap ← snapshotWorkspace
       pure (preSnap, out, postSnap)
