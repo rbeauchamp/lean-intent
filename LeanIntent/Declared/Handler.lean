@@ -294,7 +294,7 @@ structure GCtor where
 /-- Whether no field of the constructor holds a value of a type of the group. -/
 @[expose] def GCtor.isBase (c : GCtor) : Bool := !c.fields.any GField.isRef
 
-def containsAnyExprFVar (e : Expr) (xs : Array Expr) : Bool :=
+private def containsAnyExprFVar (e : Expr) (xs : Array Expr) : Bool :=
   xs.any fun x => match x.fvarId? with | some id => e.containsFVar id | none => false
 
 /-- The types of the group of the declaration `indVal`, with the parameters `xs`, and their
