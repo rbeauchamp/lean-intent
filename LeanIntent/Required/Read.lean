@@ -4,6 +4,7 @@ public import Lean
 public import LeanIntent.Required
 public import LeanIntent.Required.ModuleName
 public import LeanIntent.Implementation.Read
+public import LeanIntent.Loaded
 
 /-!
 # Reading where a project's required theorems lie, from the finished build
@@ -109,7 +110,7 @@ the name. A name the environment records under no module is declared in the file
 and is read from the constants that file added (`constants.map₂`). An error naming the constant and
 the module where the module recorded does not itself declare the name, as when the name is only an
 auxiliary name of that module's compiled code. -/
-def ownDeclaration (c : Name) : MetaM (Name × ConstantInfo) := do
+def ownDeclaration (c : Name) : MetaM (Name × ConstantInfo) := asking do
   let env ← getEnv
   match env.getModuleIdxFor? c with
   | some idx =>
@@ -134,7 +135,7 @@ itself declares it as a theorem, with the type and universe parameters of the de
 environment holds, which is the one the value's entry was checked against; where that module
 declares it as anything else, such as an axiom that a module imported later proves, it is another
 constant. An error where that module's theorem differs in type or universe parameters. -/
-def citedOf (e : Expr) : MetaM Cited := do
+def citedOf (e : Expr) : MetaM Cited := asking do
   let args ← ctorArgs e ``Proof.mk 2
   match constOf? args[1] with
   | none => return .term
@@ -153,7 +154,7 @@ def citedOf (e : Expr) : MetaM Cited := do
 `declaredAnywhere` found it, with the module whose own data declares it: that module, the
 deliverable its type names, where that is a constant, and what it lists. An error when its value
 does not reduce to `Required.mk`'s application, or its list to a list. -/
-def entryOf (decl : Implementation.Constant) : MetaM Entry := do
+def entryOf (decl : Implementation.Constant) : MetaM Entry := asking do
   let t ← readWhnf (← getConstInfo decl.name).type
   let .app (.app (.const ``Required _) _) d := t
     | throwError "the type of {decl.name} is not `LeanIntent.Required` applied to a deliverable"
@@ -173,7 +174,7 @@ both, since its type and value are then read through the environment. An opaque 
 axiom is found so that reading it is an error, never a value passed over, and a constant found that
 is unsafe or partial is an error (`Confirmation.Read.proofSafe_iff`), as
 `Confirmation.Read.declaredWhere` makes it for the modules it is given. -/
-def declaredAnywhere (heads : Array Name) : MetaM (Array (Implementation.Constant × Name)) := do
+def declaredAnywhere (heads : Array Name) : MetaM (Array (Implementation.Constant × Name)) := asking do
   let env ← getEnv
   let read (ci : ConstantInfo) := ci matches .defnInfo _ | .opaqueInfo _ | .axiomInfo _
   let mut candidates : Array (Name × ConstantInfo) := #[]
@@ -197,7 +198,7 @@ def declaredAnywhere (heads : Array Name) : MetaM (Array (Implementation.Constan
         found := found.push (⟨m, ci.name⟩, head)
   return found.qsort fun a b => Name.lt a.1.name b.1.name
 
-def check (built : Array Name) : MetaM Report := do
+def check (built : Array Name) : MetaM Report := asking do
   let env ← getEnv
   if env.header.isModule then
     throwError "the required-theorems check reads every declaration of every module imported, and \

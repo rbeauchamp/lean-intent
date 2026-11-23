@@ -12,21 +12,21 @@ open Lean Meta Elab
 syntax (name := renderIntent) "#render_intent " ident : command
 
 @[command_elab renderIntent]
-meta def elabRenderIntent : Command.CommandElab := fun stx => do
+meta def elabRenderIntent : Command.CommandElab := fun stx => asking do
   let decl ← Command.liftCoreM <| realizeGlobalConstNoOverloadWithInfo stx[1]
   logInfo (← Command.liftTermElabM <| renderExplanation decl)
 
 syntax (name := renderIntentExact) "#render_intent_exact " ident : command
 
 @[command_elab renderIntentExact]
-meta def elabRenderIntentExact : Command.CommandElab := fun stx => do
+meta def elabRenderIntentExact : Command.CommandElab := fun stx => asking do
   let decl ← Command.liftCoreM <| realizeGlobalConstNoOverloadWithInfo stx[1]
   logInfo (← Command.liftTermElabM <| renderExplanation decl .exact)
 
 syntax (name := renderIntentAt) "#render_intent_at " ident (ppSpace colGt term:max)+ : command
 
 @[command_elab renderIntentAt]
-meta def elabRenderIntentAt : Command.CommandElab := fun stx => do
+meta def elabRenderIntentAt : Command.CommandElab := fun stx => asking do
   let f := stx[1]
   let args : Array Syntax := stx[2].getArgs
   let decl ← Command.liftCoreM <| realizeGlobalConstNoOverloadWithInfo f
@@ -45,7 +45,7 @@ meta def elabRenderIntentAt : Command.CommandElab := fun stx => do
 syntax (name := answerTextsCmd) "#answer_texts " ident ident : command
 
 @[command_elab answerTextsCmd]
-meta def elabAnswerTexts : Command.CommandElab := fun stx => do
+meta def elabAnswerTexts : Command.CommandElab := fun stx => asking do
   let ex ← Command.liftCoreM <| realizeGlobalConstNoOverloadWithInfo stx[1]
   let decl ← Command.liftCoreM <| realizeGlobalConstNoOverloadWithInfo stx[2]
   let texts ← Command.liftTermElabM do

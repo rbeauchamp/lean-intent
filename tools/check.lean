@@ -252,14 +252,13 @@ partial def syntaxKey : Syntax → String
   | .ident _ _ n _ => "`" ++ nameKey n
   | .node _ k args => "(" ++ nameKey k ++ args.foldl (fun acc a => acc ++ " " ++ syntaxKey a) "" ++ ")"
 
-unsafe def testsOfModule (path file : String) (mod : Name) (mods : Array Name)
-    (out : System.FilePath) : IO (Array String) := do
+unsafe def elaborate (path file : String) (mod : Name) (opts : Options) (so : String) :
+    IO (Environment × Elab.IncrementalState) := do
   let input ← IO.FS.readFile file
   let inputCtx := Parser.mkInputContext input file
-  let opts := ({} : Options).setBool `Elab.async false
-  let fail (messages : MessageLog) : IO (Array String) := do
+  let fail (messages : MessageLog) : IO (Environment × Elab.IncrementalState) := do
     let shown ← messages.toList.mapM (·.toString)
-    throw <| IO.userError s!"{path}: Lean could not elaborate it, so its tests cannot be read:\n{String.join shown}"
+    throw <| IO.userError s!"{path}: Lean could not elaborate it, {so}:\n{String.join shown}"
   let (header, parserState, messages) ← Parser.parseHeader inputCtx
   enableInitializersExecution
   let (env, messages) ← Elab.processHeader header opts messages inputCtx (mainModule := mod)
@@ -271,6 +270,12 @@ unsafe def testsOfModule (path file : String) (mod : Name) (mods : Array Name)
   let s ← Elab.IO.processCommandsIncrementally inputCtx parserState state none
   if s.commandState.messages.hasErrors then
     return ← fail s.commandState.messages
+  return (headerEnv, s)
+
+unsafe def testsOfModule (path file : String) (mod : Name) (mods : Array Name)
+    (out : System.FilePath) : IO (Array String) := do
+  let opts := ({} : Options).setBool `Elab.async false
+  let (headerEnv, s) ← elaborate path file mod opts "so its tests cannot be read"
   if s.commandState.messages.reportedPlusUnreported.any (·.data.hasTag (· == `hasSorry)) then
     throw <| IO.userError s!"{path}: cannot inspect tests of a file using `sorry` or `debug.byAsSorry`"
   let env := s.commandState.env
@@ -1443,7 +1448,170 @@ def checkRegula (mods : Array Name) : IO (Array Rejection) := do
     return #[{ rule := "REGULA", message := s!"Regula exited with status {out.exitCode}" }]
   return lines.map fun l => { rule := "REGULA", message := l }
 
-def check (opts : CheckOpts) : IO (Array Rejection) := do
+def importFunctions : List Name := [``importModules, ``finalizeImport]
+
+def unloadedImport : Name := ``withImportModules
+
+def storedImport : Name := `LeanIntent.Imported.stored
+
+def loadExtsPosition (t : Expr) : Option Nat :=
+  go 0 t
+where
+  go (i : Nat) : Expr → Option Nat
+    | .forallE n _ b _ => if n.eraseMacroScopes == `loadExts then some i else go (i + 1) b
+    | .mdata _ b => go i b
+    | _ => none
+
+def importChoices (env : Environment) : Except String (List (Name × Option Nat)) := do
+  let again := "read the rule LOADED again from this Lean's source"
+  let mut choices := []
+  for f in importFunctions do
+    let some ci := env.find? f
+      | throw s!"{f} is not declared under this Lean: {again}"
+    let some i := loadExtsPosition ci.type
+      | throw s!"{f} takes no parameter named loadExts under this Lean: {again}"
+    choices := (f, some i) :: choices
+  unless env.contains unloadedImport do
+    throw s!"{unloadedImport} is not declared under this Lean: {again}"
+  let others := env.constants.map₁.fold (init := #[]) fun acc c ci =>
+    if !importFunctions.contains c && (loadExtsPosition ci.type).isSome then acc.push c else acc
+  unless others.isEmpty do
+    throw s!"{others.qsort Name.lt} take a parameter named loadExts under this Lean, and the rule LOADED does not know them: {again}"
+  return (unloadedImport, none) :: choices
+
+partial def importFaults (choices : List (Name × Option Nat)) (e : Expr) (acc : Array String) :
+    Array String :=
+  let acc := match e.getAppFn with
+    | .const c _ =>
+      match choices.lookup c with
+      | none => acc
+      | some none =>
+        acc.push s!"names {c}, which leaves every environment extension's state unloaded"
+      | some (some i) =>
+        if (e.getAppArgs[i]?.map (·.consumeMData.isConstOf ``Bool.true)) == some true then acc
+        else acc.push s!"names {c} without `loadExts := true` written as its argument"
+    | .lam _ t b _ | .forallE _ t b _ => importFaults choices b (importFaults choices t acc)
+    | .letE _ t v b _ =>
+      importFaults choices b (importFaults choices v (importFaults choices t acc))
+    | .mdata _ b | .proj _ _ b => importFaults choices b acc
+    | .app .. | .bvar _ | .fvar _ | .mvar _ | .sort _ | .lit _ => acc
+  e.getAppArgs.foldl (fun acc a => importFaults choices a acc) acc
+
+def loadsOf (choices : List (Name × Option Nat)) (ci : ConstantInfo) : Bool × Array String :=
+  let exprs := (ci.type :: (ci.value? (allowOpaque := true)).toList).filter fun e =>
+    e.getUsedConstants.any fun c => (choices.lookup c).isSome
+  let faults := exprs.foldl (fun acc e => importFaults choices e acc) #[]
+  (!exprs.isEmpty, faults.foldl (fun acc f => if acc.contains f then acc else acc.push f) #[])
+
+def guards : List Name := [`LeanIntent.asking, `LeanIntent.askingIn]
+
+def loadedProof : Name := `LeanIntent.Loaded
+
+def stateless : List Name :=
+  [`LeanIntent.Loaded, `LeanIntent.isLoaded, `LeanIntent.asking, `LeanIntent.askingIn,
+   `LeanIntent.Cone.lookupIn, `LeanIntent.Cone.checkRecord, `LeanIntent.Cone.firstUnknown,
+   `LeanIntent.CodeAudit.relevantIn, `LeanIntent.CodeAudit.importers,
+   `LeanIntent.CodeAudit.generatedBy, `LeanIntent.CodeAudit.instMonadEnvEnvM,
+   `LeanIntent.Render.bareConsts, `LeanIntent.Render.recursionKind, `LeanIntent.Render.stopAt]
+
+partial def holdsEnv (env : Environment) (c : Name) : StateM (Std.HashMap Name Bool) Bool := do
+  if c == ``Environment || c == ``Kernel.Environment then return true
+  if let some known := (← get)[c]? then return known
+  modify (·.insert c false)
+  let named : Array Name := match env.find? c with
+    | some (.inductInfo v) => v.ctors.foldl (init := #[]) fun acc k =>
+        match env.find? k with
+        | some ki => acc ++ ki.type.getUsedConstants
+        | none => acc
+    | some (.defnInfo v) =>
+        if v.type.getForallBody.isSort then v.value.getUsedConstants else #[]
+    | _ => #[]
+  let mut holds := false
+  for n in named do
+    if ← holdsEnv env n then
+      holds := true
+      break
+  modify (·.insert c holds)
+  return holds
+
+def guardedValue : Expr → Bool
+  | .lam _ _ b _ | .mdata _ b => guardedValue b
+  | e => match e.getAppFn with
+    | .const c _ => guards.contains c
+    | _ => false
+
+def takesLoaded : Expr → Bool
+  | .forallE _ t b _ => t.getAppFn.isConstOf loadedProof || takesLoaded b
+  | .mdata _ b => takesLoaded b
+  | _ => false
+
+def written (env : Environment) (c : Name) : Bool :=
+  (declRangeExt.find? (level := .exported) env c).isSome
+
+def readerFault (env : Environment) (c : Name) (ci : ConstantInfo) : Option String :=
+  if written env c then
+    let copy := (env.find? (Compiler.mkUnsafeRecName c)).bind (·.value? (allowOpaque := true))
+    let outright := ci.type.getUsedConstants.any fun k => k == ``Environment || k == ``Kernel.Environment
+    let guarded := (ci.value? (allowOpaque := true)).any guardedValue || copy.any guardedValue
+    if stateless.contains c || takesLoaded ci.type || (guarded && !outright) then none
+    else if guarded then
+      some "begins with the library's guard but is also handed an environment outright, which the guard does not test: it must take a proof of `LeanIntent.Loaded` for that environment"
+    else some "is handed an environment and neither begins with `LeanIntent.asking` or `LeanIntent.askingIn` nor takes a proof of `LeanIntent.Loaded`, so it would answer from the state of Lean's environment extensions where that state is not loaded"
+  else
+    let rec above : Name → Bool
+      | .anonymous => false
+      | p@(.str q _) | p@(.num q _) =>
+        written env p || written env (privateToUserName p) || above q
+    if above c.getPrefix then none
+    else some "is handed an environment, and no declaration a file writes accounts for it"
+
+unsafe def fileLoads (file libDir out : String) : IO Unit := do
+  let files ← trackedLeanFiles
+  let mods ← moduleNames files
+  let some mod := (files.zip mods).find? (·.1 == file) |>.map (·.2)
+    | throw <| IO.userError s!"{file} is not a Lean file Git's index lists here"
+  let pre := (← git #["rev-parse", "--show-prefix"]).trimAscii.toString
+  initSearchPath (← findSysroot) [libDir]
+  let opts := ({} : Options).setBool `Elab.async false
+  let (_, s) ← elaborate (pre ++ file) file mod opts "so what it imports cannot be read"
+  let env := s.commandState.env
+  let choices ← IO.ofExcept (importChoices env)
+  let declared := env.constants.map₂.toList
+  if declared.isEmpty then
+    throw <| IO.userError s!"{file}: Lean's frontend shows no declaration of it, so what it imports cannot be read"
+  let mut lines : Array String := #[]
+  for (c, ci) in declared do
+    let (names, faults) := loadsOf choices ci
+    if names && faults.isEmpty then
+      lines := lines.push s!"+ {c}"
+    for fault in faults do
+      lines := lines.push s!"- {c} {fault}"
+  let sorted := (lines.map (·.replace "\n" " ")).qsort (· < ·)
+  IO.FS.writeFile out (String.join (sorted.toList.map (· ++ "\n")))
+
+def checkToolLoads (libDir : System.FilePath) : IO (Array Rejection) := do
+  let reject (message : String) : Rejection := { rule := "LOADED", message }
+  let files := (← trackedLeanFiles).filter (·.startsWith "tools/")
+  if files.isEmpty then
+    return #[reject "Git's index lists no Lean file under tools/, where this program lies"]
+  let out ← IO.FS.createTempDir
+  try
+    let mut errs : Array Rejection := #[]
+    let mut importing := 0
+    for h : i in [0:files.size] do
+      let report := out / s!"{i}.loads"
+      discard <| runSelf #["--loads", files[i], libDir.toString, report.toString]
+      for l in ← IO.FS.lines report do
+        importing := importing + 1
+        if l.startsWith "- " then
+          errs := errs.push (reject s!"{files[i]}: {(l.drop 2).toString}")
+    if importing == 0 then
+      errs := errs.push (reject "no declaration of a Lean file under tools/ is seen to import modules, though this program imports the library's: the rule read nothing")
+    return errs
+  finally
+    IO.FS.removeDirAll out
+
+unsafe def check (opts : CheckOpts) : IO (Array Rejection) := do
   let config ← checkConfig
   unless config.isEmpty do
     return config
@@ -1465,25 +1633,61 @@ def check (opts : CheckOpts) : IO (Array Rejection) := do
   let codes ← checkCodes pkg.leanLibDir mods
   let commentErrs ← checkComments opts
   let regulaErrs ← checkRegula mods
+  let toolLoads ← checkToolLoads pkg.leanLibDir
   initSearchPath (← findSysroot) [pkg.leanLibDir]
-  let env ← importModules ((mods.map fun m => { module := m }).push { module := `Std.Internal.UV.System }) {}
+  enableInitializersExecution
+  let env ← importModules ((mods.map fun m => { module := m }).push { module := `Std.Internal.UV.System }) {} (loadExts := true)
+  let choices ← IO.ofExcept (importChoices env)
   let idxs := mods.filterMap env.getModuleIdx?
   let mut errs : Array Rejection := #[]
   let mut audited := 0
   let mut compiled : Array Name := #[]
+  let mut storedImports := false
+  let mut holders : Std.HashMap Name Bool := {}
+  let mut readers : Array Name := #[]
   for (c, ci) in env.constants.map₁.toList do
     if let some idx := env.getModuleIdxFor? c then
       if idxs.contains idx then
         audited := audited + 1
-        errs := errs ++ (← auditConstant env env.header.modules[idx.toNat]!.module c ci)
+        let mod := env.header.modules[idx.toNat]!.module
+        errs := errs ++ (← auditConstant env mod c ci)
+        let (names, faults) := loadsOf choices ci
+        if c == storedImport then
+          storedImports := names
+        else
+          for fault in faults do
+            errs := errs.push { rule := "LOADED", message := s!"{mod}: {c} {fault}" }
+        if ci matches .defnInfo _ | .opaqueInfo _ then
+          let mut handed := false
+          for k in ci.type.getUsedConstants do
+            let (holds, known) := (holdsEnv env k).run holders
+            holders := known
+            if holds then
+              handed := true
+              break
+          if handed then
+            if written env c then
+              readers := readers.push c
+            if let some fault := readerFault env c ci then
+              errs := errs.push { rule := "READERS", message := s!"{mod}: {c} {fault}" }
         if (IR.findEnvDecl env c).isSome then
           compiled := compiled.push c
+  if readers.isEmpty then
+    errs := errs.push { rule := "READERS", message :=
+      "no declaration a library file writes is seen to be handed an environment, though its readers are: the rule read nothing" }
+  for c in stateless do
+    unless readers.contains c do
+      errs := errs.push { rule := "READERS", message :=
+        s!"the rule excepts {c}, which no library file declares as a declaration handed an environment: read the rule's exceptions again" }
   if audited == 0 then
     errs := errs.push { rule := "AXIOMS", message := "the library's modules declare no constant" }
-  return errs ++ checkProcess env compiled ++ codes ++ commentErrs ++ regulaErrs
+  unless storedImports do
+    errs := errs.push { rule := "LOADED", message :=
+      s!"the library declares no {storedImport} that imports modules, the one declaration the rule lets import without loading the extensions' state: read the rule's exception again" }
+  return errs ++ checkProcess env compiled ++ codes ++ commentErrs ++ regulaErrs ++ toolLoads
 
 def checkUsage : String :=
-  "usage: lean --run tools/check.lean [--base-ref <ref>] | --tests | --tests-module <file> <out> | --comments [<file>]"
+  "usage: lean --run tools/check.lean [--base-ref <ref>] | --tests | --tests-module <file> <out> | --loads <file> <libDir> <out> | --comments [<file>]"
 
 def parseCheckArgs (args : List String) : Except String CheckOpts :=
   go args {}
@@ -1510,6 +1714,9 @@ public unsafe def main (args : List String) : IO UInt32 := do
     return 0
   | ["--tests-module", file, out] =>
     Check.moduleTests file out
+    return 0
+  | ["--loads", file, libDir, out] =>
+    Check.fileLoads file libDir out
     return 0
   | ["--comments"] =>
     Check.listComments none

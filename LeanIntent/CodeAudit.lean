@@ -2,6 +2,7 @@ module
 
 public import LeanIntent.Cone
 public import LeanIntent.Declared
+public import LeanIntent.Loaded
 public import Lean.Util.CollectAxioms
 
 /-!
@@ -277,13 +278,13 @@ instance : MonadEnv EnvM where
 
 /-- The axioms that Lean's `collectAxioms` reports the declaration `c` of `env` rests on: for an
 imported declaration, those Lean recorded when it exported the declaration's module. -/
-@[expose] def axiomsIn (env : Environment) (c : Name) : Array Name :=
+@[expose] def axiomsIn (env : Environment) (_h : Loaded env) (c : Name) : Array Name :=
   (collectAxioms c : EnvM (Array Name)).run' env
 
 /-- Whether Lean recognizes `ci` as an instance of `HasCode` or `Covered`, or a function
 returning one. Use the same semantic class recognition as instance registration, including its
 reducible unfolding and telescope traversal, rather than inspecting the type's written head. -/
-def isCarrier (ci : ConstantInfo) : MetaM Bool := do
+def isCarrier (ci : ConstantInfo) : MetaM Bool := asking do
   let cls ← isClass? ci.type
   return cls == some ``HasCode || cls == some ``Covered
 
@@ -291,7 +292,7 @@ def isCarrier (ci : ConstantInfo) : MetaM Bool := do
 the two carrier classes. This specifies the request to Lean and the use of its result; Lean's
 recognition itself remains trusted. The reporting traversal uses this operation directly. -/
 theorem isCarrier_eq (ci : ConstantInfo) :
-    isCarrier ci = (do
+    isCarrier ci = asking (do
       let cls ← isClass? ci.type
       pure (Decidable.decide (cls = some ``HasCode ∨ cls = some ``Covered))) := by
   simp [isCarrier, Bool.beq_eq_decide_eq]
@@ -348,7 +349,7 @@ theorem mem_attestedTypes {ctor : Name} {α : Expr} :
 
 /-- Render a diagnostic type with its binder types, whether it is a type family extracted from
 an attestation or an instance's full quantified declaration type. -/
-def diagnosticType (α : Expr) : MetaM String := withOptions
+def diagnosticType (α : Expr) : MetaM String := asking <| withOptions
     (fun o => ((o.setBool `pp.funBinderTypes true).setBool `pp.piBinderTypes true).setBool
       `pp.letVarTypes true) do
   return toString (← ppExpr α)
@@ -385,8 +386,7 @@ of whether a declaration that depends on it is a carrier and to the printing of 
 type, each counted from where it starts (`withCurrHeartbeats`), and not to the audit as a whole. The collection before them is no
 elaboration: it takes steps in proportion to the declarations reached, with the library, and Lean
 would count them against the first reading. -/
-def audit (first : Name) (rest : List Name) : MetaM Outcome := do
-  let env ← getEnv
+def audit (first : Name) (rest : List Name) : MetaM Outcome := askingIn fun env loaded => do
   let ctor ← Declared.standsDecl
   let some m := env.getModuleIdxFor? ``Ty.Stands
     | throwError "the audit of declared types' codes runs in a module that imports `LeanIntent.Degenerate`"
@@ -461,9 +461,9 @@ def audit (first : Name) (rest : List Name) : MetaM Outcome := do
         if ← withCurrHeartbeats (isCarrier ci) then
           carriers := carriers.push (d, ← withCurrHeartbeats (diagnosticType ci.type))
     findings := findings.push { decl := c, type? := ty, why, carriers }
-  let refusal? := decide lookup relevant exempt verified.contains (axiomsIn env) ctor first rest
+  let refusal? := decide lookup relevant exempt verified.contains (axiomsIn env loaded) ctor first rest
   let outside (c : Name) : Option (Array Name) :=
-    if relevant c then none else some ((axiomsIn env c).filter fun a => !leanAxioms.contains a)
+    if relevant c then none else some ((axiomsIn env loaded c).filter fun a => !leanAxioms.contains a)
   let refusal? := refusal?.map fun r => (r, match r with | .impl c => outside c | _ => none)
   return { first, rest, findings, refusal? }
 
@@ -494,7 +494,7 @@ names a declaration a finding already names. Empty exactly when the audit accept
 declaration it depends on attests a declared type's code with a code or isomorphism other than the
 one the deriving handler writes from the type's declaration, and it rests on no axiom but Lean's
 three. -/
-def requireCodes (c : Name) : MetaM Unit := do
+def requireCodes (c : Name) : MetaM Unit := asking do
   let lines := report (← audit c [])
   unless lines.isEmpty do
     throwError "the audit of declared types' codes refuses {c}:\n{"\n".intercalate lines.toList}"

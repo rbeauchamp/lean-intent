@@ -5,21 +5,24 @@ public import Std.Data.HashMap.Lemmas
 public import LeanIntent.Execution
 public import LeanIntent.Execution.Code
 public import LeanIntent.Implementation.Read
+public import LeanIntent.Imported
+public import LeanIntent.Loaded
 
 public section
 
 namespace LeanIntent.Execution.Read
 
-open Lean Meta LeanIntent.Render LeanIntent.Confirmation.Read
+open Lean Meta LeanIntent.Render LeanIntent.Confirmation.Read LeanIntent.Imported
 
 /-- The name `e` reduces to, through the kernel: `Name.anonymous`, or `Name.str` or `Name.num`
 applied to a name and a literal. An error when it reduces to anything else. -/
-def nameLit (e : Expr) : MetaM Name :=
+def nameLit (e : Expr) : MetaM Name := asking <|
   go (2 ^ 64) e
 where
-  go : Nat → Expr → MetaM Name
-    | 0, _ => throwError "name has more than 2 ^ 64 components"
-    | fuel + 1, e => do
+  go (fuel : Nat) (e : Expr) : MetaM Name := asking do
+    match fuel with
+    | 0 => throwError "name has more than 2 ^ 64 components"
+    | fuel + 1 =>
       let e ← readWhnf e
       match e with
       | .const ``Name.anonymous _ => return .anonymous
@@ -34,7 +37,7 @@ where
 /-- What the build shows of the value `decl`, a constant whose type reduces to `Runs d`: the
 deliverable its type names, where that is a constant, and the executable it names. An error when
 its value does not reduce to `Runs.mk`'s application, or the executable to a name. -/
-def claimOf (decl : Name) : MetaM Claim := do
+def claimOf (decl : Name) : MetaM Claim := asking do
   let t ← readWhnf (← getConstInfo decl).type
   let .app (.app (.const ``Runs _) _) d := t
     | throwError "the type of {decl} is not `LeanIntent.Runs` applied to a deliverable"
@@ -44,7 +47,7 @@ def claimOf (decl : Name) : MetaM Claim := do
   return ⟨decl, Implementation.Read.constOf? d, executable⟩
 
 /-- The values of `Runs d` the modules `mods` declare, as the build shows them. -/
-def claims (mods : Array Name) : MetaM (Array Claim) := do
+def claims (mods : Array Name) : MetaM (Array Claim) := asking do
   (← declaredIn mods ``Runs).mapM claimOf
 
 /-- The declarations the IR expression `e` calls (`IR.Expr.fap`) or makes a closure of
@@ -75,20 +78,17 @@ end
 /-- The declarations that the IR the build stored for `n`, as Lean finds it (`IR.findEnvDecl`),
 calls or makes a closure of: none where Lean finds no IR for `n`, or where its IR declares it
 implemented in another language (`extern`). -/
-@[expose] def irRefs (env : Environment) (n : Name) : List Name :=
-  match IR.findEnvDecl env n with
+@[expose] def irRefs (s : Stored) (n : Name) : List Name :=
+  match s.irDecl? n with
   | some (.fdecl _ _ _ body _) => bodyRefs body
   | some (.extern ..) | none => []
 
-/-- The modules of `env` whose imports reach the module `m`, `m` included: those whose code can
-call a declaration of `m`. -/
-@[expose] def importersOf (env : Environment) (m : Name) : Std.HashSet Name := Id.run do
-  let mods := env.header.modules
+@[expose] def importersOf (s : Stored) (m : Name) : Std.HashSet Name := Id.run do
+  let mods := s.modules
   let mut importers : Std.HashMap Name (Array Name) := {}
-  for h : i in [0:mods.size] do
-    for imp in (env.header.moduleData[i]?.map (·.imports)).getD #[] do
-      importers := importers.insert imp.module
-        ((importers.getD imp.module #[]).push mods[i].module)
+  for (modName, imports) in mods do
+    for imp in imports do
+      importers := importers.insert imp ((importers.getD imp #[]).push modName)
   let mut found : Std.HashSet Name := ({} : Std.HashSet Name).insert m
   let mut work := [m]
   for _ in [0 : mods.size + 1] do
@@ -101,12 +101,6 @@ call a declaration of `m`. -/
           found := found.insert next
           work := next :: work
   return found
-
-/-- The module of `env` that `n` belongs to, where `env` imports it: the module that declares the
-constant `n`, or, for a declaration the environment holds no constant of, the module whose IR holds
-it. -/
-@[expose] def importedModuleOf (env : Environment) (n : Name) : Option Name :=
-  env.getModuleIdxFor? n |>.bind fun i => Confirmation.Read.moduleName? env.header i.toNat
 
 @[expose] def pushNew (queued : Std.HashSet Name) (acc : List Name) :
     List Name → Std.HashSet Name × List Name
@@ -347,47 +341,39 @@ theorem buildTable_reach_ne_exhausted {step : Name → List Name} {root target :
 
 end Table
 
-def reachesIn (env : Environment) (c : Implementation.Constant) : CoreM Bool := do
-  unless importedModuleOf env c.name == some c.module do return false
-  let up := importersOf env c.module
-  let inCone (n : Name) : Bool := (importedModuleOf env n).any up.contains
+@[expose] def reachesIn (s : Stored) (c : Implementation.Constant) : Except String Bool := do
+  unless s.moduleOf c.name == some c.module do return false
+  let up := importersOf s c.module
+  let inCone (n : Name) : Bool := (s.moduleOf n).any up.contains
   unless inCone `main do return false
   let code (n : Name) : List Name :=
-    if n != c.name && isCompiledCodeOf (env.contains ·) c.name n && (IR.findEnvDecl env n).isSome
+    if n != c.name && isCompiledCodeOf s.contains c.name n && (s.irDecl? n).isSome
     then [c.name] else []
-  let step (n : Name) : List Name := (irRefs env n ++ code n).filter inCone
-  let some table := buildTable step (env.const2ModIdx.size + 1)
+  let step (n : Name) : List Name := (irRefs s n ++ code n).filter inCone
+  let some table := buildTable step (s.constCount + 1)
       (({} : Std.HashSet Name).insert `main) [`main] {}
-    | throwError "`main` reaches more than {env.const2ModIdx.size + 1} declarations"
+    | throw s!"`main` reaches more than {s.constCount + 1} declarations"
   return reach (fun n => table.getD n []) `main c.name (table.size + 1) == .reached
 
-def executableIn (name root : Name) (targets : List Implementation.Constant) :
-    CoreM Executable := do
-  let env ← getEnv
-  let entry := env.contains `main
-  let reached ← if entry then targets.filterM (reachesIn env) else pure []
+@[expose] def executableIn (s : Stored) (name root : Name) (targets : List Implementation.Constant) :
+    Except String Executable := do
+  let entry := s.contains `main
+  let reached ← if entry then targets.filterM (reachesIn s) else pure []
   return ⟨name, root, entry, reached⟩
 
-/-- **What a gate reads**, from the finished build: the report on what the executables `exes`,
-each given by its name and root module as the project's Lake configuration declares them, run of
-the project whose modules are `mods`. It reads the deliverables and claims of those modules, the
-implementations `Implementation.Read.check` reads of them, and, for each executable, the
-environment Lean imports from its root module alone, in which it reads `main` and what `main`
-reaches. Its findings are empty exactly when every claim holds (`Execution.findings_eq_nil_iff`). -/
-def check (mods : Array Name) (exes : Array (Name × Name)) : MetaM Report := do
+def check (mods : Array Name) (exes : Array (Name × Name)) : MetaM Report := asking do
   let ds ← declaredIn mods ``Deliverable
   let implemented ← Implementation.Read.check mods
   let is := implemented.implementations.map fun (d, _, c) => (d, c)
   let as := implemented.awaiting.map (·.1)
   let cls ← claims mods
-  let ctx ← readThe Core.Context
   let es ← exes.mapM fun (name, root) => do
     let targets := (cls.toList.filter (·.executable == name)).flatMap fun cl =>
       is.filterMap fun (d, c) => if cl.deliverable == some d then some c else none
     try
-      let env ← importModules #[{ module := root }] (← getOptions)
-      let (e, _) ← (executableIn name root targets.eraseDups).run ctx { env }
-      return e
+      match executableIn (← stored root (← getOptions)) name root targets.eraseDups with
+      | .ok e => return e
+      | .error why => throwError "{why}"
     catch err =>
       throwError "the executable {name}, whose root module is {root}, cannot be read: \
         {err.toMessageData}"
