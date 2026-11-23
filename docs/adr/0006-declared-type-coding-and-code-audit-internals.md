@@ -29,11 +29,13 @@ The declared-type coding pipeline spans `LeanIntent/Codes.lean`, `LeanIntent/Clo
 - **Untrusted candidate lookup for mutual group maps**: Inside `checkAttestation`, looking up `ci.name.modifyBase (·.getPrefix ++ Name.mkSimple s!"to{l}")` supplies only a candidate hint for sibling types in a recursive group (preserving macro scopes on base names); acceptance is decided solely by kernel-checked constructor equations in `checkRecMaps`.
 - **Self-audit at derivation time**: `LeanIntent/Declared/Handler.lean` runs `checkAttestation` immediately after elaborating each derived `HasCode` instance so the deriving handler never emits an attestation that `LeanIntent.CodeAudit` would later refuse.
 
-### Lean v4.35.0 reduction, extensionless-environment, and naming internals
+### Reduction, extensionless-environment, scope, and naming internals
 
 - **`whnf` → `Kernel.whnf` fallback in `checkRecMaps`**: MetaM `whnf` can stop short of reducing a recursive map applied to a constructor to `MuVal.base`/`MuVal.node` when a recursive field is a function; `checkRecMaps` falls back to `Kernel.whnf` in that case.
 - **Manual `Nat.decLt` proof construction**: `checkRecMaps` constructs `r < A` proofs directly via `of_decide_eq_true (Nat.decLt ...)` with `mkApp` instead of typeclass synthesis, because `tools/codes.lean` imports modules with default `loadExts := false` where instance-synthesis environment extensions are not loaded (see also #63).
-- **Namespace-relative naming (`rel`) in `mkRecHasCode`**: Generated mutual definitions and self-recursive theorems strip the current namespace prefix (`rel`) rather than using `_root_ ++ ...`, because Lean syntax resolves intra-mutual and self-recursive references relative to the current namespace.
+- **Namespace-relative naming (`relIdent`) across generated commands (#72)**: `relIdent` (`Name.modifyBase (·.replacePrefix ns .anonymous)`) replaces `_root_ ++ ...` across `mkStandsAndInstance`, `mkRecHasCode` (`let rel := relIdent ns`), and `mkHasCode` (`isoName`) so generated instances, mutual definitions, and theorems resolve relative to the current namespace while preserving macro scopes on macro-declared types.
+- **Recursive equation realization (`getEqnsFor?` and `mkEqIdent`, #72)**: Instead of naming `_root_ ++ toName k ++ s!"eq_{c.alt}"` or rewriting with `rw [to{k}]`, `mkRecHasCode` realizes each `act (toName k)`'s equation theorems via `Lean.Meta.getEqnsFor?` inside `withoutExporting` (covering private definitions in `module` files) and references `eqs[c.alt - 1]?` through `mkEqIdent` (an `_internal`/`eqLemma` macro-scoped `Syntax.ident` carrying `[.decl c []]` preresolution) in both `invToDefs` and `toInvAlts`.
+- **Section scope isolation (`handler`, #73)**: `handler` clears `varDecls`, `varUIds`, `includedVars`, `omittedVars`, and `levelNames` inside `withScope` so enclosing section `variable`, `include`, `omit`, and `universe` declarations do not alter generated definitions, theorems, or instances.
 
 ### Linear-time lazy reverse-dependency collection (`LeanIntent/CodeAudit.lean`)
 
