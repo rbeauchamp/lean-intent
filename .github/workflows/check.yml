@@ -8,13 +8,16 @@
 # false, full Git history (fetch-depth: 0), conditional exact-ref population of
 # `refs/remotes/origin/main` from `origin`'s verified `refs/heads/main` (`git ls-remote`,
 # `git fetch --no-tags`, `FETCH_HEAD` exact-ref/OID check, `FETCH_HEAD^{commit}`, and
-# `git update-ref --no-deref`) when absent or not a commit, explicit `--base-ref` on pull_request
-# (`github.event.pull_request.base.sha`), branch push (non-zero `github.event.before`, failing
-# closed otherwise), and tag push / workflow_call / workflow_dispatch (`refs/remotes/origin/main`)
-# for NO-COMMENTS merge-base verification, a commit-SHA-pinned checkout action, SHA-256 verification
-# of both the Lean release archive paired with lean-toolchain and the pinned no-comments binary
-# paired with tools/no-comments.pin (without running an unverified curl | sh installer), and exact
-# release tag + commit-SHA verification of out-of-tree Regula paired with tools/regula.pin.
+# `git update-ref --no-deref`) when absent or not a commit, explicit `--base-ref` distinguishing
+# reusable `workflow_call` runs (`github.workflow_ref != job.workflow_ref`, read from `toJSON(job)`,
+# failing closed if absent, always using `refs/remotes/origin/main` regardless of caller event) from
+# direct `pull_request` (`github.event.pull_request.base.sha`), branch `push` (non-zero
+# `github.event.before`, failing closed otherwise), and tag `push` / `workflow_dispatch`
+# (`refs/remotes/origin/main`) for NO-COMMENTS merge-base verification, a commit-SHA-pinned checkout
+# action, SHA-256 verification of both the Lean release archive paired with lean-toolchain and the
+# pinned no-comments binary paired with tools/no-comments.pin (without running an unverified
+# curl | sh installer), and exact release tag + commit-SHA verification of out-of-tree Regula paired
+# with tools/regula.pin.
 name: check
 
 on:
@@ -239,49 +242,64 @@ jobs:
       # the library's compiled code neither starts a process nor asks where it runs, no declaration
       # depends on a declared type's code other than the one its deriving handler writes, every
       # tracked Lean file obeys the comment ratchet in tools/comment-ratchet.json, out-of-tree Regula
-      # passes `standard-logical` proof-verdict checking, every library declaration (except
-      # `LeanIntent.Imported.stored`) and tracked tool file imports modules only with `loadExts :=
-      # true`, and every library declaration handed an environment is guarded (`asking`/`askingIn`),
-      # takes a `LeanIntent.Loaded` proof, or is in the closed `stateless` exception list.
+      # passes `standard-logical` proof-verdict checking, direct mentions of
+      # `importModules`/`finalizeImport` across library declarations (except
+      # `LeanIntent.Imported.stored`) and tracked `tools/` files pass `loadExts := true` (with
+      # `withImportModules` refused), and every source-written library `.defnInfo`/`.opaqueInfo`
+      # whose type transitively holds `Environment` or `Kernel.Environment` begins with
+      # `asking`/`askingIn` (without taking an outright `Environment`), takes a `LeanIntent.Loaded`
+      # binder, or is in the closed `stateless` list (while admitting compiler-generated
+      # declarations nested beneath a source-written prefix; see ADR-0001 and ADR-0009).
       - name: Build the library and audit its axioms
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
+          CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
+          JOB_CONTEXT: ${{ toJSON(job) }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          case "$EVENT_NAME" in
-            pull_request)
-              if [ -z "$PR_BASE_SHA" ]; then
-                echo "::error::Missing pull_request.base.sha for NO-COMMENTS --base-ref"
-                exit 1
-              fi
-              lean --run tools/check.lean --base-ref "$PR_BASE_SHA"
-              ;;
-            push)
-              if [ "$REF_TYPE" = "tag" ]; then
-                lean --run tools/check.lean --base-ref refs/remotes/origin/main
-              elif [ "$REF_TYPE" = "branch" ]; then
-                if [ -z "$PUSH_BEFORE_SHA" ] || [ "$PUSH_BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
-                  echo "::error::Missing non-zero push before SHA for NO-COMMENTS --base-ref"
+          JOB_WORKFLOW_REF="$(jq -er '.workflow_ref | select(type == "string" and length > 0)' <<< "$JOB_CONTEXT" 2>/dev/null || true)"
+          if [ -z "$CALLER_WORKFLOW_REF" ] || [ -z "$JOB_WORKFLOW_REF" ]; then
+            echo "::error::Missing github.workflow_ref or job.workflow_ref to distinguish direct and workflow_call runs"
+            exit 1
+          fi
+          if [ "$CALLER_WORKFLOW_REF" != "$JOB_WORKFLOW_REF" ]; then
+            lean --run tools/check.lean --base-ref refs/remotes/origin/main
+          else
+            case "$EVENT_NAME" in
+              pull_request)
+                if [ -z "$PR_BASE_SHA" ]; then
+                  echo "::error::Missing pull_request.base.sha for NO-COMMENTS --base-ref"
                   exit 1
                 fi
-                lean --run tools/check.lean --base-ref "$PUSH_BEFORE_SHA"
-              else
-                echo "::error::Unsupported push ref_type for NO-COMMENTS --base-ref: $REF_TYPE"
+                lean --run tools/check.lean --base-ref "$PR_BASE_SHA"
+                ;;
+              push)
+                if [ "$REF_TYPE" = "tag" ]; then
+                  lean --run tools/check.lean --base-ref refs/remotes/origin/main
+                elif [ "$REF_TYPE" = "branch" ]; then
+                  if [ -z "$PUSH_BEFORE_SHA" ] || [ "$PUSH_BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+                    echo "::error::Missing non-zero push before SHA for NO-COMMENTS --base-ref"
+                    exit 1
+                  fi
+                  lean --run tools/check.lean --base-ref "$PUSH_BEFORE_SHA"
+                else
+                  echo "::error::Unsupported push ref_type for NO-COMMENTS --base-ref: $REF_TYPE"
+                  exit 1
+                fi
+                ;;
+              workflow_dispatch)
+                lean --run tools/check.lean --base-ref refs/remotes/origin/main
+                ;;
+              *)
+                echo "::error::Unsupported GitHub Actions event: $EVENT_NAME"
                 exit 1
-              fi
-              ;;
-            workflow_call|workflow_dispatch)
-              lean --run tools/check.lean --base-ref refs/remotes/origin/main
-              ;;
-            *)
-              echo "::error::Unsupported GitHub Actions event: $EVENT_NAME"
-              exit 1
-              ;;
-          esac
+                ;;
+            esac
+          fi
       # The repository establishes its claims by proof, so its listing of tests is empty.
       - name: Check that the repository has no tests
         shell: bash

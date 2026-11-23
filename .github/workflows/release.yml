@@ -6,14 +6,16 @@
 # Permissions stay read-only at workflow level (`contents: read`), with `contents: write` scoped
 # solely to `publish-release`. All actions are pinned by immutable 40-hex commit SHA with
 # `persist-credentials: false`, and `publish-release` verifies `GITHUB_REF_TYPE`, `GITHUB_REF_NAME`
-# (`v*`), valid tag ref format, checkout `HEAD`, `refs/remotes/origin/main` ancestry (populating
-# missing/non-commit `refs/remotes/origin/main` from `origin`'s verified exact `refs/heads/main`),
-# and exact remote tag binding (`git ls-remote` + `git fetch --no-tags` + `FETCH_HEAD` exact-ref/OID
-# check) with `FETCH_HEAD^{commit}` peeling before calling `gh release create --verify-tag`. Because
-# `gh release create` publishes by tag name (`--verify-tag` checks existence only) and GitHub's
-# immutable-release protection starts at publication, preventing tag updates or deletions between
-# verification and publication depends on GitHub repository ruleset protection for `v*` tags (the
-# active `release-tags` ruleset covers `refs/tags/v*`).
+# (strict SemVer `v<MAJOR.MINOR.PATCH>` with no leading zeros), valid tag ref format, checkout
+# `HEAD`, `refs/remotes/origin/main` ancestry (populating missing/non-commit
+# `refs/remotes/origin/main` from `origin`'s verified exact `refs/heads/main`), and exact remote tag
+# binding (`git ls-remote` + `git fetch --no-tags` + `FETCH_HEAD` exact-ref/OID check) with
+# `FETCH_HEAD^{commit}` peeling before calling `gh release create --notes "" --verify-tag` (empty
+# notes, no auto-generated changelog). Because `gh release create` publishes by tag name
+# (`--verify-tag` checks existence only) and GitHub's immutable-release protection starts at
+# publication, preventing tag updates or deletions between verification and publication depends on
+# GitHub repository ruleset protection for `v*` tags (the active `release-tags` ruleset covers
+# `refs/tags/v*`).
 name: Release
 
 on:
@@ -89,13 +91,11 @@ jobs:
             echo "Expected tag push with GITHUB_REF_NAME and GITHUB_SHA set" >&2
             exit 1
           fi
-          case "$TAG" in
-            v*) ;;
-            *)
-              echo "Expected tag matching v*, got ${TAG}" >&2
-              exit 1
-              ;;
-          esac
+          SEMVER_TAG_RE='^v(0|[123456789][0123456789]*)\.(0|[123456789][0123456789]*)\.(0|[123456789][0123456789]*)$'
+          if ! [[ "$TAG" =~ $SEMVER_TAG_RE ]]; then
+            echo "Expected SemVer release tag v<MAJOR.MINOR.PATCH> (no leading zeros), got ${TAG}" >&2
+            exit 1
+          fi
           EXACT_REF="refs/tags/${TAG}"
           if ! git check-ref-format "$EXACT_REF"; then
             echo "Invalid tag ref format: ${EXACT_REF}" >&2
@@ -140,4 +140,4 @@ jobs:
             echo "Remote tag '${TAG}' resolves to commit:${REMOTE_COMMIT}, expected commit:${GITHUB_SHA}" >&2
             exit 1
           fi
-          gh release create "$TAG" --repo "${GITHUB_REPOSITORY}" --title "$TAG" --generate-notes --verify-tag
+          gh release create "$TAG" --repo "${GITHUB_REPOSITORY}" --title "$TAG" --notes "" --verify-tag
