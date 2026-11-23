@@ -48,6 +48,9 @@ def isToolFile (file : String) : Bool := file.startsWith "tools/"
 def libraryFiles : IO (Array String) :=
   return (← trackedLeanFiles).filter (!isToolFile ·)
 
+def toolFiles : IO (Array String) :=
+  return (← trackedLeanFiles).filter isToolFile
+
 def moduleNames (files : Array String) : IO (Array Name) := do
   let cwd ← IO.currentDir
   files.mapM fun f => moduleNameOfFileName (System.FilePath.mk f) (some cwd)
@@ -1473,10 +1476,6 @@ def importChoices (env : Environment) : Except String (List (Name × Option Nat)
     choices := (f, some i) :: choices
   unless env.contains unloadedImport do
     throw s!"{unloadedImport} is not declared under this Lean: {again}"
-  let others := env.constants.map₁.fold (init := #[]) fun acc c ci =>
-    if !importFunctions.contains c && (loadExtsPosition ci.type).isSome then acc.push c else acc
-  unless others.isEmpty do
-    throw s!"{others.qsort Name.lt} take a parameter named loadExts under this Lean, and the rule LOADED does not know them: {again}"
   return (unloadedImport, none) :: choices
 
 partial def importFaults (choices : List (Name × Option Nat)) (e : Expr) (acc : Array String) :
@@ -1512,7 +1511,7 @@ def stateless : List Name :=
    `LeanIntent.Cone.lookupIn, `LeanIntent.Cone.checkRecord, `LeanIntent.Cone.firstUnknown,
    `LeanIntent.CodeAudit.relevantIn, `LeanIntent.CodeAudit.importers,
    `LeanIntent.CodeAudit.generatedBy, `LeanIntent.CodeAudit.instMonadEnvEnvM,
-   `LeanIntent.Render.bareConsts, `LeanIntent.Render.recursionKind, `LeanIntent.Render.stopAt]
+   `LeanIntent.Render.stopAt]
 
 partial def holdsEnv (env : Environment) (c : Name) : StateM (Std.HashMap Name Bool) Bool := do
   if c == ``Environment || c == ``Kernel.Environment then return true
@@ -1575,10 +1574,12 @@ unsafe def fileLoads (file libDir out : String) : IO Unit := do
   let opts := ({} : Options).setBool `Elab.async false
   let (_, s) ← elaborate (pre ++ file) file mod opts "so what it imports cannot be read"
   let env := s.commandState.env
-  let choices ← IO.ofExcept (importChoices env)
   let declared := env.constants.map₂.toList
   if declared.isEmpty then
     throw <| IO.userError s!"{file}: Lean's frontend shows no declaration of it, so what it imports cannot be read"
+  enableInitializersExecution
+  let leanEnv ← importModules #[{ module := `Lean.Environment }] {} (loadExts := true)
+  let choices ← IO.ofExcept (importChoices leanEnv)
   let mut lines : Array String := #[]
   for (c, ci) in declared do
     let (names, faults) := loadsOf choices ci
@@ -1591,7 +1592,7 @@ unsafe def fileLoads (file libDir out : String) : IO Unit := do
 
 def checkToolLoads (libDir : System.FilePath) : IO (Array Rejection) := do
   let reject (message : String) : Rejection := { rule := "LOADED", message }
-  let files := (← trackedLeanFiles).filter (·.startsWith "tools/")
+  let files ← toolFiles
   if files.isEmpty then
     return #[reject "Git's index lists no Lean file under tools/, where this program lies"]
   let out ← IO.FS.createTempDir

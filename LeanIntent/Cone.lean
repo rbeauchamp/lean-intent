@@ -524,7 +524,8 @@ in a module of Lean's module system they may carry a private prefix, as
 
 /-- The declaration `env` holds under `c`, read with the bodies of its own module visible. -/
 @[expose] def lookupIn (env : Environment) (c : Name) : Option ConstantInfo :=
-  (env.setExporting false).find? c
+  ((env.setExporting false).find? (skipRealize := true) c).orElse fun _ =>
+    env.toKernelEnv.find? c
 
 /-- Why the check of a record refuses before it explores. -/
 inductive Unchecked where

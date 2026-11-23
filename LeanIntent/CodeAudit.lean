@@ -5,96 +5,6 @@ public import LeanIntent.Declared
 public import LeanIntent.Loaded
 public import Lean.Util.CollectAxioms
 
-/-!
-# The audit of declared types' codes
-
-A declared type's code and isomorphism are attested by the private constructor of `Ty.Stands` that
-admits a declared type (`LeanIntent.Declared`). Lean's privacy binds names only: the `constructor`
-tactic applies a constructor without resolving its name, so a hand-written instance of `HasCode`
-completed by `by constructor` can pair a declared type with a code or isomorphism its author chose,
-and change the degenerate class the owner is shown. This module decides, from Lean's own
-environment, that a declaration depends on no such attestation.
-
-* **What a declaration depends on** (`DependsOn`): what cone exclusion follows (`Cone.RefersTo`),
-  and also a theorem's proof and an opaque constant's value, where an attestation can be written.
-  It holds everything Lean's `collectAxioms` follows at v4.36.0 (`Lean.Util.CollectAxioms`: a
-  declaration's type, the value of a definition, theorem or opaque constant, and an inductive
-  type's constructors). `depRefs` lists it (`mem_depRefs`).
-* **Where an attestation can be** (`Follows`): a declaration whose module is the one that declares
-  `Ty.Stands` or imports it, directly or through others, or that the environment's own module
-  declares (`relevantIn`). Every other declaration was checked by Lean's kernel in an environment
-  without `Ty.Stands`, so neither it nor anything it names can name the constructor, and what it
-  names is not followed. It can still rest on an axiom, and prove `False` from `sorry` for a
-  declaration that does name the constructor's type to use, so the axioms it rests on are those
-  Lean's `collectAxioms` reports for it (`axiomsIn`), which for an imported declaration Lean
-  computed when it exported the declaration's module.
-* **The procedure** (`decide`): cone exclusion's closure (`Cone.exclude`) from a first declaration
-  and a list of the rest, so that its scope is never empty, refusing at the first reached name
-  that, in a module that can hold an attestation, names the constructor in its statement or value
-  (`Applies`), unless it is one of the declarations Lean generates for `Ty.Stands` (`generatedBy`)
-  or an attestation `Declared.checkAttestation` reads as the handler's (`verified`); at a reached
-  name outside those modules that rests on an axiom other than Lean's three; at a reached name with
-  no declaration; and at a reached axiom other than Lean's three.
-  `decide_eq_none_iff` states what it decides, `verified_of_decide_eq_none` that an acceptance
-  leaves no reached attestation unread, and `mem_leanAxioms_of_decide_eq_none` and
-  `axioms_mem_leanAxioms_of_decide_eq_none` that it leaves no axiom but Lean's three.
-* **In a Lean environment** (`audit`, `report`, `requireCodes`): `audit`, given a first
-  declaration and a list of the rest as `decide` is, collects the reached declarations that name the
-  constructor, reads each with `Declared.checkAttestation`, names for each it refuses the type it
-  attests and the instances of `HasCode` or `Covered` that depend on it, and then decides with
-  `decide`, the verified attestations being those it read as the handler's. It returns that scope
-  with what it found (`Outcome`), which `report` prints. `requireCodes c` audits `c` alone and
-  throws an error that says why, unless the audit accepts it. No entry point can be given an empty
-  scope, whose audit would accept anything; a caller whose scope comes from a search refuses when
-  the search finds nothing, as `tools/codes.lean` does. Diagnostic types retain their enclosing
-  binders as type families (`AttestedType`, `mem_attestedTypes`), rather than losing types that
-  depend on a bound variable; Lean's pretty printer renders those families with binder types.
-  Carrier recognition uses Lean's `isClass?`, as instance registration does, so reducible aliases
-  of either class, including aliases hiding quantifiers, are recognized (`isCarrier_eq`).
-
-A refused attestation is one of three kinds. A hand-written instance, or a proof Lean abstracts out
-of one (`inst._proof_1`), that applies the constructor with a code or isomorphism other than the
-one the handler derives, which is the forgery this audit exists for. An attestation that no instance
-carries, which the audit refuses too, since a forged attestation is the only way to make a forged
-instance and a declaration that holds one can hand it to any instance later. And a proof that
-eliminates a `Ty.Stands` proof and names the constructor in what it builds, which no declaration of
-the library does. An axiom other than Lean's three is refused because it can state an attestation
-without naming the constructor: `sorryAx`, or `Lean.ofReduceBool` once compiled code is made to
-return a false answer.
-
-What the theorems do not reach, and what is trusted:
-
-* That `Declared.checkAttestation` refuses every attestation whose type, code or isomorphism is not
-  the one the handler derives from the type's declaration, including every attestation of a type
-  `Ty` builds in, such as `Bool` or a definition that reduces to it, which already has a code the
-  handler does not write (`Declared.builtinHeads`): argued from its code, which takes the
-  derivation from the handler's own functions and leaves each equality to Lean's kernel. For a
-  recursive type, the code is re-derived through the handler's own reading of its group and the
-  isomorphism is read by what its maps reduce to at every constructor, by Lean's `whnf` or its
-  kernel, which fixes them by structural recursion over the group (`Declared.checkRecMaps`). The
-  handler runs it on what it writes and fails rather than write a code it refuses, so the two agree
-  on every type the handler covers. That the handler reads the declaration in order stays trusted,
-  as `LeanIntent.Declared.Handler` states: the audit derives the code through the same functions, not a
-  second reading.
-* That a declaration whose dependencies name the constructor only in attestations and rest on no
-  axiom but Lean's three proves `Ty.Stands` of a declared type's code only for a code and
-  isomorphism equal to those of one of those attestations: argued from Lean's logic, in which the
-  private constructor is the only rule that concludes it, and none of the three axioms proves a
-  proposition without a proof of one equivalent to it.
-* That the declarations Lean generates for `Ty.Stands` that name the constructor are those
-  `generatedBy` lists, as observed of Lean v4.36.0. A release that generates another would make the
-  audit refuse every declaration that reaches it, not accept one it should refuse.
-* That a declaration in a module that does not import the one declaring `Ty.Stands` cannot name the
-  constructor, which follows from Lean's kernel checking each declaration in the environment of its
-  module; that `collectAxioms` reports every axiom such a declaration rests on, as Lean's own audit
-  of axioms; and that `Environment.find?` returns the declarations the kernel checked. In a module of
-  Lean's module system an imported theorem is shown as an axiom, so the audit refuses there rather
-  than accept a proof it cannot read; run it where every module is imported in full.
-* That Lean's compiler runs these definitions as defined: the theorems are about the definitions.
-* That Lean's `isClass?` recognizes class types: `isCarrier_eq` specifies the call and how its
-  result selects carriers, not the correctness of Lean's reduction and class recognition.
--/
-
 public section
 
 namespace LeanIntent.CodeAudit
@@ -281,20 +191,20 @@ imported declaration, those Lean recorded when it exported the declaration's mod
 @[expose] def axiomsIn (env : Environment) (_h : Loaded env) (c : Name) : Array Name :=
   (collectAxioms c : EnvM (Array Name)).run' env
 
-/-- Whether Lean recognizes `ci` as an instance of `HasCode` or `Covered`, or a function
-returning one. Use the same semantic class recognition as instance registration, including its
-reducible unfolding and telescope traversal, rather than inspecting the type's written head. -/
 def isCarrier (ci : ConstantInfo) : MetaM Bool := asking do
-  let cls ← isClass? ci.type
-  return cls == some ``HasCode || cls == some ``Covered
+  if ← isInstance ci.name then
+    let cls ← isClass? ci.type
+    return cls == some ``HasCode || cls == some ``Covered
+  else
+    return false
 
-/-- Carrier selection asks Lean to recognize the declaration's full type and selects exactly
-the two carrier classes. This specifies the request to Lean and the use of its result; Lean's
-recognition itself remains trusted. The reporting traversal uses this operation directly. -/
 theorem isCarrier_eq (ci : ConstantInfo) :
     isCarrier ci = asking (do
-      let cls ← isClass? ci.type
-      pure (Decidable.decide (cls = some ``HasCode ∨ cls = some ``Covered))) := by
+      if ← isInstance ci.name then
+        let cls ← isClass? ci.type
+        pure (Decidable.decide (cls = some ``HasCode ∨ cls = some ``Covered))
+      else
+        pure false) := by
   simp [isCarrier, Bool.beq_eq_decide_eq]
 
 /-- `AttestedType ctor e α`: `α` is the first argument of an application of `ctor` in `e`,

@@ -155,7 +155,7 @@ open LeanIntent.Cone (exprRefs)
 
 /-- The constants written without `@`: those whose type has only binders with the default
 annotation, which Lean applies to the arguments written after them and nothing else. -/
-@[expose] def bareConsts (env : Environment) (c : Name) : Bool :=
+@[expose] def bareConsts (env : Environment) (_h : Loaded env) (c : Name) : Bool :=
   match env.find? c with
   | some ci => explicitOnly ci.type
   | none => false
@@ -211,15 +211,14 @@ def elaboratesTo (text : String) (e : Expr) (ns : Name := .anonymous)
 
 /-- `e` printed exactly, as text that Lean elaborates back to `e`, binder names and metadata aside;
 an error when it cannot be. -/
-def printExact (e : Expr) : MetaM String := asking do
+def printExact (e : Expr) : MetaM String := askingIn fun env h => do
   let e ← instantiateMVars e
   if e.hasFVar || e.hasMVar || e.hasLooseBVars then
     throwError "cannot print{indentExpr e}\nas it has free or meta variables"
   let ec := canon (constRoots e) [] (eraseMData e)
-  let env ← getEnv
   let tokens := Parser.getTokenTable env
   let esc : String → Bool := fun s => (tokens.find? s).isSome
-  for bare in [bareConsts env, fun _ => false] do
+  for bare in [bareConsts env h, fun _ => false] do
     match print bare esc ec with
     | none =>
       throwError "cannot print{indentExpr e}\nthe printer refuses it: it holds a projection, \
@@ -643,7 +642,7 @@ record of those it compiled by well-founded recursion (`Lean.Elab.WF.eqnInfoExt`
 Lean reads it to state `c`'s unfolding equation, and `none` otherwise. A definition by
 `partial_fixpoint`, whose equation need not determine it, is in neither, and is printed by its
 value. -/
-@[expose] def recursionKind (env : Environment) (c : Name) : Option Bool :=
+@[expose] def recursionKind (env : Environment) (_h : Loaded env) (c : Name) : Option Bool :=
   if (Elab.Structural.eqnInfoExt.find? env c).isSome then some true
   else if (Elab.WF.eqnInfoExt.find? env c).isSome then some false
   else none
@@ -747,7 +746,8 @@ def declSection (R : Reader) (lookup : Name → Option ConstantInfo)
   | .ctorInfo _ | .recInfo _ => return none
   | .defnInfo v =>
     if let some (eq, t) := eqns.find? c then
-      let (kind, shows, below) := if recursionKind (← getEnv) c == some true then
+      let rk ← askingIn fun env h => pure (recursionKind env h c)
+      let (kind, shows, below) := if rk == some true then
           ("structural recursion", "", "at structural subterms of the arguments it recurses on")
         else ("well-founded recursion", "its termination proof shows that ",
           "at arguments below those on the left by a well-founded relation")
@@ -828,28 +828,31 @@ def definitions (R : Reader) (roots : List Name) (shown : NameSet) : MetaM Strin
   let limit := env₀.constants.map₂.foldl (fun k _ _ => k + 1) env₀.constants.map₁.size + 1
   let mut eqns : NameMap (Name × Expr) := {}
   for _ in [0 : limit] do
-    let env ← getEnv
-    let lookup := fun c => (env.setExporting false).find? c
-    let stop := stopAt env own shown
-    let found := eqns
-    let eqn := fun c => match found.find? c with
-      | some (_, t) => .eqn t
-      | none => if (recursionKind env c).isSome then .typeOnly else .value
-    let bound := env.constants.map₂.foldl (fun k _ _ => k + 1) env.constants.map₁.size + 1
-    let out ← match meaning lookup eqn stop bound roots with
-      | .ok out => pure out
-      | .error (.unknown c) => throwError "cannot print {c}: it has no declaration here"
-      | .error .fuel => throwError "cannot print the definitions: there are too many"
-    let todo ← out.filterM fun (c, ci) => do
-      if found.contains c then return false
-      match ci with
-      | .defnInfo _ => return (recursionKind env c).isSome
-      | .axiomInfo v =>
-        if wasOriginallyDefn env c && (← isRecursiveDefinition c) then
-          return !(← isProp v.type)
-        else return false
-      | _ => return false
+    let (out, todo) ← askingIn fun env h => do
+      let lookup := fun c => (env.setExporting false).find? c
+      let stop := stopAt env own shown
+      let found := eqns
+      let eqn := fun c => match found.find? c with
+        | some (_, t) => .eqn t
+        | none => if (recursionKind env h c).isSome then .typeOnly else .value
+      let bound := env.constants.map₂.foldl (fun k _ _ => k + 1) env.constants.map₁.size + 1
+      let out ← match meaning lookup eqn stop bound roots with
+        | .ok out => pure out
+        | .error (.unknown c) => throwError "cannot print {c}: it has no declaration here"
+        | .error .fuel => throwError "cannot print the definitions: there are too many"
+      let todo ← out.filterM fun (c, ci) => do
+        if found.contains c then return false
+        match ci with
+        | .defnInfo _ => return (recursionKind env h c).isSome
+        | .axiomInfo v =>
+          if wasOriginallyDefn env c && (← isRecursiveDefinition c) then
+            return !(← isProp v.type)
+          else return false
+        | _ => return false
+      pure (out, todo)
     if todo.isEmpty then
+      let env ← getEnv
+      let lookup := fun c => (env.setExporting false).find? c
       let isLibrary (c : Name) : Bool := R.form == .readable &&
         match env.getModuleIdxFor? c with
         | some idx => (env.header.modules[idx.toNat]?.map (·.module.getRoot)) == some `LeanIntent
@@ -860,7 +863,7 @@ def definitions (R : Reader) (roots : List Name) (shown : NameSet) : MetaM Strin
       let mut generated := ""
       let mut library := ""
       for (c, ci) in out do
-        if let some s ← declSection R lookup out found c ci then
+        if let some s ← declSection R lookup out eqns c ci then
           if isLibrary c then library := library ++ s
           else if isGenerated c then generated := generated ++ s
           else text := text ++ s
