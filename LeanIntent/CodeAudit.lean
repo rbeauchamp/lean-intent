@@ -197,7 +197,8 @@ def isCarrier (ci : ConstantInfo) : MetaM Bool := asking <| withoutExporting do
   if defHasCode.any (·.1 == ci.name) || defCovered.any (·.1 == ci.name) then
     return true
   else if ← isInstance ci.name then
-    let cls ← isClass? ci.type
+    let cls ← MetaM.run' (ctx := {}) (s := {}) <|
+      forallTelescopeReducing ci.type fun _ target => isClass? target
     return cls == some ``HasCode || cls == some ``Covered
   else
     return false
@@ -210,7 +211,8 @@ theorem isCarrier_eq (ci : ConstantInfo) :
           (∃ e ∈ defCovered, e.1 = ci.name)) then
         pure true
       else if ← isInstance ci.name then
-        let cls ← isClass? ci.type
+        let cls ← MetaM.run' (ctx := {}) (s := {}) <|
+          forallTelescopeReducing ci.type fun _ target => isClass? target
         pure (Decidable.decide (cls = some ``HasCode ∨ cls = some ``Covered))
       else
         pure false) := by
