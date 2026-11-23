@@ -199,9 +199,8 @@
     "ff6783e84511697b",
     "ffc3dfcf3c898b07"
   ]},
-  {"file": "LeanIntent/CodeAudit.lean", "comments": 33, "lines": 175, "fingerprints": [
+  {"file": "LeanIntent/CodeAudit.lean", "comments": 30, "lines": 80, "fingerprints": [
     "065d531b8ad73cc1",
-    "074ae39edb38407e",
     "08ee005c4dbc8c67",
     "0ca703fbca8bf60f",
     "1bda58dc21657ed9",
@@ -222,8 +221,6 @@
     "8028a3bcee3a3072",
     "87299aa0f5545785",
     "91710247e503b329",
-    "974cc46b05d48f3a",
-    "9e0a949615dc4e66",
     "b752961c5c7777b7",
     "bc988d9984283ece",
     "c896c13492feabdc",
@@ -806,16 +803,13 @@
     "ef50358de8f01187",
     "f8e6a534c2990ad9"
   ]},
-  {"file": "LeanIntent/Execution/Read.lean", "comments": 9, "lines": 24, "fingerprints": [
-    "3f836b13c79de2c0",
+  {"file": "LeanIntent/Execution/Read.lean", "comments": 6, "lines": 13, "fingerprints": [
     "4b58465ee5045fa5",
-    "8de3141dc56c37ed",
     "8faae63b3a65e4c0",
     "934784bb50d9be73",
     "be6a46bd2a10ee71",
     "c771ddee8a71ed4e",
-    "d15ec4ca311b838f",
-    "e36006ac26ee9946"
+    "d15ec4ca311b838f"
   ]},
   {"file": "LeanIntent/Implementation.lean", "comments": 60, "lines": 170, "fingerprints": [
     "00c9d557175d465f",

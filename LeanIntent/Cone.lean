@@ -2,6 +2,7 @@ module
 
 public import Lean.CoreM
 public import Std.Data.HashSet.Lemmas
+public import LeanIntent.Loaded
 
 /-!
 # Cone exclusion: refusing an intent record that depends on its implementation
@@ -523,7 +524,8 @@ in a module of Lean's module system they may carry a private prefix, as
 
 /-- The declaration `env` holds under `c`, read with the bodies of its own module visible. -/
 @[expose] def lookupIn (env : Environment) (c : Name) : Option ConstantInfo :=
-  (env.setExporting false).find? c
+  ((env.setExporting false).find? (skipRealize := true) c).orElse fun _ =>
+    env.toKernelEnv.find? c
 
 /-- Why the check of a record refuses before it explores. -/
 inductive Unchecked where
@@ -604,7 +606,7 @@ theorem checkRecord_ne_ok_of_reaches {env : Environment} {record c : Name} {impl
 the implementation whose declarations `impl` names, in the current environment: it refuses a
 record whose cone reaches a declaration of the implementation, a name with no declaration, or an
 axiom other than Lean's three. -/
-def requireIndependent (record : Name) (impl : List Name) : CoreM Unit := do
+def requireIndependent (record : Name) (impl : List Name) : CoreM Unit := asking do
   match checkRecord (← getEnv) record impl with
   | .ok () => pure ()
   | .error e => throwError "intent record refused: {describe record e}"

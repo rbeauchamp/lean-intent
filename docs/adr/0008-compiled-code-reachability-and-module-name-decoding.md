@@ -27,11 +27,11 @@ Two verification readers bridge compiled Lean/Lake artifacts into pure proved de
 - **Why general decoding of `Lean.Name.toString` is unsafe**: `escapePart` (`Init/Data/ToString/Name.lean`, lines 55–64 at Lean v4.36.0) wraps components containing `.` in `«...»` while leaving components that already contain `»` untouched, so the single-component names `a.b` and `«a.b»` both print as `«a.b»`. A lenient decoder could map a built module name to an unbuilt module and pass with exit `0`.
 - Restricting to the closed ASCII form makes decoding provably injective (`moduleName?_inj`), while projects with non-ASCII or escaped module names pass `Lake.Module` names directly via Lake's API instead of `queryModules`.
 
-### Bounded reachability worklist and environment threading (`LeanIntent/Execution/Read.lean`)
+### Bounded reachability worklist and `Stored` isolation (`LeanIntent/Execution/Read.lean`)
 
-- `Execution.Read.buildTable` builds the finite reachability table for `reachesIn` by structural recursion over a fuel bound (`env.const2ModIdx.size + 1`), returning `none` if fuel expires with non-empty work (so `reachesIn` fails closed with an error rather than returning a truncated table; `Environment.getModuleIdxFor?` is unexposed in Lean's module system, so relating `inCone` directly to `env.const2ModIdx.size` is left outside the module proof).
+- `Execution.Read.buildTable` builds the finite reachability table for `reachesIn` by structural recursion over a fuel bound (`s.constCount + 1`, where `LeanIntent.Imported.Stored.constCount` reads `env.const2ModIdx.size`), returning `none` if fuel expires with non-empty work (so `reachesIn` fails closed with an error rather than returning a truncated table; `Environment.getModuleIdxFor?` is unexposed in Lean's module system, so relating `inCone` directly to `s.constCount` is left outside the module proof).
 - Whenever `buildTable` returns `some table`, `buildTable_within` and `buildTable_within_succ` prove `Execution.Within (fun n => table.getD n []) root table.size` and `table.size + 1`, `buildTable_reach_eq_reached_iff` proves `Execution.reach` with `table.size + 1` fuel agrees with `Execution.Reaches`, and `buildTable_reach_ne_exhausted` rules out `.exhausted`, eliminating the unreachable `.exhausted` branch in `reachesIn`.
-- `executableIn` reads `getEnv` once and threads that single environment to both ``env.contains `main`` and `reachesIn env`.
+- Per #63 ([ADR-0009](0009-environment-extension-loading-and-reader-guards.md)), `irRefs`, `importersOf`, `reachesIn`, and `executableIn` operate solely on `LeanIntent.Imported.Stored` (with `reachesIn` and `executableIn` returning `Except String ...`) rather than threading an `Environment`, and `importedModuleOf` is removed; `Execution.Read.check` passes `← LeanIntent.Imported.stored root (← getOptions)` while guarding its own `MetaM` entry points (`nameLit`, `claimOf`, `claims`, `check`) with `LeanIntent.asking`.
 
 ## Consequences
 

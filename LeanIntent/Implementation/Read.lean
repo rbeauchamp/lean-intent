@@ -3,6 +3,7 @@ module
 public import Lean
 public import LeanIntent.Implementation
 public import LeanIntent.Confirmation.Read
+public import LeanIntent.Loaded
 
 /-!
 # Reading a project's implementations from the finished build
@@ -52,7 +53,7 @@ open Lean Meta LeanIntent.Render LeanIntent.Confirmation.Read
 
 /-- The module that declares the constant `c`, as the environment records it: the imported module
 that holds it, or the module being elaborated when it is declared there. -/
-def moduleOf (c : Name) : MetaM Name := do
+def moduleOf (c : Name) : MetaM Name := asking do
   let env ← getEnv
   match env.getModuleIdxFor? c with
   | some idx =>
@@ -72,7 +73,7 @@ def moduleOf (c : Name) : MetaM Name := do
 /-- What the build shows of the value `decl`, a constant whose type reduces to `Implementation d`:
 the deliverable its type names and the constant its subject is, each where it is a constant. An
 error when its value does not reduce to `Implementation.mk`'s application. -/
-def entryOf (decl : Name) : MetaM Entry := do
+def entryOf (decl : Name) : MetaM Entry := asking do
   let t ← readWhnf (← getConstInfo decl).type
   let .app (.app (.const ``Implementation _) _) d := t
     | throwError "the type of {decl} is not `LeanIntent.Implementation` applied to a deliverable"
@@ -86,7 +87,7 @@ def entryOf (decl : Name) : MetaM Entry := do
 `AwaitingImplementation d`: the deliverable its type names, where that is a constant, and the reason
 it gives. An error when its value does not reduce to `AwaitingImplementation.mk`'s application, or
 its reason to a string literal. -/
-def awaitingEntryOf (decl : Name) : MetaM AwaitingEntry := do
+def awaitingEntryOf (decl : Name) : MetaM AwaitingEntry := asking do
   let t ← readWhnf (← getConstInfo decl).type
   let .app (.app (.const ``AwaitingImplementation _) _) d := t
     | throwError
@@ -102,7 +103,7 @@ entries of its values of `Implementation d` and of `AwaitingImplementation d`, s
 empty exactly when there is at least one deliverable, each has exactly one value recording its
 implementation or exactly one value declaring it awaiting one, and not both, each value names one
 of them, and each implementation records a constant (`Implementation.findings_eq_nil_iff`). -/
-def check (mods : Array Name) : MetaM Report := do
+def check (mods : Array Name) : MetaM Report := asking do
   let ds ← declaredIn mods ``Deliverable
   let vs ← (← declaredIn mods ``Implementation).mapM entryOf
   let as ← (← declaredIn mods ``AwaitingImplementation).mapM awaitingEntryOf

@@ -5,13 +5,14 @@ meta import LeanIntent.CodeAudit
 
 open Lean
 
-public def main (args : List String) : IO UInt32 := do
+public unsafe def main (args : List String) : IO UInt32 := do
   try
     let mods := args.toArray.map String.toName
     if mods.isEmpty || mods.any (·.isAnonymous) then
       throw <| IO.userError "usage: lean --run tools/codes.lean <module>..."
     initSearchPath (← findSysroot)
-    let env ← importModules (mods.map fun m => { module := m }) {}
+    enableInitializersExecution
+    let env ← importModules (mods.map fun m => { module := m }) {} (loadExts := true)
     let idxs := mods.filterMap env.getModuleIdx?
     let roots := env.constants.map₁.toList.filterMap fun (c, _) =>
       (env.getModuleIdxFor? c).bind fun i => if idxs.contains i then some c else none

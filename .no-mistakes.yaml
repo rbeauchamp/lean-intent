@@ -9,8 +9,11 @@
 # codes over every declaration (through tools/codes.lean, a program it runs because it is not
 # itself built against the library), enforces the Lean comment ratchet (`NO-COMMENTS` against
 # tools/comment-ratchet.json), runs out-of-tree strict `rbeauchamp/regula` `standard-logical`
-# proof-verdict checking (`REGULA` against `tools/regula.pin`), and with --tests it lists the
-# repository's tests. no-mistakes
+# proof-verdict checking (`REGULA` against `tools/regula.pin`), refuses a declaration, of the
+# library or of a Lean file under tools/, that imports modules in a way that leaves the state of
+# Lean's environment extensions unloaded (`LOADED`), refuses a library declaration handed an
+# environment that does not guard against an unloaded environment (`READERS`), and with --tests it
+# lists the repository's tests. no-mistakes
 # honours `test.instructions`, `test.no_surface` and `test.tests_as_evidence` only from the copy of
 # this file on the default branch, so a change to any of them governs the runs that follow its
 # merge.
@@ -114,10 +117,18 @@
 # `3 * 168.44 = 505.32` seconds). The check's wall-clock limit is therefore raised from 1020 to
 # 1200 seconds (20 minutes, above `3 * 369.32 = 1107.96` seconds), and `--tests` is raised from
 # 420 to 540 seconds (9 minutes, rounded up to a whole minute above `3 * 168.44 = 505.32` seconds).
+# Following #63 (`loadExts := true` in `tools/check.lean` plus `LOADED` and `READERS`), measured
+# directly on 2026-11-22 on the same Apple M5 Max under Lean v4.36.0 (`REGULA_DIR` pinned locally):
+# clean no-`.lake` `lean --run tools/check.lean` took 114.34 seconds (built: 82.34 seconds; down
+# from 369.32 seconds clean because `collectAxioms` reads `exportedAxiomsExt` instead of walking
+# every constant body), while `lean --run tools/check.lean --tests` took 196.90 and 201.49 seconds
+# (`3 * 201.49 = 604.47` seconds). The check's 1200-second limit is kept, and `--tests` is raised
+# from 540 to 660 seconds (11 minutes, rounded up to a whole minute above `3 * 201.49 = 604.47`
+# seconds).
 test:
   instructions: |
     On lean-intent this step is verification. A change's claims are established by machine-checked proof, by derivation and by reading; lean-intent has no running product to drive.
-    1. The pipeline has already run the repository's checks in this step, in this run's own checkout of the change, as its configured test command (commands.test in .no-mistakes.yaml); do not run lean --run tools/check.lean, or that command, again. The context above this runbook states that run's result, at this pipeline's version on a line beginning "Configured test command already ran successfully as baseline" when it exited 0, or "Configured test command failed with exit code" followed by its exit status. Cite that run: its command and its exit status. If the context states no result of the configured test command, the checks did not run in this step: report the check open and say so. The configured test command exits 0 only if its listing of tests exits 0 and prints nothing and the check it runs first, through no-mistakes admit, exits 0; that check is lean --run tools/check.lean. It exits 0 only when lakefile.toml requires no other package, Lake builds every library module with no error and no warning (a sorry is a warning), every Lean file Git's index lists is a module file, every declaration of the library rests only on Lean's axioms propext, Classical.choice and Quot.sound, the library's compiled code calls no runtime function that starts a process or asks where it runs or what its environment holds, the audit of declared types' codes (LeanIntent.CodeAudit, run by tools/codes.lean) accepts every declaration of the library, NO-COMMENTS accepts every tracked Lean file against tools/comment-ratchet.json, and out-of-tree Regula (pinned in tools/regula.pin) emits its standard-logical proof-verdict pass on the resolved workspace directory. docs/adr/0001-repository-checks-and-trusted-base.md (with ADR-0002, ADR-0003 and ADR-0004) says what each rule decides; claim no more than that.
+    1. The pipeline has already run the repository's checks in this step, in this run's own checkout of the change, as its configured test command (commands.test in .no-mistakes.yaml); do not run lean --run tools/check.lean, or that command, again. The context above this runbook states that run's result, at this pipeline's version on a line beginning "Configured test command already ran successfully as baseline" when it exited 0, or "Configured test command failed with exit code" followed by its exit status. Cite that run: its command and its exit status. If the context states no result of the configured test command, the checks did not run in this step: report the check open and say so. The configured test command exits 0 only if its listing of tests exits 0 and prints nothing and the check it runs first, through no-mistakes admit, exits 0; that check is lean --run tools/check.lean. It exits 0 only when lakefile.toml requires no other package, Lake builds every library module with no error and no warning (a sorry is a warning), every Lean file Git's index lists is a module file, every declaration of the library rests only on Lean's axioms propext, Classical.choice and Quot.sound, the library's compiled code calls no runtime function that starts a process or asks where it runs or what its environment holds, the audit of declared types' codes (LeanIntent.CodeAudit, run by tools/codes.lean) accepts every declaration of the library, NO-COMMENTS accepts every tracked Lean file against tools/comment-ratchet.json, out-of-tree Regula (pinned in tools/regula.pin) emits its standard-logical proof-verdict pass on the resolved workspace directory, no declaration of the library or of a Lean file under tools/ imports modules with environment extensions left unloaded except `LeanIntent.Imported.stored` which hands back no environment (the rule `LOADED`), and every declaration of the library handed an environment begins with `LeanIntent.asking`/`askingIn`, takes a `LeanIntent.Loaded` proof, or is in the closed `stateless` exception list (the rule `READERS`). docs/adr/0001-repository-checks-and-trusted-base.md (with ADR-0002, ADR-0003, ADR-0004 and ADR-0009) says what each rule decides; claim no more than that.
     2. Do not write, request or suggest a test, and do not improvise disposable break-it runs as evidence: lean-intent establishes its claims by theorems. A claim about what a theorem states is settled by reading its statement, binders and hypotheses included, never its docstring or name alone.
     3. Report each claim by how it was established: machine-checked (a Lean proof that the check above built; cite the theorem and the command's exit status), argued (by derivation or by reading; cite the file and lines), observed (executed in this run for this claim), assumed (a hypothesis the change relies on; say why it is trusted) or open (not established; say what would establish it and which issue tracks it).
   # lean-intent has no running product; proof, its check and reading settle its claims.
@@ -146,10 +157,10 @@ test:
       lean_files=$(git ls-files -- '*.lean')
       if [ -n "$lean_files" ]; then
         status=0
-        no-mistakes admit --memory 6GiB --limit "none; measured peak 3.101 GiB" -- gtimeout --foreground --verbose --kill-after=30 540 lean --run tools/check.lean --tests || status=$?
+        no-mistakes admit --memory 6GiB --limit "none; measured peak 3.101 GiB" -- gtimeout --foreground --verbose --kill-after=30 660 lean --run tools/check.lean --tests || status=$?
         case $status in
-          124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 540 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
-          137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 540 seconds and did not stop within 30 seconds of TERM" >&2 ;;
+          124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 660 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
+          137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 660 seconds and did not stop within 30 seconds of TERM" >&2 ;;
         esac
         exit "$status"
       fi
@@ -196,10 +207,10 @@ commands:
     esac
     [ "$status" -eq 0 ] || exit "$status"
     mkdir -p .lake
-    no-mistakes admit --memory 6GiB --limit "none; measured peak 3.101 GiB" -- gtimeout --foreground --verbose --kill-after=30 540 lean --run tools/check.lean --tests > .lake/tests-listing || status=$?
+    no-mistakes admit --memory 6GiB --limit "none; measured peak 3.101 GiB" -- gtimeout --foreground --verbose --kill-after=30 660 lean --run tools/check.lean --tests > .lake/tests-listing || status=$?
     case $status in
-      124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 540 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
-      137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 540 seconds and did not stop within 30 seconds of TERM" >&2 ;;
+      124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 660 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
+      137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 660 seconds and did not stop within 30 seconds of TERM" >&2 ;;
     esac
     [ "$status" -eq 0 ] || exit "$status"
     if [ -s .lake/tests-listing ]; then
