@@ -191,21 +191,40 @@ imported declaration, those Lean recorded when it exported the declaration's mod
 @[expose] def axiomsIn (env : Environment) (_h : Loaded env) (c : Name) : Array Name :=
   (collectAxioms c : EnvM (Array Name)).run' env
 
-def isCarrier (ci : ConstantInfo) : MetaM Bool := asking do
-  if ← isInstance ci.name then
+def isCarrier (ci : ConstantInfo) : MetaM Bool := asking <| withoutExporting do
+  let defHasCode ← getDefaultInstances ``HasCode
+  let defCovered ← getDefaultInstances ``Covered
+  if defHasCode.any (·.1 == ci.name) || defCovered.any (·.1 == ci.name) then
+    return true
+  else if ← isInstance ci.name then
     let cls ← isClass? ci.type
     return cls == some ``HasCode || cls == some ``Covered
   else
     return false
 
 theorem isCarrier_eq (ci : ConstantInfo) :
-    isCarrier ci = asking (do
-      if ← isInstance ci.name then
+    isCarrier ci = asking (withoutExporting do
+      let defHasCode ← getDefaultInstances ``HasCode
+      let defCovered ← getDefaultInstances ``Covered
+      if Decidable.decide ((∃ e ∈ defHasCode, e.1 = ci.name) ∨
+          (∃ e ∈ defCovered, e.1 = ci.name)) then
+        pure true
+      else if ← isInstance ci.name then
         let cls ← isClass? ci.type
         pure (Decidable.decide (cls = some ``HasCode ∨ cls = some ``Covered))
       else
         pure false) := by
-  simp [isCarrier, Bool.beq_eq_decide_eq]
+  have any_eq : ∀ (l : List (Name × Nat)),
+      l.any (·.1 == ci.name) = Decidable.decide (∃ e ∈ l, e.1 = ci.name) := by
+    intro l
+    apply Bool.eq_iff_iff.mpr
+    simp only [List.any_eq_true, beq_iff_eq, decide_eq_true_eq]
+  unfold isCarrier
+  refine congrArg asking (congrArg withoutExporting ?_)
+  refine bind_congr fun defHasCode => bind_congr fun defCovered => ?_
+  rw [any_eq defHasCode, any_eq defCovered, ← Bool.decide_or]
+  simp only [Bool.beq_eq_decide_eq]
+  rfl
 
 /-- `AttestedType ctor e α`: `α` is the first argument of an application of `ctor` in `e`,
 abstracted over the binders enclosing that occurrence. Both `fun` and `∀` binders become `fun`

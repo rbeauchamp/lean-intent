@@ -1465,42 +1465,382 @@ where
     | .mdata _ b => go i b
     | _ => none
 
+def nthForallName? : Expr → Nat → Option Name
+  | .mdata _ b, i => nthForallName? b i
+  | .forallE n _ _ _, 0 => some n.eraseMacroScopes
+  | .forallE _ _ b _, i + 1 => nthForallName? b i
+  | _, _ => none
+
+theorem loadExtsPosition_go_eq_some :
+    ∀ (t : Expr) (k i : Nat),
+      loadExtsPosition.go k t = some i →
+      k ≤ i ∧ nthForallName? t (i - k) = some `loadExts
+  | .forallE n _ b _, k, i, h => by
+    unfold loadExtsPosition.go at h
+    by_cases hn : n.eraseMacroScopes == `loadExts
+    · simp only [hn, ↓reduceIte, Option.some.injEq] at h
+      subst h
+      simp [nthForallName?, beq_iff_eq.mp hn]
+    · simp only [hn, Bool.false_eq_true, ↓reduceIte] at h
+      obtain ⟨hk, hnth⟩ := loadExtsPosition_go_eq_some b (k + 1) i h
+      have hsub : i - k = (i - (k + 1)) + 1 := by omega
+      rw [hsub]
+      exact ⟨by omega, by simpa [nthForallName?] using hnth⟩
+  | .mdata _ b, k, i, h => by
+    simpa [loadExtsPosition.go, nthForallName?] using loadExtsPosition_go_eq_some b k i h
+  | .bvar _, _, _, h | .fvar _, _, _, h | .mvar _, _, _, h | .sort _, _, _, h
+  | .const _ _, _, _, h | .app _ _, _, _, h | .lam _ _ _ _, _, _, h
+  | .letE _ _ _ _ _, _, _, h | .lit _, _, _, h | .proj _ _ _, _, _, h => by
+    simp [loadExtsPosition.go] at h
+
+theorem loadExtsPosition_eq_some {t : Expr} {i : Nat} (h : loadExtsPosition t = some i) :
+    nthForallName? t i = some `loadExts := by
+  simpa using (loadExtsPosition_go_eq_some t 0 i h).2
+
 def importChoices (env : Environment) : Except String (List (Name × Option Nat)) := do
   let again := "read the rule LOADED again from this Lean's source"
-  let mut choices := []
-  for f in importFunctions do
+  let choices ← importFunctions.foldlM (init := []) fun acc f => do
     let some ci := env.find? f
       | throw s!"{f} is not declared under this Lean: {again}"
     let some i := loadExtsPosition ci.type
       | throw s!"{f} takes no parameter named loadExts under this Lean: {again}"
-    choices := (f, some i) :: choices
+    return (f, some i) :: acc
   unless env.contains unloadedImport do
     throw s!"{unloadedImport} is not declared under this Lean: {again}"
   return (unloadedImport, none) :: choices
 
-partial def importFaults (choices : List (Name × Option Nat)) (e : Expr) (acc : Array String) :
-    Array String :=
-  let acc := match e.getAppFn with
-    | .const c _ =>
-      match choices.lookup c with
-      | none => acc
-      | some none =>
-        acc.push s!"names {c}, which leaves every environment extension's state unloaded"
-      | some (some i) =>
-        if (e.getAppArgs[i]?.map (·.consumeMData.isConstOf ``Bool.true)) == some true then acc
-        else acc.push s!"names {c} without `loadExts := true` written as its argument"
-    | .lam _ t b _ | .forallE _ t b _ => importFaults choices b (importFaults choices t acc)
-    | .letE _ t v b _ =>
-      importFaults choices b (importFaults choices v (importFaults choices t acc))
-    | .mdata _ b | .proj _ _ b => importFaults choices b acc
-    | .app .. | .bvar _ | .fvar _ | .mvar _ | .sort _ | .lit _ => acc
-  e.getAppArgs.foldl (fun acc a => importFaults choices a acc) acc
+theorem importChoices_eq_ok {env : Environment} {choices : List (Name × Option Nat)}
+    (h : importChoices env = .ok choices) :
+    choices.lookup unloadedImport = some none ∧
+    env.contains unloadedImport = true ∧
+    ∀ f ∈ importFunctions, ∃ ci i,
+      env.find? f = some ci ∧ nthForallName? ci.type i = some `loadExts ∧
+      choices.lookup f = some (some i) := by
+  unfold importChoices importFunctions unloadedImport at h
+  simp only [List.foldlM_cons, List.foldlM_nil, bind, Except.bind, pure, Except.pure] at h
+  cases h1 : env.find? ``importModules <;> simp [h1] at h
+  rename_i ci1
+  cases hp1 : loadExtsPosition ci1.type <;> simp [hp1] at h
+  rename_i i1
+  cases h2 : env.find? ``finalizeImport <;> simp [h2] at h
+  rename_i ci2
+  cases hp2 : loadExtsPosition ci2.type <;> simp [hp2] at h
+  rename_i i2
+  cases hc : env.contains ``withImportModules <;> simp [hc] at h
+  subst h
+  refine ⟨by simp [unloadedImport, List.lookup], hc, ?_⟩
+  intro f hf
+  simp only [importFunctions, List.mem_cons, List.not_mem_nil, or_false] at hf
+  rcases hf with rfl | rfl
+  · refine ⟨ci1, i1, h1, loadExtsPosition_eq_some hp1, ?_⟩
+    simp only [List.lookup]
+    repeat (split <;> first | rfl | (rename_i hne; simp [beq_iff_eq] at hne) | (rename_i hne; simp at hne))
+  · refine ⟨ci2, i2, h2, loadExtsPosition_eq_some hp2, ?_⟩
+    simp only [List.lookup]
+    repeat (split <;> first | rfl | (rename_i hne; simp [beq_iff_eq] at hne) | (rename_i hne; simp at hne))
+
+def importConstFault (choices : List (Name × Option Nat)) (c : Name) (args : List Expr) :
+    Bool × Option String :=
+  match choices.lookup c with
+  | none => (false, none)
+  | some none =>
+    (true, some s!"names {c}, which leaves every environment extension's state unloaded")
+  | some (some i) =>
+    if (args[i]?.map (·.consumeMData.isConstOf ``Bool.true)) == some true then (true, none)
+    else (true, some s!"names {c} without `loadExts := true` written as its argument")
+
+def scanImports (choices : List (Name × Option Nat)) :
+    Expr → List Expr → Bool × Array String → Bool × Array String
+  | .app f a, args, st =>
+    let st := scanImports choices a [] st
+    scanImports choices f (a :: args) st
+  | .mdata _ b, args, st =>
+    scanImports choices b args st
+  | .const c _, args, (names, faults) =>
+    match importConstFault choices c args with
+    | (false, _) => (names, faults)
+    | (true, none) => (true, faults)
+    | (true, some msg) => (true, faults.push msg)
+  | .lam _ t b _, _, st =>
+    scanImports choices b [] (scanImports choices t [] st)
+  | .forallE _ t b _, _, st =>
+    scanImports choices b [] (scanImports choices t [] st)
+  | .letE _ t v b _, _, st =>
+    scanImports choices b [] (scanImports choices v [] (scanImports choices t [] st))
+  | .proj _ _ b, _, st =>
+    scanImports choices b [] st
+  | .bvar _, _, st | .fvar _, _, st | .mvar _, _, st | .sort _, _, st | .lit _, _, st => st
+
+def ImportOccurSafe (choices : List (Name × Option Nat)) (c : Name) (args : List Expr) : Prop :=
+  match choices.lookup c with
+  | none => True
+  | some none => False
+  | some (some i) => ∃ arg, args[i]? = some arg ∧ arg.consumeMData.isConstOf ``Bool.true = true
+
+def ExprImportsSafe (choices : List (Name × Option Nat)) : Expr → List Expr → Prop
+  | .app f a, args => ExprImportsSafe choices a [] ∧ ExprImportsSafe choices f (a :: args)
+  | .mdata _ b, args => ExprImportsSafe choices b args
+  | .const c _, args => ImportOccurSafe choices c args
+  | .lam _ t b _, _ => ExprImportsSafe choices t [] ∧ ExprImportsSafe choices b []
+  | .forallE _ t b _, _ => ExprImportsSafe choices t [] ∧ ExprImportsSafe choices b []
+  | .letE _ t v b _, _ =>
+    ExprImportsSafe choices t [] ∧ ExprImportsSafe choices v [] ∧ ExprImportsSafe choices b []
+  | .proj _ _ b, _ => ExprImportsSafe choices b []
+  | .bvar _, _ | .fvar _, _ | .mvar _, _ | .sort _, _ | .lit _, _ => True
+
+def NamesImport (choices : List (Name × Option Nat)) : Expr → Prop
+  | .app f a => NamesImport choices a ∨ NamesImport choices f
+  | .mdata _ b => NamesImport choices b
+  | .const c _ => (choices.lookup c).isSome = true
+  | .lam _ t b _ => NamesImport choices t ∨ NamesImport choices b
+  | .forallE _ t b _ => NamesImport choices t ∨ NamesImport choices b
+  | .letE _ t v b _ => NamesImport choices t ∨ NamesImport choices v ∨ NamesImport choices b
+  | .proj _ _ b => NamesImport choices b
+  | .bvar _ | .fvar _ | .mvar _ | .sort _ | .lit _ => False
+
+theorem scanImports_fst (choices : List (Name × Option Nat)) :
+    ∀ (e : Expr) (args : List Expr) (st : Bool × Array String),
+      (scanImports choices e args st).1 = true ↔ NamesImport choices e ∨ st.1 = true
+  | .app f a, args, st => by
+    simp only [scanImports, NamesImport, scanImports_fst choices f (a :: args),
+      scanImports_fst choices a []]
+    exact ⟨fun | .inl h => .inl (.inr h) | .inr (.inl h) => .inl (.inl h) | .inr (.inr h) => .inr h,
+      fun | .inl (.inl h) => .inr (.inl h) | .inl (.inr h) => .inl h | .inr h => .inr (.inr h)⟩
+  | .mdata _ b, args, st => by
+    simpa [scanImports, NamesImport] using scanImports_fst choices b args st
+  | .const c _, args, (names, faults) => by
+    simp only [scanImports, NamesImport, importConstFault]
+    cases choices.lookup c with
+    | none => simp
+    | some spec =>
+      cases spec with
+      | none => simp
+      | some i =>
+        by_cases h : (args[i]?.map (·.consumeMData.isConstOf ``Bool.true)) == some true <;>
+          simp [h]
+  | .lam _ t b _, _, st | .forallE _ t b _, _, st => by
+    simp only [scanImports, NamesImport, scanImports_fst choices b [],
+      scanImports_fst choices t []]
+    exact ⟨fun | .inl h => .inl (.inr h) | .inr (.inl h) => .inl (.inl h) | .inr (.inr h) => .inr h,
+      fun | .inl (.inl h) => .inr (.inl h) | .inl (.inr h) => .inl h | .inr h => .inr (.inr h)⟩
+  | .letE _ t v b _, _, st => by
+    simp only [scanImports, NamesImport, scanImports_fst choices b [],
+      scanImports_fst choices v [], scanImports_fst choices t []]
+    constructor
+    · rintro (h | h | h | h)
+      · exact .inl (.inr (.inr h))
+      · exact .inl (.inr (.inl h))
+      · exact .inl (.inl h)
+      · exact .inr h
+    · rintro ((h | h | h) | h)
+      · exact .inr (.inr (.inl h))
+      · exact .inr (.inl h)
+      · exact .inl h
+      · exact .inr (.inr (.inr h))
+  | .proj _ _ b, _, st => by
+    simpa [scanImports, NamesImport] using scanImports_fst choices b [] st
+  | .bvar _, _, st | .fvar _, _, st | .mvar _, _, st | .sort _, _, st | .lit _, _, st => by
+    simp [scanImports, NamesImport]
+
+theorem scanImports_snd_size_ge (choices : List (Name × Option Nat)) :
+    ∀ (e : Expr) (args : List Expr) (st : Bool × Array String),
+      st.2.size ≤ (scanImports choices e args st).2.size
+  | .app f a, args, st =>
+    Nat.le_trans (scanImports_snd_size_ge choices a [] st)
+      (scanImports_snd_size_ge choices f (a :: args) _)
+  | .mdata _ b, args, st => scanImports_snd_size_ge choices b args st
+  | .const c _, args, (names, faults) => by
+    simp only [scanImports, importConstFault]
+    cases choices.lookup c with
+    | none => exact Nat.le_refl _
+    | some spec =>
+      cases spec with
+      | none => simp
+      | some i =>
+        by_cases h : (args[i]?.map (·.consumeMData.isConstOf ``Bool.true)) == some true <;>
+          simp [h]
+  | .lam _ t b _, _, st | .forallE _ t b _, _, st =>
+    Nat.le_trans (scanImports_snd_size_ge choices t [] st)
+      (scanImports_snd_size_ge choices b [] _)
+  | .letE _ t v b _, _, st =>
+    Nat.le_trans (scanImports_snd_size_ge choices t [] st)
+      (Nat.le_trans (scanImports_snd_size_ge choices v [] _)
+        (scanImports_snd_size_ge choices b [] _))
+  | .proj _ _ b, _, st => scanImports_snd_size_ge choices b [] st
+  | .bvar _, _, st | .fvar _, _, st | .mvar _, _, st | .sort _, _, st | .lit _, _, st =>
+    Nat.le_refl _
+
+theorem scanImports_snd_size_eq (choices : List (Name × Option Nat)) :
+    ∀ (e : Expr) (args : List Expr) (st : Bool × Array String),
+      (scanImports choices e args st).2.size = st.2.size ↔ ExprImportsSafe choices e args
+  | .app f a, args, st => by
+    have ha := scanImports_snd_size_ge choices a [] st
+    have hf := scanImports_snd_size_ge choices f (a :: args) (scanImports choices a [] st)
+    have iha := scanImports_snd_size_eq choices a [] st
+    have ihf := scanImports_snd_size_eq choices f (a :: args) (scanImports choices a [] st)
+    change (scanImports choices f (a :: args) (scanImports choices a [] st)).2.size = st.2.size ↔
+      ExprImportsSafe choices a [] ∧ ExprImportsSafe choices f (a :: args)
+    constructor
+    · intro h; exact ⟨iha.mp (by omega), ihf.mp (by omega)⟩
+    · rintro ⟨h1, h2⟩; exact (ihf.mpr h2).trans (iha.mpr h1)
+  | .mdata _ b, args, st => by
+    simpa [scanImports, ExprImportsSafe] using scanImports_snd_size_eq choices b args st
+  | .const c _, args, (names, faults) => by
+    simp only [scanImports, ExprImportsSafe, ImportOccurSafe, importConstFault]
+    cases choices.lookup c with
+    | none => simp
+    | some spec =>
+      cases spec with
+      | none => simp
+      | some i =>
+        by_cases h : (args[i]?.map (·.consumeMData.isConstOf ``Bool.true)) == some true
+        · simp only [h, ↓reduceIte, true_iff]
+          cases harg : args[i]? <;> simp_all
+        · simp only [h, Bool.false_eq_true, ↓reduceIte, Array.size_push]
+          constructor
+          · intro heq; omega
+          · rintro ⟨arg, harg, htrue⟩
+            simp_all
+  | .lam _ t b _, _, st | .forallE _ t b _, _, st => by
+    have ht := scanImports_snd_size_ge choices t [] st
+    have hb := scanImports_snd_size_ge choices b [] (scanImports choices t [] st)
+    have iht := scanImports_snd_size_eq choices t [] st
+    have ihb := scanImports_snd_size_eq choices b [] (scanImports choices t [] st)
+    change (scanImports choices b [] (scanImports choices t [] st)).2.size = st.2.size ↔
+      ExprImportsSafe choices t [] ∧ ExprImportsSafe choices b []
+    constructor
+    · intro h; exact ⟨iht.mp (by omega), ihb.mp (by omega)⟩
+    · rintro ⟨h1, h2⟩; exact (ihb.mpr h2).trans (iht.mpr h1)
+  | .letE _ t v b _, _, st => by
+    have ht := scanImports_snd_size_ge choices t [] st
+    have hv := scanImports_snd_size_ge choices v [] (scanImports choices t [] st)
+    have hb := scanImports_snd_size_ge choices b []
+      (scanImports choices v [] (scanImports choices t [] st))
+    have iht := scanImports_snd_size_eq choices t [] st
+    have ihv := scanImports_snd_size_eq choices v [] (scanImports choices t [] st)
+    have ihb := scanImports_snd_size_eq choices b []
+      (scanImports choices v [] (scanImports choices t [] st))
+    change (scanImports choices b [] (scanImports choices v [] (scanImports choices t [] st))).2.size = st.2.size ↔
+      ExprImportsSafe choices t [] ∧ ExprImportsSafe choices v [] ∧ ExprImportsSafe choices b []
+    constructor
+    · intro h; exact ⟨iht.mp (by omega), ihv.mp (by omega), ihb.mp (by omega)⟩
+    · rintro ⟨h1, h2, h3⟩; exact (ihb.mpr h3).trans ((ihv.mpr h2).trans (iht.mpr h1))
+  | .proj _ _ b, _, st => by
+    simpa [scanImports, ExprImportsSafe] using scanImports_snd_size_eq choices b [] st
+  | .bvar _, _, st | .fvar _, _, st | .mvar _, _, st | .sort _, _, st | .lit _, _, st => by
+    simp [scanImports, ExprImportsSafe]
+
+def declExprs (ci : ConstantInfo) : List Expr :=
+  ci.type :: (ci.value? (allowOpaque := true)).toList ++
+    match ci with
+    | .recInfo v => v.rules.map (·.rhs)
+    | _ => []
 
 def loadsOf (choices : List (Name × Option Nat)) (ci : ConstantInfo) : Bool × Array String :=
-  let exprs := (ci.type :: (ci.value? (allowOpaque := true)).toList).filter fun e =>
-    e.getUsedConstants.any fun c => (choices.lookup c).isSome
-  let faults := exprs.foldl (fun acc e => importFaults choices e acc) #[]
-  (!exprs.isEmpty, faults.foldl (fun acc f => if acc.contains f then acc else acc.push f) #[])
+  let (names, faults) := (declExprs ci).foldl (fun st e => scanImports choices e [] st) (false, #[])
+  (names, faults.foldl (fun acc f => if acc.contains f then acc else acc.push f) #[])
+
+theorem dedup_isEmpty_iff (xs : Array String) :
+    (xs.foldl (fun acc f => if acc.contains f then acc else acc.push f) #[]).isEmpty = true ↔
+      xs.isEmpty = true := by
+  have aux : ∀ (l : List String) (acc : Array String),
+      (l.foldl (fun acc f => if acc.contains f then acc else acc.push f) acc).isEmpty = true ↔
+        l = [] ∧ acc.isEmpty = true := by
+    intro l
+    induction l with
+    | nil => intro acc; simp
+    | cons x xs ih =>
+      intro acc
+      simp only [List.foldl_cons, ih]
+      split
+      · rename_i hmem
+        constructor
+        · rintro ⟨_, h⟩
+          cases acc with
+          | mk al =>
+            cases al with
+            | nil => simp at hmem
+            | cons a as => simp at h
+        · rintro ⟨h, _⟩; cases h
+      · constructor
+        · rintro ⟨_, h⟩; simp at h
+        · rintro ⟨h, _⟩; cases h
+  rw [← Array.foldl_toList, aux]
+  cases xs with
+  | mk l => simp
+
+theorem foldl_scanImports_fst (choices : List (Name × Option Nat)) (es : List Expr)
+    (st : Bool × Array String) :
+    (es.foldl (fun st e => scanImports choices e [] st) st).1 = true ↔
+      (∃ e ∈ es, NamesImport choices e) ∨ st.1 = true := by
+  induction es generalizing st with
+  | nil => simp
+  | cons e es ih =>
+    simp only [List.foldl_cons, ih, scanImports_fst, List.mem_cons]
+    constructor
+    · rintro (⟨x, hx, hnx⟩ | h | h)
+      · exact .inl ⟨x, .inr hx, hnx⟩
+      · exact .inl ⟨e, .inl rfl, h⟩
+      · exact .inr h
+    · rintro (⟨x, rfl | hx, hnx⟩ | h)
+      · exact .inr (.inl hnx)
+      · exact .inl ⟨x, hx, hnx⟩
+      · exact .inr (.inr h)
+
+theorem foldl_scanImports_snd_size_ge (choices : List (Name × Option Nat)) (es : List Expr)
+    (st : Bool × Array String) :
+    st.2.size ≤ (es.foldl (fun st e => scanImports choices e [] st) st).2.size := by
+  induction es generalizing st with
+  | nil => exact Nat.le_refl _
+  | cons e es ih =>
+    exact Nat.le_trans (scanImports_snd_size_ge choices e [] st)
+      (ih (scanImports choices e [] st))
+
+theorem foldl_scanImports_snd_size_eq (choices : List (Name × Option Nat)) (es : List Expr)
+    (st : Bool × Array String) :
+    (es.foldl (fun st e => scanImports choices e [] st) st).2.size = st.2.size ↔
+      ∀ e ∈ es, ExprImportsSafe choices e [] := by
+  induction es generalizing st with
+  | nil => simp
+  | cons e es ih =>
+    have h1 := scanImports_snd_size_ge choices e [] st
+    have h2 := foldl_scanImports_snd_size_ge choices es (scanImports choices e [] st)
+    have ih1 := scanImports_snd_size_eq choices e [] st
+    have ih2 := ih (scanImports choices e [] st)
+    simp only [List.foldl_cons, List.mem_cons]
+    constructor
+    · intro heq x hx
+      rcases hx with rfl | hx
+      · exact ih1.mp (by omega)
+      · exact ih2.mp (by omega) x hx
+    · intro hall
+      have he := ih1.mpr (hall e (.inl rfl))
+      have hes := ih2.mpr (fun x hx => hall x (.inr hx))
+      omega
+
+theorem loadsOf_names_iff (choices : List (Name × Option Nat)) (ci : ConstantInfo) :
+    (loadsOf choices ci).1 = true ↔ ∃ e ∈ declExprs ci, NamesImport choices e := by
+  unfold loadsOf
+  simpa using foldl_scanImports_fst choices (declExprs ci) (false, #[])
+
+theorem loadsOf_faults_empty_iff (choices : List (Name × Option Nat)) (ci : ConstantInfo) :
+    (loadsOf choices ci).2.isEmpty = true ↔ ∀ e ∈ declExprs ci, ExprImportsSafe choices e [] := by
+  unfold loadsOf
+  dsimp only
+  rw [dedup_isEmpty_iff, Array.isEmpty_iff_size_eq_zero]
+  simpa using foldl_scanImports_snd_size_eq choices (declExprs ci) (false, #[])
+
+theorem loadsOf_ok_spec {env : Environment} {choices : List (Name × Option Nat)}
+    {ci : ConstantInfo} (hc : importChoices env = .ok choices)
+    (hf : (loadsOf choices ci).2.isEmpty = true) :
+    (∀ e ∈ declExprs ci, ExprImportsSafe choices e []) ∧
+    choices.lookup unloadedImport = some none ∧
+    env.contains unloadedImport = true ∧
+    ∀ f ∈ importFunctions, ∃ ci_f k,
+      env.find? f = some ci_f ∧ nthForallName? ci_f.type k = some `loadExts ∧
+      choices.lookup f = some (some k) := by
+  obtain ⟨hu, hcon, hfs⟩ := importChoices_eq_ok hc
+  exact ⟨(loadsOf_faults_empty_iff choices ci).mp hf, hu, hcon, hfs⟩
 
 def guards : List Name := [`LeanIntent.asking, `LeanIntent.askingIn]
 
