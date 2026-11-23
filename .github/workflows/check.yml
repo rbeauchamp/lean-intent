@@ -1,21 +1,27 @@
 # Runs the repository's checks (tools/check.lean and empty tools/check.lean --tests) on GitHub's
-# machines for every pull request, every push to main, and manual workflow_dispatch runs. Together
-# with the local no-mistakes validation (.no-mistakes.yaml, `commands.test`), this enforces all
+# machines for every pull request, every push to main, reusable workflow_call runs (such as from
+# .github/workflows/release.yml on v* tag pushes), and manual workflow_dispatch runs. Together with
+# the local no-mistakes validation (.no-mistakes.yaml, `commands.test`), this enforces all
 # repository checks on every change.
 #
 # Security & merge-base hardening: runs with read-only contents permissions, persist-credentials:
-# false, full Git history (fetch-depth: 0) with explicit `--base-ref` on pull_request
-# (`github.event.pull_request.base.sha`) and push (`github.event.before`) events for NO-COMMENTS
-# merge-base verification, a commit-SHA-pinned checkout action, SHA-256 verification of both the
-# Lean release archive paired with lean-toolchain and the pinned no-comments binary paired with
-# tools/no-comments.pin (without running an unverified curl | sh installer), and exact release tag +
-# commit-SHA verification of out-of-tree Regula paired with tools/regula.pin.
+# false, full Git history (fetch-depth: 0), conditional exact-ref population of
+# `refs/remotes/origin/main` from `origin`'s verified `refs/heads/main` (`git ls-remote`,
+# `git fetch --no-tags`, `FETCH_HEAD` exact-ref/OID check, `FETCH_HEAD^{commit}`, and
+# `git update-ref --no-deref`) when absent or not a commit, explicit `--base-ref` on pull_request
+# (`github.event.pull_request.base.sha`), branch push (non-zero `github.event.before`, failing
+# closed otherwise), and tag push / workflow_call / workflow_dispatch (`refs/remotes/origin/main`)
+# for NO-COMMENTS merge-base verification, a commit-SHA-pinned checkout action, SHA-256 verification
+# of both the Lean release archive paired with lean-toolchain and the pinned no-comments binary
+# paired with tools/no-comments.pin (without running an unverified curl | sh installer), and exact
+# release tag + commit-SHA verification of out-of-tree Regula paired with tools/regula.pin.
 name: check
 
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -29,6 +35,40 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Ensure refs/remotes/origin/main exists for merge-base check
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git show-ref --verify --quiet refs/remotes/origin/main || ! git rev-parse --verify --quiet 'refs/remotes/origin/main^{commit}' >/dev/null; then
+            LS_REMOTE_OUT="$(git ls-remote --heads --refs origin refs/heads/main)"
+            MAIN_OID=""
+            MAIN_COUNT=0
+            while IFS=$'\t' read -r oid ref; do
+              if [ "$ref" = "refs/heads/main" ]; then
+                MAIN_OID="$oid"
+                MAIN_COUNT=$((MAIN_COUNT + 1))
+              fi
+            done <<< "$LS_REMOTE_OUT"
+            if [ "$MAIN_COUNT" -ne 1 ] || [ -z "$MAIN_OID" ]; then
+              echo "Expected unique refs/heads/main on origin" >&2
+              exit 1
+            fi
+            git fetch --no-tags origin refs/heads/main
+            FETCH_HEAD_PATH="$(git rev-parse --git-path FETCH_HEAD)"
+            if [ "$(wc -l < "$FETCH_HEAD_PATH")" -ne 1 ]; then
+              echo "Expected single entry in FETCH_HEAD for refs/heads/main" >&2
+              exit 1
+            fi
+            IFS= read -r FETCH_HEAD_LINE < "$FETCH_HEAD_PATH"
+            FETCH_OID="$(git rev-parse --verify FETCH_HEAD)"
+            EXPECTED_FETCH_PREFIX="${MAIN_OID}"$'\t\t'"branch 'main' of "
+            if [ "$FETCH_OID" != "$MAIN_OID" ] || [ "${FETCH_HEAD_LINE:0:${#EXPECTED_FETCH_PREFIX}}" != "$EXPECTED_FETCH_PREFIX" ]; then
+              echo "Fetched object did not resolve from exact refs/heads/main" >&2
+              exit 1
+            fi
+            MAIN_COMMIT="$(git rev-parse --verify 'FETCH_HEAD^{commit}')"
+            git update-ref --no-deref refs/remotes/origin/main "$MAIN_COMMIT"
+          fi
       - name: Install Lean matching lean-toolchain with SHA-256 verification
         shell: bash
         run: |
@@ -193,17 +233,21 @@ jobs:
             exit 1
           fi
           echo "REGULA_DIR=$regula_dir" >> "$GITHUB_ENV"
-      # LAKE-CONFIG, LEAN-BUILD, LEAN-MODULE, AXIOMS, PROCESS, CODES, NO-COMMENTS, and REGULA: no
-      # other package is required, every library module builds with no error and no warning, every
-      # Lean file is a `module` file, every declaration rests only on Lean's axioms, the library's
-      # compiled code neither starts a process nor asks where it runs, no declaration depends on a
-      # declared type's code other than the one its deriving handler writes, every tracked Lean file
-      # obeys the comment ratchet in tools/comment-ratchet.json, and out-of-tree Regula passes
-      # `standard-logical` proof-verdict checking.
+      # LAKE-CONFIG, LEAN-BUILD, LEAN-MODULE, AXIOMS, PROCESS, CODES, NO-COMMENTS, REGULA, LOADED,
+      # and READERS: no other package is required, every library module builds with no error and no
+      # warning, every Lean file is a `module` file, every declaration rests only on Lean's axioms,
+      # the library's compiled code neither starts a process nor asks where it runs, no declaration
+      # depends on a declared type's code other than the one its deriving handler writes, every
+      # tracked Lean file obeys the comment ratchet in tools/comment-ratchet.json, out-of-tree Regula
+      # passes `standard-logical` proof-verdict checking, every library declaration (except
+      # `LeanIntent.Imported.stored`) and tracked tool file imports modules only with `loadExts :=
+      # true`, and every library declaration handed an environment is guarded (`asking`/`askingIn`),
+      # takes a `LeanIntent.Loaded` proof, or is in the closed `stateless` exception list.
       - name: Build the library and audit its axioms
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
@@ -217,14 +261,21 @@ jobs:
               lean --run tools/check.lean --base-ref "$PR_BASE_SHA"
               ;;
             push)
-              if [ -z "$PUSH_BEFORE_SHA" ]; then
-                echo "::error::Missing push before SHA for NO-COMMENTS --base-ref"
+              if [ "$REF_TYPE" = "tag" ]; then
+                lean --run tools/check.lean --base-ref refs/remotes/origin/main
+              elif [ "$REF_TYPE" = "branch" ]; then
+                if [ -z "$PUSH_BEFORE_SHA" ] || [ "$PUSH_BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+                  echo "::error::Missing non-zero push before SHA for NO-COMMENTS --base-ref"
+                  exit 1
+                fi
+                lean --run tools/check.lean --base-ref "$PUSH_BEFORE_SHA"
+              else
+                echo "::error::Unsupported push ref_type for NO-COMMENTS --base-ref: $REF_TYPE"
                 exit 1
               fi
-              lean --run tools/check.lean --base-ref "$PUSH_BEFORE_SHA"
               ;;
-            workflow_dispatch)
-              lean --run tools/check.lean
+            workflow_call|workflow_dispatch)
+              lean --run tools/check.lean --base-ref refs/remotes/origin/main
               ;;
             *)
               echo "::error::Unsupported GitHub Actions event: $EVENT_NAME"
