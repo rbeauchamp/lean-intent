@@ -163,7 +163,29 @@ annotation, which Lean applies to the arguments written after them and nothing e
 @[expose] def holdsMatch (env : Environment) (e : Expr) : Bool :=
   (e.find? fun x => match x with | .const c _ => isMatcherCore env c | _ => false).isSome
 
-def elaboratesTo (text : String) (e : Expr) (ns : Name := .anonymous) : MetaM Bool := do
+@[expose] def equalModuloMatch (env : Environment) : Expr → Expr → Bool
+  | .app f1 a1, .app f2 a2 => equalModuloMatch env f1 f2 && equalModuloMatch env a1 a2
+  | .lam _ t1 b1 bi1, .lam _ t2 b2 bi2 =>
+    bi1 == bi2 && equalModuloMatch env t1 t2 && equalModuloMatch env b1 b2
+  | .forallE _ t1 b1 bi1, .forallE _ t2 b2 bi2 =>
+    bi1 == bi2 && equalModuloMatch env t1 t2 && equalModuloMatch env b1 b2
+  | .letE _ t1 v1 b1 nd1, .letE _ t2 v2 b2 nd2 =>
+    nd1 == nd2 && equalModuloMatch env t1 t2 && equalModuloMatch env v1 v2 &&
+      equalModuloMatch env b1 b2
+  | .proj s1 i1 x1, .proj s2 i2 x2 => s1 == s2 && i1 == i2 && equalModuloMatch env x1 x2
+  | .const c1 us1, .const c2 us2 =>
+    if c1 == c2 && us1 == us2 then true
+    else isMatcherCore env c1 && isMatcherCore env c2 &&
+      Kernel.isDefEqGuarded env {} (.const c1 us1) (.const c2 us2)
+  | .bvar i1, .bvar i2 => i1 == i2
+  | .fvar id1, .fvar id2 => id1 == id2
+  | .sort l1, .sort l2 => l1 == l2
+  | .lit l1, .lit l2 => l1 == l2
+  | .mvar id1, .mvar id2 => id1 == id2
+  | _, _ => false
+
+def elaboratesTo (text : String) (e : Expr) (ns : Name := .anonymous)
+    (allowMatch : Bool := false) : MetaM Bool := do
   match Parser.runParserCategory (← getEnv) `term text with
   | .error _ => return false
   | .ok stx =>
@@ -177,10 +199,13 @@ def elaboratesTo (text : String) (e : Expr) (ns : Name := .anonymous) : MetaM Bo
             Term.synthesizeSyntheticMVarsNoPostponing
             instantiateMVars e'
         if e'.hasMVar then return false
-        if (eraseNames (eraseMData e')).equal (eraseNames e) then return true
+        let e1 := eraseNames (eraseMData e')
+        let e2 := eraseNames (eraseMData e)
+        if e1.equal e2 then return true
+        unless allowMatch do return false
         let env ← getEnv
         unless holdsMatch env e do return false
-        return Kernel.isDefEqGuarded env (← getLCtx) e' e
+        return equalModuloMatch env e1 e2
       catch _ => return false
 
 /-- `e` printed exactly, as text that Lean elaborates back to `e`, binder names and metadata aside;
@@ -300,7 +325,7 @@ def Reader.print (R : Reader) (e : Expr) : MetaM String := do
   for extra in readableOptions do
     let attempt ← observing? (R.delabWith extra ec)
     if let some (text, kinds) := attempt then
-      if ← elaboratesTo text ec R.ns then
+      if ← elaboratesTo text ec R.ns (allowMatch := true) then
         R.notations.modify (kinds.foldl .insert ·)
         return text
   R.printClosed e
@@ -635,7 +660,38 @@ of `c`. An error, naming `c`, when Lean gives none, when its statement or univer
 not those, or when it rests on an axiom other than Lean's own (`LeanIntent.Cone.leanAxioms`): since
 its statement names `c`, the axioms of `c`, its termination proof among them, are among its own
 (`Lean.collectAxioms` follows each constant's type and value). -/
+private def importedModule? (env : Environment) (c : Name) : Option EffectiveImport :=
+  (env.getModuleIdxFor? c).bind fun idx => env.header.modules[idx.toNat]?
+
+private def throwUnexposedDef {α : Type} (c : Name) (isRec : Bool) : MetaM α := do
+  let env ← getEnv
+  let kind := if isRec then "a recursive definition" else "a definition"
+  match importedModule? env c with
+  | some imp =>
+    if env.header.isModule && !imp.isExported && isRec then
+      throwError "cannot print {c}: its body is not exposed in {imp.module}, and its module \
+        {imp.module} is imported without `public`; mark {c} with `@[expose]` in {imp.module}, \
+        and in a `module` file use `public import {imp.module}` (or `public import` a module \
+        that publicly re-exports it) when printing a recursive definition by its equation"
+    else
+      let extra := if isRec then " or equation" else ""
+      throwError "cannot print {c}: it is {kind} whose body is not exposed in {imp.module}, \
+        so Lean shows it as an axiom without its body{extra}; mark {c} with `@[expose]` in \
+        {imp.module}"
+  | none =>
+    throwError "cannot print {c}: it is {kind} whose body is not exposed, so Lean shows it as \
+      an axiom without its body; mark {c} with `@[expose]`"
+
 def unfoldEqn (c : Name) (levels : List Name) : MetaM (Name × Expr) := do
+  let env ← getEnv
+  if ((env.setExporting false).find? c) matches some (.axiomInfo _) && wasOriginallyDefn env c then
+    throwUnexposedDef c (← isRecursiveDefinition c)
+  if env.header.isModule then
+    if let some imp := importedModule? env c then
+      unless imp.isExported do
+        throwError "cannot print {c}: its module {imp.module} is imported without `public`; \
+          in a `module` file, use `public import {imp.module}` (or `public import` a module \
+          that publicly re-exports it)"
   let eq? ← try getUnfoldEqnFor? c (nonRec := false)
     catch err => throwError "cannot print {c}: Lean cannot state its equation: {err.toMessageData}"
   let some eq := eq?
@@ -717,6 +773,8 @@ def declSection (R : Reader) (lookup : Name → Option ConstantInfo)
       it, so a term that uses it depends on nothing but its type")
   | .axiomInfo v =>
     unless ← isProp v.type do
+      if wasOriginallyDefn (← getEnv) c then
+        throwUnexposedDef c (← isRecursiveDefinition c)
       throwError "cannot print {c}: it is an axiom whose type is not a proposition, whose meaning \
         is not all in its type; in a module of Lean's module system, Lean shows an imported \
         definition whose body is not exposed this way"
@@ -772,15 +830,22 @@ def definitions (R : Reader) (roots : List Name) (shown : NameSet) : MetaM Strin
     let stop := stopAt env own shown
     let found := eqns
     let eqn := fun c => match found.find? c with
-      | some (_, t) => some t
-      | none => if (recursionKind env c).isSome then some (.sort .zero) else none
+      | some (_, t) => .eqn t
+      | none => if (recursionKind env c).isSome then .typeOnly else .value
     let bound := env.constants.map₂.foldl (fun k _ _ => k + 1) env.constants.map₁.size + 1
     let out ← match meaning lookup eqn stop bound roots with
       | .ok out => pure out
       | .error (.unknown c) => throwError "cannot print {c}: it has no declaration here"
       | .error .fuel => throwError "cannot print the definitions: there are too many"
-    let todo := out.filter fun (c, ci) =>
-      ci matches .defnInfo _ && (recursionKind env c).isSome && !found.contains c
+    let todo ← out.filterM fun (c, ci) => do
+      if found.contains c then return false
+      match ci with
+      | .defnInfo _ => return (recursionKind env c).isSome
+      | .axiomInfo v =>
+        if wasOriginallyDefn env c && (← isRecursiveDefinition c) then
+          return !(← isProp v.type)
+        else return false
+      | _ => return false
     if todo.isEmpty then
       let isLibrary (c : Name) : Bool := R.form == .readable &&
         match env.getModuleIdxFor? c with

@@ -9,19 +9,29 @@ namespace LeanIntent.Print
 open Lean (Name ConstantInfo Expr)
 open LeanIntent.Cone (declRefs mem_declRefs exprRefs mem_exprRefs Mentions RefersTo)
 
-@[expose] def refsVia (eqn : Name → Option Expr) (c : Name) : ConstantInfo → List Name
+inductive RefsMode where
+  | value
+  | eqn (e : Expr)
+  | typeOnly
+
+@[expose] def refsVia (eqn : Name → RefsMode) (c : Name) : ConstantInfo → List Name
   | .defnInfo v =>
     match eqn c with
-    | some t => exprRefs v.type (exprRefs t [])
-    | none => declRefs (.defnInfo v)
+    | .value => declRefs (.defnInfo v)
+    | .eqn t => exprRefs v.type (exprRefs t [])
+    | .typeOnly => exprRefs v.type []
   | ci => declRefs ci
 
-theorem mem_refsVia_eqn {eqn : Name → Option Expr} {c k : Name} {v : Lean.DefinitionVal} {t : Expr}
-    (h : eqn c = some t) : k ∈ refsVia eqn c (.defnInfo v) ↔ Mentions k v.type ∨ Mentions k t := by
+theorem mem_refsVia_eqn {eqn : Name → RefsMode} {c k : Name} {v : Lean.DefinitionVal} {t : Expr}
+    (h : eqn c = .eqn t) : k ∈ refsVia eqn c (.defnInfo v) ↔ Mentions k v.type ∨ Mentions k t := by
   simp [refsVia, h, mem_exprRefs]
 
-theorem refsVia_eq_declRefs {eqn : Name → Option Expr} {c : Name} {ci : ConstantInfo}
-    (h : eqn c = none ∨ ∀ v, ci ≠ .defnInfo v) : refsVia eqn c ci = declRefs ci := by
+theorem mem_refsVia_typeOnly {eqn : Name → RefsMode} {c k : Name} {v : Lean.DefinitionVal}
+    (h : eqn c = .typeOnly) : k ∈ refsVia eqn c (.defnInfo v) ↔ Mentions k v.type := by
+  simp [refsVia, h, mem_exprRefs]
+
+theorem refsVia_eq_declRefs {eqn : Name → RefsMode} {c : Name} {ci : ConstantInfo}
+    (h : eqn c = .value ∨ ∀ v, ci ≠ .defnInfo v) : refsVia eqn c ci = declRefs ci := by
   cases ci with
   | defnInfo v =>
     rcases h with h | h
@@ -29,19 +39,19 @@ theorem refsVia_eq_declRefs {eqn : Name → Option Expr} {c : Name} {ci : Consta
     · exact absurd rfl (h v)
   | _ => rfl
 
-theorem mem_declRefs_ctor {eqn : Name → Option Expr} {c : Name} {v : Lean.InductiveVal} {k : Name}
+theorem mem_declRefs_ctor {eqn : Name → RefsMode} {c : Name} {v : Lean.InductiveVal} {k : Name}
     (h : k ∈ v.ctors) : k ∈ refsVia eqn c (.inductInfo v) :=
   (mem_declRefs (.inductInfo v) k).mpr (Or.inr (Or.inr (Or.inl h)))
 
-theorem mem_declRefs_induct {eqn : Name → Option Expr} {c : Name} {v : Lean.ConstructorVal} :
+theorem mem_declRefs_induct {eqn : Name → RefsMode} {c : Name} {v : Lean.ConstructorVal} :
     v.induct ∈ refsVia eqn c (.ctorInfo v) :=
   (mem_declRefs (.ctorInfo v) v.induct).mpr (Or.inr rfl)
 
-theorem mem_declRefs_block {eqn : Name → Option Expr} {c : Name} {v : Lean.RecursorVal} {i : Name}
+theorem mem_declRefs_block {eqn : Name → RefsMode} {c : Name} {v : Lean.RecursorVal} {i : Name}
     (h : i ∈ v.all) : i ∈ refsVia eqn c (.recInfo v) :=
   (mem_declRefs (.recInfo v) i).mpr (Or.inr (Or.inl h))
 
-inductive Reach (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr)
+inductive Reach (lookup : Name → Option ConstantInfo) (eqn : Name → RefsMode)
     (stop : Name → Bool) (roots : List Name) : Name → Prop where
   | root {c : Name} : c ∈ roots → stop c = false → Reach lookup eqn stop roots c
   | step {d c : Name} {ci : ConstantInfo} : Reach lookup eqn stop roots d → lookup d = some ci →
@@ -59,7 +69,7 @@ inductive Gap where
     if stop c || visited.contains c then nextActive stop visited rest
     else some (c, rest)
 
-@[expose] def collect (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr)
+@[expose] def collect (lookup : Name → Option ConstantInfo) (eqn : Name → RefsMode)
     (stop : Name → Bool) : Nat → Std.HashSet Name → List Name →
     List (Name × ConstantInfo) → Except Gap (List (Name × ConstantInfo))
   | fuel, visited, work, done =>
@@ -75,23 +85,23 @@ inductive Gap where
           collect lookup eqn stop fuel (visited.insert c) (refsVia eqn c ci ++ rest)
             ((c, ci) :: done)
 
-@[expose] def meaning (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr)
+@[expose] def meaning (lookup : Name → Option ConstantInfo) (eqn : Name → RefsMode)
     (stop : Name → Bool) (fuel : Nat) (roots : List Name) :
     Except Gap (List (Name × ConstantInfo)) :=
   (collect lookup eqn stop fuel ∅ roots []).map List.reverse
 
-@[expose] def Within (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr)
+@[expose] def Within (lookup : Name → Option ConstantInfo) (eqn : Name → RefsMode)
     (stop : Name → Bool) (roots : List Name) (fuel : Nat) : Prop :=
   ∃ l : List Name, l.length ≤ fuel ∧ ∀ c, Reach lookup eqn stop roots c → c ∈ l
 
-@[expose] def Gap.Holds (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr)
+@[expose] def Gap.Holds (lookup : Name → Option ConstantInfo) (eqn : Name → RefsMode)
     (stop : Name → Bool) (roots : List Name) (fuel : Nat) : Gap → Prop
   | .unknown c => Reach lookup eqn stop roots c ∧ lookup c = none
   | .fuel => ¬ Within lookup eqn stop roots fuel
 
 section Proofs
 
-variable {lookup : Name → Option ConstantInfo} {eqn : Name → Option Expr} {stop : Name → Bool}
+variable {lookup : Name → Option ConstantInfo} {eqn : Name → RefsMode} {stop : Name → Bool}
   {roots : List Name}
 
 theorem nextActive_eq_none {V : Std.HashSet Name} :
@@ -134,7 +144,7 @@ theorem nextActive_eq_some {V : Std.HashSet Name} {c : Name} {rest : List Name} 
       · exact .inr (.inr (.inl rfl))
       · exact .inr (.inr (.inr hw))
 
-structure Inv (lookup : Name → Option ConstantInfo) (eqn : Name → Option Expr) (stop : Name → Bool)
+structure Inv (lookup : Name → Option ConstantInfo) (eqn : Name → RefsMode) (stop : Name → Bool)
     (roots : List Name) (V : Std.HashSet Name) (work : List Name)
     (done : List (Name × ConstantInfo)) : Prop where
   found : ∀ p ∈ done, lookup p.1 = some p.2

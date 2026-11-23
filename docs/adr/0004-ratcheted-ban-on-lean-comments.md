@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-Code comments across `lean-intent`'s `.lean` files accumulated 6,804 comment lines (~26.1% of all Lean source lines; ~7,030 lines or 27.0% including collapsed blank lines; counted at commit `ab64562`, before `main` moved to Lean v4.36.0): mostly tautological docstrings restating types and definitions, alongside stale comments that drifted behind code changes and excuse comments that rationalized hacky or incomplete implementations (e.g., unnecessary `import all`, skipped generic explanations, hardcoded magic fuel bounds, and stringly-typed sentinels; tracked in #85–#95). Meanwhile, genuine architectural and TCB rationale belongs in durable documentation (`docs/` and `docs/adr/`) rather than scattered inside source files.
+Code comments across `lean-intent`'s `.lean` files accumulated 6,804 comment lines (~26.1% of all Lean source lines; ~7,030 lines or 27.0% including collapsed blank lines; counted at commit `ab64562`, before `main` moved to Lean v4.36.0): mostly tautological docstrings restating types and definitions, alongside stale comments that drifted behind code changes and excuse comments that rationalized hacky or incomplete implementations (e.g., unnecessary `import all`, skipped generic explanations, hardcoded magic fuel bounds, and stringly-typed sentinels; filed in #85–#95 and resolved across follow-up changes). Meanwhile, genuine architectural and TCB rationale belongs in durable documentation (`docs/` and `docs/adr/`) rather than scattered inside source files.
 
 Removing all ~2,400 comments cleanly in one change would make a single pull request too large to audit and review carefully.
 
