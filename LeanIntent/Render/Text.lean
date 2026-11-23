@@ -660,15 +660,38 @@ of `c`. An error, naming `c`, when Lean gives none, when its statement or univer
 not those, or when it rests on an axiom other than Lean's own (`LeanIntent.Cone.leanAxioms`): since
 its statement names `c`, the axioms of `c`, its termination proof among them, are among its own
 (`Lean.collectAxioms` follows each constant's type and value). -/
+private def importedModule? (env : Environment) (c : Name) : Option EffectiveImport :=
+  (env.getModuleIdxFor? c).bind fun idx => env.header.modules[idx.toNat]?
+
+private def throwUnexposedDef {α : Type} (c : Name) (isRec : Bool) : MetaM α := do
+  let env ← getEnv
+  let kind := if isRec then "a recursive definition" else "a definition"
+  match importedModule? env c with
+  | some imp =>
+    if env.header.isModule && !imp.isExported && isRec then
+      throwError "cannot print {c}: its body is not exposed in {imp.module}, and its module \
+        {imp.module} is imported without `public`; mark {c} with `@[expose]` in {imp.module}, \
+        and in a `module` file use `public import {imp.module}` (or `public import` a module \
+        that publicly re-exports it) when printing a recursive definition by its equation"
+    else
+      let extra := if isRec then " or equation" else ""
+      throwError "cannot print {c}: it is {kind} whose body is not exposed in {imp.module}, \
+        so Lean shows it as an axiom without its body{extra}; mark {c} with `@[expose]` in \
+        {imp.module}"
+  | none =>
+    throwError "cannot print {c}: it is {kind} whose body is not exposed, so Lean shows it as \
+      an axiom without its body; mark {c} with `@[expose]`"
+
 def unfoldEqn (c : Name) (levels : List Name) : MetaM (Name × Expr) := do
   let env ← getEnv
+  if ((env.setExporting false).find? c) matches some (.axiomInfo _) && wasOriginallyDefn env c then
+    throwUnexposedDef c (← isRecursiveDefinition c)
   if env.header.isModule then
-    if let some idx := env.getModuleIdxFor? c then
-      if let some imp := env.header.modules[idx.toNat]? then
-        unless imp.isExported do
-          throwError "cannot print {c}: its module {imp.module} is imported without `public`; \
-            in a `module` file, use `public import {imp.module}` (or `public import` a module \
-            that publicly re-exports it)"
+    if let some imp := importedModule? env c then
+      unless imp.isExported do
+        throwError "cannot print {c}: its module {imp.module} is imported without `public`; \
+          in a `module` file, use `public import {imp.module}` (or `public import` a module \
+          that publicly re-exports it)"
   let eq? ← try getUnfoldEqnFor? c (nonRec := false)
     catch err => throwError "cannot print {c}: Lean cannot state its equation: {err.toMessageData}"
   let some eq := eq?
@@ -750,6 +773,8 @@ def declSection (R : Reader) (lookup : Name → Option ConstantInfo)
       it, so a term that uses it depends on nothing but its type")
   | .axiomInfo v =>
     unless ← isProp v.type do
+      if wasOriginallyDefn (← getEnv) c then
+        throwUnexposedDef c (← isRecursiveDefinition c)
       throwError "cannot print {c}: it is an axiom whose type is not a proposition, whose meaning \
         is not all in its type; in a module of Lean's module system, Lean shows an imported \
         definition whose body is not exposed this way"
@@ -812,8 +837,15 @@ def definitions (R : Reader) (roots : List Name) (shown : NameSet) : MetaM Strin
       | .ok out => pure out
       | .error (.unknown c) => throwError "cannot print {c}: it has no declaration here"
       | .error .fuel => throwError "cannot print the definitions: there are too many"
-    let todo := out.filter fun (c, ci) =>
-      ci matches .defnInfo _ && (recursionKind env c).isSome && !found.contains c
+    let todo ← out.filterM fun (c, ci) => do
+      if found.contains c then return false
+      match ci with
+      | .defnInfo _ => return (recursionKind env c).isSome
+      | .axiomInfo v =>
+        if wasOriginallyDefn env c && (← isRecursiveDefinition c) then
+          return !(← isProp v.type)
+        else return false
+      | _ => return false
     if todo.isEmpty then
       let isLibrary (c : Name) : Bool := R.form == .readable &&
         match env.getModuleIdxFor? c with
