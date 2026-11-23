@@ -555,7 +555,7 @@ def builtinHeads : MetaM (Array Name) := do
             | throwError "LeanIntent.HasCode: missing true branch for `{.ofConstName c}`"
           let mut brHeads := #[]
           for br in [tBr, fBr] do
-            let some h ← lambdaTelescope br fun _ body => do inductiveHead? (← kernelWhnf body)
+            let some h ← inductiveHead? (← kernelWhnf br)
               | throwError "LeanIntent.HasCode: non-inductive branch for `{.ofConstName c}`: `{br}`"
             brHeads := brHeads.push h
           return brHeads
@@ -1087,18 +1087,14 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
   elabCommand (← `(command|
     @[expose] def $(rel toGName) $binders* ($kId : Nat) : $G $kId → $famK :=
       match $kId:ident with $toGAlts:matchAlt*))
-  let eqss ← liftTermElabM <| withoutExporting do
-    plans.mapIdxM fun k cs => do
-      if cs.isEmpty then return #[]
-      let some eqs ← Lean.Meta.getEqnsFor? (act (toName k))
-        | throwError "LeanIntent.HasCode: no equation theorems for `{.ofConstName (act (toName k))}`"
-      return eqs
   let (invToDefs, toInvAlts) ← liftTermElabM do
     let mut invToDefs := #[]
     let mut toInvAlts := #[]
     for h : k in [0:K] do
-      let some eqs := eqss[k]?
-        | throwError "LeanIntent.HasCode: missing equation theorems for group type {k}"
+      let eqs ← if plans[k].isEmpty then pure #[] else withoutExporting do
+        let some eqs ← Lean.Meta.getEqnsFor? (act (toName k))
+          | throwError "LeanIntent.HasCode: no equation theorems for `{.ofConstName (act (toName k))}`"
+        pure eqs
       let mut invToAlts := #[]
       for c in plans[k] do
         let some eqName := eqs[c.alt - 1]?

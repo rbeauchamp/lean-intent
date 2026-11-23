@@ -667,8 +667,8 @@ def unfoldEqn (c : Name) (levels : List Name) : MetaM (Name × Expr) := do
       if let some imp := env.header.modules[idx.toNat]? then
         unless imp.isExported do
           throwError "cannot print {c}: its module {imp.module} is imported without `public`; \
-            in a `module` file, import the record's module with `public import` so {imp.module} \
-            is publicly imported"
+            in a `module` file, use `public import {imp.module}` (or `public import` a module \
+            that publicly re-exports it)"
   let eq? ← try getUnfoldEqnFor? c (nonRec := false)
     catch err => throwError "cannot print {c}: Lean cannot state its equation: {err.toMessageData}"
   let some eq := eq?

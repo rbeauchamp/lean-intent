@@ -13,7 +13,6 @@ inductive RefsMode where
   | value
   | eqn (e : Expr)
   | typeOnly
-  deriving @[expose] Inhabited
 
 @[expose] def refsVia (eqn : Name → RefsMode) (c : Name) : ConstantInfo → List Name
   | .defnInfo v =>
