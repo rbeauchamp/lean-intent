@@ -196,12 +196,20 @@ def isCarrier (ci : ConstantInfo) : MetaM Bool := asking <| withoutExporting do
   let defCovered ← getDefaultInstances ``Covered
   if defHasCode.any (·.1 == ci.name) || defCovered.any (·.1 == ci.name) then
     return true
-  else if ← isInstance ci.name then
-    let cls ← MetaM.run' (ctx := {}) (s := {}) <|
-      forallTelescopeReducing ci.type fun _ target => isClass? target
-    return cls == some ``HasCode || cls == some ``Covered
   else
-    return false
+    let env ← getEnv
+    match (instanceExtension.getState (genRecorded := true) env).instanceNames.find? ci.name with
+    | some entry =>
+      if (match entry.keys[0]? with
+          | some (DiscrTree.Key.const cls _) => cls == ``HasCode || cls == ``Covered
+          | _ => false) then
+        return true
+      else
+        let cls ← MetaM.run' (ctx := {}) (s := {}) <|
+          forallTelescopeReducing ci.type fun _ target => isClass? target
+        return cls == some ``HasCode || cls == some ``Covered
+    | none =>
+      return false
 
 theorem isCarrier_eq (ci : ConstantInfo) :
     isCarrier ci = asking (withoutExporting do
@@ -210,12 +218,20 @@ theorem isCarrier_eq (ci : ConstantInfo) :
       if Decidable.decide ((∃ e ∈ defHasCode, e.1 = ci.name) ∨
           (∃ e ∈ defCovered, e.1 = ci.name)) then
         pure true
-      else if ← isInstance ci.name then
-        let cls ← MetaM.run' (ctx := {}) (s := {}) <|
-          forallTelescopeReducing ci.type fun _ target => isClass? target
-        pure (Decidable.decide (cls = some ``HasCode ∨ cls = some ``Covered))
       else
-        pure false) := by
+        let env ← getEnv
+        match (instanceExtension.getState (genRecorded := true) env).instanceNames.find? ci.name with
+        | some entry =>
+          if (match entry.keys[0]? with
+              | some (DiscrTree.Key.const cls _) => Decidable.decide (cls = ``HasCode ∨ cls = ``Covered)
+              | _ => false) then
+            pure true
+          else
+            let cls ← MetaM.run' (ctx := {}) (s := {}) <|
+              forallTelescopeReducing ci.type fun _ target => isClass? target
+            pure (Decidable.decide (cls = some ``HasCode ∨ cls = some ``Covered))
+        | none =>
+          pure false) := by
   have any_eq : ∀ (l : List (Name × Nat)),
       l.any (·.1 == ci.name) = Decidable.decide (∃ e ∈ l, e.1 = ci.name) := by
     intro l
@@ -225,8 +241,16 @@ theorem isCarrier_eq (ci : ConstantInfo) :
   refine congrArg asking (congrArg withoutExporting ?_)
   refine bind_congr fun defHasCode => bind_congr fun defCovered => ?_
   rw [any_eq defHasCode, any_eq defCovered, ← Bool.decide_or]
-  simp only [Bool.beq_eq_decide_eq]
-  rfl
+  split
+  · rfl
+  · refine bind_congr fun env => ?_
+    cases (instanceExtension.getState (genRecorded := true) env).instanceNames.find? ci.name with
+    | none => rfl
+    | some entry =>
+      dsimp only
+      cases entry.keys[0]? with
+      | none => simp [Bool.beq_eq_decide_eq]
+      | some k => cases k <;> simp [Bool.beq_eq_decide_eq, Bool.decide_or]
 
 /-- `AttestedType ctor e α`: `α` is the first argument of an application of `ctor` in `e`,
 abstracted over the binders enclosing that occurrence. Both `fun` and `∀` binders become `fun`
