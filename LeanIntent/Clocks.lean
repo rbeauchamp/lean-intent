@@ -2,118 +2,6 @@ module
 
 public import LeanIntent.Declared
 
-/-!
-# The clocks inside a subject's arguments
-
-A script of timed actions is a subject that reads its clock and not what it sees: a function of the
-time alone. The trivial-witness check (`LeanIntent.TrivialWitnesses`) holds, for each clock its
-class takes, the member that offers at each input a subject that reads only that clock. Lean's
-logic cannot ask which part of an argument a project means as its clock, so this module fixes,
-from a subject's code alone, the parts that can be one, and the one way a project declares a part
-its clock where the code alone cannot tell.
-
-## Clock parts
-
-A *clock part* of a function's arguments (`ArgClock`) is a component of one argument reached
-through its data, applying no function (`Place.ArgPath`, `Place.Path`, `Place.FieldPath`), with a
-reading of it (`ClockRead`). A component lies at a *place* (`Place`): a value of a code, or a tree of
-one type of a recursive group, the `l`-th, which may be one no code denotes, such as a type of the
-group that a field holds.
-
-Each place has a *view* (`Place.view`): the place its values have by the equations of `Ty.den` that
-are isomorphisms rather than projections (`Place.Step`), followed until none applies, with the
-transport to it (`Place.viewIso`), the steps' isomorphisms one after another. A declared type views
-as its representation; a recursive type `Ty.mu` that grows as the tree of its group, and one that
-does not as its base, whose values are all its values; a `Ty.muAt` that grows as the tree of its
-group, and one that does not as the unit code; a tree of the group's root with no other constructor
-as its base; and every other place as itself. The components and readings at a place follow its
-view, so a value has the same ones however it is presented: as a declared type, as a bare `Ty.mu` or
-`Ty.muAt`, or as a tree of its group (`Place.ListedAtView`, `Place.listing_view`,
-`Ty.listing_tree`, from `Place.fieldGets_view` and `Place.viewOf_view`).
-
-The components are the value itself, a component of one side of a pair, and, at a place whose
-values are not pairs, a component of a field of the value, each of any covered type. The fields are
-those of the view, carried back through the transport, where every value at the view has one shape:
-
-* the fields of a chain, the representation of a type with one constructor, such as a structure;
-* at a tree of a type of the group that is not the root and has one constructor, such as a rose tree
-  `node (label : Nat) (kids : List Rose)`, the fields of its data, the chain of its fields that
-  hold no value of the group (`Ty.ctorData`), and each child at a recursive field that holds a value
-  of the group itself (whose arguments' code is the unit code), read whole as a tree of its own type
-  and then by its own fields, by the same rule.
-
-A component is read as its value, of its own type, once, and as each *count* of its view
-(`Place.Count`), read through the transport: the length of a list, the size of an array, or the
-length of a tree of a type of the group shaped as a list (`Ty.listShaped`, `Ty.treeLen`): each of its
-constructors has at most one recursive field that holds the type itself, some constructor has one,
-and the length counts the nodes along it. So a type a project declares with the shape of a list,
-such as `History` with `nil` and `cons (head : Bool) (tail : History)`, whose code is a declared
-type over a `Ty.mu`, has its length read, as Lean's `List T` nested in a group does.
-`ArgClock.read` reads a clock part from a tuple of arguments. A part that does not exist, such as the
-element of a list, a side of a sum, a field of a type with several constructors (a type of a group
-with base values and nodes, or with several constructors, included) or what a function returns (a
-recursive field that holds a function included), has no such path, so Lean refuses to elaborate it
-and no declaration can name it. `ArgClock.all` lists every clock part (`ArgClock.mem_all`), from
-every component of each argument (`Ty.paths`, `Place.Path.mem_paths`) and every reading of each
-(`ClockRead.all`, `ClockRead.mem_all`). The functions that list components and views (`Ty.paths`,
-`Ty.fieldPaths`, `Ty.viewOf`) match every code former with no catch-all case, so a former added to
-`Ty` must state its components and its view before the library builds.
-
-A path into a group descends into a child only through a node of a type with one constructor, and
-paths carry no bound. The listing descends into at most as many children as the group has types
-(`r.items`), so the components it lists are finitely many whatever the code, and it loses none: every
-path from a value is listed (`Place.Path.mem_paths`, `Place.Path.listed`). The proof counts rounds
-of finding the types of the group that have a value (`Ty.inhAfter`): a type that has a value is
-found within as many rounds as the group has types and one more, since each round before the rounds
-settle finds one more type, and only the root and types with a constructor, each listed in `r`, are
-ever found (`Ty.inhAfter_of`, `Ty.inhAfter_settle`); and the child of a node of a type that is not
-the root and has one constructor is of a type found a round before its node's (`Ty.inhAfter_kid`),
-while no type is found within no round. So a path from a value passes through at most `r.items`
-such nodes.
-
-## Which parts are clocks
-
-* **By the subject's type alone**, each clock part whose reading does not determine the arguments:
-  two tuples of arguments read the same there and differ (`ArgClock.determines_eq_false_iff`,
-  `ArgClock.determines_iff`). Whether it does is decided from the codes, exactly: along the path,
-  the rest of each pair, chain or node has one value, and the reading determines the component.
-  For a tree, whether a type of the group has a value (`Ty.treeInh_iff`), has two
-  (`Ty.treeMulti_iff`), and whether a tree's length determines it (`Ty.lenDet_iff`) are decided by
-  rounds over the group's types, which settle within as many rounds as there are types to mark
-  (`Ty.roundsOf_bound`). A count read through the transport determines the component exactly when
-  it determines the view's value, since the transport is a bijection (`Iso.injective_comp_iff`). A
-  rose tree's label does not determine the tree, so the class holds the script on it, and neither
-  does a `History`'s length; the one field of a structure that holds an option of itself does.
-  A subject that reads only such a part does not read the rest of its arguments, a real restriction,
-  as not reading one argument is. Where the part is in fact what the subject sees and the rest its
-  clock, such a subject is one that ignores its clock, which the class holds for whole arguments
-  already; a report of it is a true statement about the pair either way.
-* **By the project's declaration**, each clock part that is a value of type `LeanIntent.Clock α`
-  (`ArgClock.InClock`): a structure of one field, the tick, of any covered type `α`, which a project
-  gives to the part of its subject's arguments it means as its clock. A part whose reading
-  determines the arguments, such as the only argument of a policy of type `Nat → Act`, is all the
-  subject has to read: every subject reads only it, so reading it as a clock makes every subject a
-  script, and reading it as what the subject sees makes none. The type alone cannot tell the two
-  apart, so it reads such a part as what the subject sees, and only the declaration, a policy of
-  type `Clock Nat → Act`, reads it as a clock. The declaration is a part of the subject's type, so it
-  is read wherever a pair about that type is stated, and is the same for every such pair. That it is
-  a type, and not an instance or an attribute, is a choice of the agent that implemented it: an
-  instance can sit in a module the verdicts do not import, or be passed for one pair.
-* A value of type `LeanIntent.Clock α` in an argument where no clock part reaches, such as inside a
-  list, an option, a sum, a declared type with several constructors, a type of a recursive group
-  whose values have several shapes, or a function, is a declaration the class cannot read:
-  `Ty.strayClock` finds it, and the trivial-witness check refuses every verdict about such a type
-  rather than ignore the declaration. One a clock part reaches, in the data of a node of one shape
-  included, is a declaration the class reads. A recursive type with a value recurs through a type of
-  its group whose values have several shapes, since a cycle of nodes of one shape holds no value, so
-  its values also hold such a `LeanIntent.Clock` below the clock parts, in the values nested in them,
-  and the check refuses the type for those. It looks only in the fields of values, never in a
-  declared type's parameters, which hold no value except through the fields that use them. It finds
-  a `LeanIntent.Clock` by the name its code carries, so a `LeanIntent.Clock T` that is itself a type
-  of a recursive group, through a nested occurrence, which the codes name only by its number in the
-  group, is neither read nor found.
--/
-
 public section
 
 namespace LeanIntent
@@ -136,6 +24,8 @@ theorem Clock.code_eq (α : Type) [HasCode α] :
     HasCode.code (Clock α) =
       .decl Clock.codeName (.prod (HasCode.code α) .unit) (.prod (HasCode.code α) .unit) :=
   rfl
+
+theorem Clock.codeName_eq_clockName : Clock.codeName = Declared.clockName := rfl
 
 /-- A type has one value exactly when its code says so (`Ty.unique`). -/
 theorem Ty.unique_iff (t : Ty) : t.unique = true ↔ ∀ x y : t.denote, x = y := by
@@ -2385,6 +2275,11 @@ case, so a code former added to `Ty` must say whether it holds one. -/
   | .mu b g r _ => b.namesClock || g.namesClock || r.namesClock
   | .muAt b g r _ _ => b.namesClock || g.namesClock || r.namesClock
 
+theorem Clock.namesClock_code (α : Type) [HasCode α] :
+    (HasCode.code (Clock α)).namesClock = true := by
+  rw [Clock.code_eq]
+  simp [Ty.namesClock]
+
 /-- Whether a tree of the `l`-th type of the group with the base `b`, data and arguments `g` and
 recursive fields `r`, rooted at its `o`-th type, holds a `LeanIntent.Clock` where no clock part
 reaches it, given whether its base (`baseS`), the data of the first constructor of each type
@@ -2423,16 +2318,6 @@ where it grows, and never where it denotes the unit type. -/
 
 mutual
 
-/-- Whether a value of the code holds a `LeanIntent.Clock` where no clock part reaches it: inside a
-list, an array, an option, a sum, a function, a declared type with several constructors, or a type
-of a recursive group where its values have several shapes or past a child at a field that holds a
-function. The clock parts reach through pairs and the fields of every declared type with one
-constructor, `LeanIntent.Clock` included, and through the nodes of one shape of a recursive group,
-and a `LeanIntent.Clock` they reach, there too, is a declaration the class reads; the values nested
-in a recursive type's values through a type with several shapes hold it again where they do not
-reach. A parameter of a declared type is not a part of its values except through the fields that
-hold it, which are read instead. It follows the paths (`Ty.paths`): a code that is not a pair is its
-value, which reads a `LeanIntent.Clock` it is, and its fields (`Ty.fieldStrayClock`). -/
 @[expose] def Ty.strayClock : Ty → Bool
   | .prod a b => Ty.strayClock a || Ty.strayClock b
   | .decl _ _ r => Ty.fieldStrayClock r
@@ -2474,10 +2359,214 @@ recursion on `g`. -/
 
 end
 
-/-- Whether an argument of the type `σ` denotes holds a `LeanIntent.Clock` where no clock part
-reaches it: a declaration of a clock that the trivial-witness check cannot read, so it refuses every
-verdict about the type. -/
-@[expose] def Sig.strayClock (σ : Sig) : Bool := σ.args.any Ty.strayClock
+inductive Ty.NamedClock : Ty → Type
+  | here (ps r : Ty) : Ty.NamedClock (.decl Clock.codeName ps r)
+  | list {a : Ty} : Ty.NamedClock a → Ty.NamedClock (.list a)
+  | array {a : Ty} : Ty.NamedClock a → Ty.NamedClock (.array a)
+  | option {a : Ty} : Ty.NamedClock a → Ty.NamedClock (.option a)
+  | fst {a : Ty} (b : Ty) : Ty.NamedClock a → Ty.NamedClock (.prod a b)
+  | snd (a : Ty) {b : Ty} : Ty.NamedClock b → Ty.NamedClock (.prod a b)
+  | inl {a : Ty} (b : Ty) : Ty.NamedClock a → Ty.NamedClock (.sum a b)
+  | inr (a : Ty) {b : Ty} : Ty.NamedClock b → Ty.NamedClock (.sum a b)
+  | dom {a : Ty} (b : Ty) : Ty.NamedClock a → Ty.NamedClock (.arrow a b)
+  | cod (a : Ty) {b : Ty} : Ty.NamedClock b → Ty.NamedClock (.arrow a b)
+  | rep (n : Lean.Name) (ps : Ty) {r : Ty} : Ty.NamedClock r → Ty.NamedClock (.decl n ps r)
+  | muBase {b : Ty} (g r : Ty) (i : Nat) : Ty.NamedClock b → Ty.NamedClock (.mu b g r i)
+  | muGroup (b : Ty) {g : Ty} (r : Ty) (i : Nat) : Ty.NamedClock g → Ty.NamedClock (.mu b g r i)
+  | muRefs (b g : Ty) {r : Ty} (i : Nat) : Ty.NamedClock r → Ty.NamedClock (.mu b g r i)
+  | muAtBase {b : Ty} (g r : Ty) (j i : Nat) : Ty.NamedClock b → Ty.NamedClock (.muAt b g r j i)
+  | muAtGroup (b : Ty) {g : Ty} (r : Ty) (j i : Nat) :
+      Ty.NamedClock g → Ty.NamedClock (.muAt b g r j i)
+  | muAtRefs (b g : Ty) {r : Ty} (j i : Nat) : Ty.NamedClock r → Ty.NamedClock (.muAt b g r j i)
+
+theorem Ty.NamedClock.namesClock : {t : Ty} → Ty.NamedClock t → t.namesClock = true
+  | _, .here _ _ => by simp [Ty.namesClock]
+  | _, .list o => by simpa [Ty.namesClock] using o.namesClock
+  | _, .array o => by simpa [Ty.namesClock] using o.namesClock
+  | _, .option o => by simpa [Ty.namesClock] using o.namesClock
+  | _, .fst _ o => by simp [Ty.namesClock, o.namesClock]
+  | _, .snd _ o => by simp [Ty.namesClock, o.namesClock]
+  | _, .inl _ o => by simp [Ty.namesClock, o.namesClock]
+  | _, .inr _ o => by simp [Ty.namesClock, o.namesClock]
+  | _, .dom _ o => by simp [Ty.namesClock, o.namesClock]
+  | _, .cod _ o => by simp [Ty.namesClock, o.namesClock]
+  | _, .rep _ _ o => by simp [Ty.namesClock, o.namesClock]
+  | _, .muBase _ _ _ o => by simp [Ty.namesClock, o.namesClock]
+  | _, .muGroup _ _ _ o => by simp [Ty.namesClock, o.namesClock]
+  | _, .muRefs _ _ _ o => by simp [Ty.namesClock, o.namesClock]
+  | _, .muAtBase _ _ _ _ o => by simp [Ty.namesClock, o.namesClock]
+  | _, .muAtGroup _ _ _ _ o => by simp [Ty.namesClock, o.namesClock]
+  | _, .muAtRefs _ _ _ _ o => by simp [Ty.namesClock, o.namesClock]
+
+theorem Ty.namedClock_of_namesClock : (t : Ty) → t.namesClock = true → Nonempty (Ty.NamedClock t)
+  | .unit, h | .bool, h | .nat, h | .int, h | .string, h | .fin _, h | .atom _, h | .ref _, h => by
+    simp [Ty.namesClock] at h
+  | .list a, h =>
+    (Ty.namedClock_of_namesClock a (by simpa [Ty.namesClock] using h)).elim fun o => ⟨.list o⟩
+  | .array a, h =>
+    (Ty.namedClock_of_namesClock a (by simpa [Ty.namesClock] using h)).elim fun o => ⟨.array o⟩
+  | .option a, h =>
+    (Ty.namedClock_of_namesClock a (by simpa [Ty.namesClock] using h)).elim fun o => ⟨.option o⟩
+  | .prod a b, h => by
+    simp only [Ty.namesClock, Bool.or_eq_true] at h
+    rcases h with h | h
+    · exact (Ty.namedClock_of_namesClock a h).elim fun o => ⟨.fst b o⟩
+    · exact (Ty.namedClock_of_namesClock b h).elim fun o => ⟨.snd a o⟩
+  | .sum a b, h => by
+    simp only [Ty.namesClock, Bool.or_eq_true] at h
+    rcases h with h | h
+    · exact (Ty.namedClock_of_namesClock a h).elim fun o => ⟨.inl b o⟩
+    · exact (Ty.namedClock_of_namesClock b h).elim fun o => ⟨.inr a o⟩
+  | .arrow a b, h => by
+    simp only [Ty.namesClock, Bool.or_eq_true] at h
+    rcases h with h | h
+    · exact (Ty.namedClock_of_namesClock a h).elim fun o => ⟨.dom b o⟩
+    · exact (Ty.namedClock_of_namesClock b h).elim fun o => ⟨.cod a o⟩
+  | .decl n ps r, h => by
+    simp only [Ty.namesClock, Bool.or_eq_true, decide_eq_true_eq] at h
+    rcases h with rfl | h
+    · exact ⟨.here ps r⟩
+    · exact (Ty.namedClock_of_namesClock r h).elim fun o => ⟨.rep n ps o⟩
+  | .mu b g r i, h => by
+    simp only [Ty.namesClock, Bool.or_eq_true] at h
+    rcases h with (h | h) | h
+    · exact (Ty.namedClock_of_namesClock b h).elim fun o => ⟨.muBase g r i o⟩
+    · exact (Ty.namedClock_of_namesClock g h).elim fun o => ⟨.muGroup b r i o⟩
+    · exact (Ty.namedClock_of_namesClock r h).elim fun o => ⟨.muRefs b g i o⟩
+  | .muAt b g r j i, h => by
+    simp only [Ty.namesClock, Bool.or_eq_true] at h
+    rcases h with (h | h) | h
+    · exact (Ty.namedClock_of_namesClock b h).elim fun o => ⟨.muAtBase g r j i o⟩
+    · exact (Ty.namedClock_of_namesClock g h).elim fun o => ⟨.muAtGroup b r j i o⟩
+    · exact (Ty.namedClock_of_namesClock r h).elim fun o => ⟨.muAtRefs b g j i o⟩
+
+theorem Ty.namesClock_iff (t : Ty) : t.namesClock = true ↔ Nonempty (Ty.NamedClock t) :=
+  ⟨Ty.namedClock_of_namesClock t, fun ⟨o⟩ => o.namesClock⟩
+
+mutual
+
+@[expose] def Ty.NamedClock.path? : {t : Ty} → Ty.NamedClock t → Option (Σ p, Place.Path (.code t) p)
+  | _, .here _ _ => some ⟨_, .self _⟩
+  | _, .fst b o => o.path?.map fun q => ⟨q.1, .fst b q.2⟩
+  | _, .snd a o => o.path?.map fun q => ⟨q.1, .snd a q.2⟩
+  | _, .rep n ps o => o.fieldPath?.map fun q => ⟨q.1, .fields rfl (.step (.decl n ps _) q.2)⟩
+  | _, _ => none
+
+@[expose] def Ty.NamedClock.fieldPath? :
+    {t : Ty} → Ty.NamedClock t → Option (Σ p, Place.FieldPath (.code t) p)
+  | _, .fst rest o => o.path?.map fun q => ⟨q.1, .head rest q.2⟩
+  | _, .snd a o => o.fieldPath?.map fun q => ⟨q.1, .tail a q.2⟩
+  | _, .rep n ps o => o.fieldPath?.map fun q => ⟨q.1, .step (.decl n ps _) q.2⟩
+  | _, _ => none
+
+end
+
+mutual
+
+@[expose] def Ty.clocksRead : Ty → Bool
+  | .prod a b => Ty.clocksRead a && Ty.clocksRead b
+  | .decl _ _ r => Ty.fieldsRead r
+  | t => !t.namesClock
+
+@[expose] def Ty.fieldsRead : Ty → Bool
+  | .prod a rest => Ty.clocksRead a && Ty.fieldsRead rest
+  | .decl n _ r => !decide (n = Clock.codeName) && Ty.fieldsRead r
+  | r => !r.namesClock
+
+end
+
+mutual
+
+theorem Ty.NamedClock.path?_of_clocksRead : {t : Ty} → (o : Ty.NamedClock t) →
+    t.clocksRead = true → ∃ q, o.path? = some q ∧ q.1.isClock = true
+  | _, .here _ _, _ => ⟨⟨_, .self _⟩, rfl, by simp [Place.isClock, Ty.isClock]⟩
+  | _, .fst b o, h => by
+    simp only [Ty.clocksRead, Bool.and_eq_true] at h
+    obtain ⟨q, hq, hc⟩ := o.path?_of_clocksRead h.1
+    exact ⟨⟨q.1, .fst b q.2⟩, by simp [Ty.NamedClock.path?, hq], hc⟩
+  | _, .snd a o, h => by
+    simp only [Ty.clocksRead, Bool.and_eq_true] at h
+    obtain ⟨q, hq, hc⟩ := o.path?_of_clocksRead h.2
+    exact ⟨⟨q.1, .snd a q.2⟩, by simp [Ty.NamedClock.path?, hq], hc⟩
+  | _, .rep n ps o, h => by
+    simp only [Ty.clocksRead] at h
+    obtain ⟨q, hq, hc⟩ := o.fieldPath?_of_fieldsRead h
+    exact ⟨⟨q.1, .fields rfl (.step (.decl n ps _) q.2)⟩, by simp [Ty.NamedClock.path?, hq], hc⟩
+  | _, .list o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
+  | _, .array o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
+  | _, .option o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
+  | _, .inl _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
+  | _, .inr _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
+  | _, .dom _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
+  | _, .cod _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
+  | _, .muBase _ _ _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
+  | _, .muGroup _ _ _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
+  | _, .muRefs _ _ _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
+  | _, .muAtBase _ _ _ _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
+  | _, .muAtGroup _ _ _ _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
+  | _, .muAtRefs _ _ _ _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
+
+theorem Ty.NamedClock.fieldPath?_of_fieldsRead : {t : Ty} → (o : Ty.NamedClock t) →
+    t.fieldsRead = true → ∃ q, o.fieldPath? = some q ∧ q.1.isClock = true
+  | _, .fst rest o, h => by
+    simp only [Ty.fieldsRead, Bool.and_eq_true] at h
+    obtain ⟨q, hq, hc⟩ := o.path?_of_clocksRead h.1
+    exact ⟨⟨q.1, .head rest q.2⟩, by simp [Ty.NamedClock.fieldPath?, hq], hc⟩
+  | _, .snd a o, h => by
+    simp only [Ty.fieldsRead, Bool.and_eq_true] at h
+    obtain ⟨q, hq, hc⟩ := o.fieldPath?_of_fieldsRead h.2
+    exact ⟨⟨q.1, .tail a q.2⟩, by simp [Ty.NamedClock.fieldPath?, hq], hc⟩
+  | _, .rep n ps o, h => by
+    simp only [Ty.fieldsRead, Bool.and_eq_true] at h
+    obtain ⟨q, hq, hc⟩ := o.fieldPath?_of_fieldsRead h.2
+    exact ⟨⟨q.1, .step (.decl n ps _) q.2⟩, by simp [Ty.NamedClock.fieldPath?, hq], hc⟩
+  | _, .here _ _, h => by simp [Ty.fieldsRead] at h
+  | _, .list o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
+  | _, .array o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
+  | _, .option o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
+  | _, .inl _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
+  | _, .inr _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
+  | _, .dom _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
+  | _, .cod _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
+  | _, .muBase _ _ _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
+  | _, .muGroup _ _ _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
+  | _, .muRefs _ _ _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
+  | _, .muAtBase _ _ _ _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
+  | _, .muAtGroup _ _ _ _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
+  | _, .muAtRefs _ _ _ _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
+
+end
+
+@[expose] def Place.ArgPath.From {a : Ty} {p : Place} (q : Place.Path (.code a) p) :
+    {as : List Ty} → Place.ArgPath p as → Prop
+  | b :: _, .here q' => a = b ∧ HEq q q'
+  | _ :: _, .there r => Place.ArgPath.From q r
+
+theorem Place.ArgPath.exists_from {p : Place} {a : Ty} (q : Place.Path (.code a) p) :
+    {as : List Ty} → a ∈ as → ∃ r : Place.ArgPath p as, r.From q
+  | [], h => absurd h List.not_mem_nil
+  | b :: as, h => by
+    by_cases e : a = b
+    · subst e
+      exact ⟨.here q, rfl, HEq.rfl⟩
+    · obtain ⟨r, hr⟩ := Place.ArgPath.exists_from q (as := as) ((List.mem_cons.mp h).resolve_left e)
+      exact ⟨.there r, hr⟩
+
+@[expose] def Sig.strayClock (σ : Sig) : Bool := σ.args.any fun a => a.strayClock || !a.clocksRead
+
+theorem Sig.read_of_strayClock_eq_false {σ : Sig} (h : σ.strayClock = false) {a : Ty}
+    (ha : a ∈ σ.args) (o : Ty.NamedClock a) :
+    ∃ (q : Σ p, Place.Path (.code a) p) (r : Place.ArgPath q.1 σ.args),
+      o.path? = some q ∧ r.From q.2 ∧ ArgClock.InClock ⟨q.1, r, .value⟩ := by
+  have hr : a.clocksRead = true := by
+    cases hc : a.clocksRead
+    · have : σ.strayClock = true := List.any_eq_true.mpr ⟨a, ha, by rw [hc]; simp⟩
+      rw [h] at this
+      exact Bool.noConfusion this
+    · rfl
+  obtain ⟨q, hq, hc⟩ := o.path?_of_clocksRead hr
+  obtain ⟨r, hfrom⟩ := Place.ArgPath.exists_from q.2 ha
+  exact ⟨q, r, hq, hfrom, (Place.isClock_iff q.1).mp hc⟩
 
 /-! ## Scripts of timed actions -/
 

@@ -1,5 +1,5 @@
 [
-  {"file": "LeanIntent/Clocks.lean", "comments": 198, "lines": 464, "fingerprints": [
+  {"file": "LeanIntent/Clocks.lean", "comments": 195, "lines": 340, "fingerprints": [
     "0115586ca6d2f067",
     "013cff42c0b3c1cd",
     "033cb973d11e1927",
@@ -44,7 +44,6 @@
     "3896d7a11092ef66",
     "3942d594f19031a1",
     "398e5b6c2ecb39dc",
-    "39b2e3335d6b1c26",
     "3a7ffebfc6caf4f6",
     "3ceae58e1942e883",
     "3d66439fbf0be584",
@@ -94,7 +93,6 @@
     "66c19e1bc73259f0",
     "6890fd0b0aa8aaef",
     "6c1e9841ec92a91e",
-    "6c39f69b019b5a36",
     "6c9f3f6e14fa11bb",
     "6cc268e34c1df220",
     "6e48d80428821e32",
@@ -132,7 +130,6 @@
     "a92ef1bf9067b758",
     "aa9c9bc653c3b3c0",
     "ab7e7a13cf2c8a4c",
-    "ac028c6d30afe5fd",
     "add7f37e3deab9da",
     "b22fb8acdbc867ca",
     "b314d7d1382409e6",
@@ -578,7 +575,7 @@
     "f36a4e9c5e8f2f3d",
     "f5febc819156e32a"
   ]},
-  {"file": "LeanIntent/Declared/Handler.lean", "comments": 40, "lines": 259, "fingerprints": [
+  {"file": "LeanIntent/Declared/Handler.lean", "comments": 38, "lines": 119, "fingerprints": [
     "0ab1e15d42a39a97",
     "147847fddfa8708d",
     "16972518187c2ddd",
@@ -596,7 +593,6 @@
     "61e8c8c28a11c533",
     "64233f96325d8cbf",
     "686aee12c31e9e00",
-    "7078ce0dc818e491",
     "79a2952229627835",
     "7c5ef58e9a6d4f74",
     "7d5f0baaf2edb62c",
@@ -608,7 +604,6 @@
     "c4e61227174b610e",
     "cbe76e2c7fb7f807",
     "ce5874b015b6072d",
-    "cf18354e7b1b572f",
     "d0b940808d294c48",
     "d269456345a4b47f",
     "df96755de1a80292",
@@ -1513,7 +1508,7 @@
     "f75aa48e6e582bd6",
     "feaac5295beabe0c"
   ]},
-  {"file": "LeanIntent/TrivialWitnesses.lean", "comments": 74, "lines": 247, "fingerprints": [
+  {"file": "LeanIntent/TrivialWitnesses.lean", "comments": 71, "lines": 143, "fingerprints": [
     "04e715194cab9c08",
     "09d05b75d15f0c71",
     "0ce2dd93b7768092",
@@ -1530,7 +1525,6 @@
     "2ddea9d62ef356e9",
     "323acb7445ea0caa",
     "333e4c6a7edc53ae",
-    "3751e64a6c58f63c",
     "3bb1c4889007724d",
     "4286978402afaec3",
     "458709cd609914bf",
@@ -1540,7 +1534,6 @@
     "503e3a1714a9a4c8",
     "50e148f63d8a9d43",
     "55956cea1c3f7d3e",
-    "58bf242edb6481ab",
     "596c5daf4c3988ff",
     "5c1fdbd866f6428d",
     "5d5f83f7ee13a537",
@@ -1577,7 +1570,6 @@
     "cecf0b48530e954e",
     "d08279702468d37d",
     "d1a6d61ac1c66038",
-    "d375ecad8212fb64",
     "d39d8f4835cebd35",
     "d39df5e427973a5e",
     "dc5bb929c1154910",

@@ -7,133 +7,6 @@ public import Lean.Elab.Deriving.Basic
 public import Lean.Elab.Deriving.Util
 import Lean.Meta.Eqns
 
-/-!
-# The codes of the types a project declares
-
-A structure or inductive type the project declares gets its code from its declaration alone, by
-`deriving LeanIntent.HasCode` on the declaration (or `deriving instance LeanIntent.HasCode for T`).
-The module `LeanIntent.Declared` registers the handler; this module declares it, with everything it
-runs. The handler below reads the declaration through Lean's environment, never through its source
-text, and writes:
-
-* the code `Ty.decl n ps r` (`instHasCodeT.code`): `n` the type's name, `ps` the chain of the codes
-  of its type parameters, and `r` its *representation*: for each constructor in declaration order,
-  the chain of its fields' codes in declaration order, each field paired with the chain after it and
-  the last with the unit code; a type with one constructor is that chain, and one with several is
-  the sum of the first constructor's chain and the representation of the rest;
-* the isomorphism between the type and the representation (`instHasCodeT.iso`), which takes the
-  `i`-th constructor applied to its fields to the `i`-th alternative of the sum holding each field
-  carried through its own type's isomorphism, and back; Lean's kernel checks that each map undoes
-  the other;
-* the proof that the code stands for the type through that isomorphism (`instHasCodeT.stands`),
-  through the private constructor of `Ty.Stands` that admits a declared type, which no other code of
-  the library applies;
-* the instance of `HasCode` that carries the three.
-
-So a declared type's empty value is its first constructor applied to the empty values of its
-fields, the class takes constants at each constructor applied to each combination of values of its
-fields' rules (`Ty.Small`), one by one or as one member, and its projections are the components of
-its fields when it has one constructor, a function in a field included, as
-`Ty.decl` delegates to its representation (`LeanIntent.Codes`) and `Ty.projs` descends into the
-fields of a declaration with one constructor (`LeanIntent.Degenerate`). Nothing of it is chosen by
-the record or by the instance's author.
-
-A type that reaches itself through the fields of its constructors, directly, through a type its
-nested occurrences make (such as `List T`), or through another type of its mutual declaration, is
-recursive, and the handler reads it through Lean's recursor for it, whose motives are the types of
-its *group* (those its declaration declares, then those its nested occurrences make) and whose
-induction hypotheses mark the fields that hold a value of one of them, or a function to one. It
-writes:
-
-* the representation `Ty.mu b g r i` of the `i`-th type of the group (`instHasCodeT.base`,
-  `instHasCodeT.group` and `instHasCodeT.refs`): `b` the representation, as above, of its
-  constructors whose fields hold no value of a type of the group, in declaration order; `g` the chain
-  of the group's types, each the chain of its other constructors in declaration order, each the chain
-  of the chain of the codes of its fields that hold no value of the group and the chain of the codes
-  of its recursive fields' arguments; and `r` the same chain with, for each constructor, the types of
-  the group its recursive fields hold (`LeanIntent.Codes`);
-* for a type with no constructor of the first kind, the representation `Ty.muAt b g r j i` instead,
-  where `j` is its *root* (`rootOf`), the first type of the group, in the order of the recursor's
-  motives, that it reaches and that has such a constructor, `b` is the representation of the root's
-  constructors of that kind, and `g` and `r` list the root's other constructors;
-* the map from each type of the group to its trees (`instHasCodeT.to0`, …), by structural recursion
-  over the group, and the map back, the fold (`Ty.muFold`) of the map from base values
-  (`instHasCodeT.baseInv`) and of the map from each other constructor (`instHasCodeT.alg`);
-* the proofs that each map undoes the other (`instHasCodeT.invTo0`, …, `instHasCodeT.toInv`), by the
-  same recursion, which Lean's kernel checks, and the isomorphism they make.
-
-So a recursive type's empty value is its first base constructor applied to its fields' empty
-values, the class takes constants at each base constructor applied to each combination of values of
-its fields' rules, and it has no projection but the identity, as `Ty.projs` reaches into no field of
-`Ty.mu`. A recursive type without a base of its own, such as a rose tree whose only constructor
-holds a list of trees, or the odd half of a mutual even and odd pair, takes its empty value by the
-same rounds, from the types its constructors hold: the first of its constructors whose recursive
-fields hold types that get their empty values in an earlier round, applied to its other fields'
-empty values and to those types' empty values (`Ty.IsMuEmpty`, `Ty.empty_muAt`), and the class
-takes that value as its only constant. The code, base, root and group are functions of the
-declaration alone, read in declaration order, and none depends on another type's instance of
-`HasCode` but its fields' types'.
-
-The handler refuses, and so leaves not covered, every type it cannot represent this way: a recursive
-type with no value, because each of its constructors has a field that holds a value of a type of its
-group that has none (`Ty.inhabited`), and one whose recursive constructors build only finitely many
-values because a type of its group they need has none (`Ty.grows`, `Ty.growsAt`), though it may
-have values, with a base constructor of its own or without one, as `I` of the mutual group
-`I | mk (o : O)`, `O | o0 | back (i : I) (c : C)`, `C | mkc (c : C)`, whose one value is `mk o0`
-(`docs/degenerate-subjects.md` states why); a recursive field that is a function whose arguments
-depend on a field or on one another; a type whose values are
-constrained by proofs, indices or value parameters (an inductive family with indices, a group with
-a type nested through an inductive family with indices, a parameter that is not a type of `Type`, a
-field that depends on an earlier field or whose type is not a type of `Type`, such as a proof), from
-whose fields alone no empty value follows; an unsafe type; a type with no constructor, which has no
-value; a type that does not live in `Type`; a field whose type has no code; and a type that already
-has a code. A type whose fields have no code yet gets one once its fields do; a type of a mutual
-declaration that does not reach itself is coded as a structure is, once the types of its fields
-have codes.
-
-In a `module` file a type that is not public, because it is marked `private` or because no
-`public section` holds it and it is not marked `public`, has a private name, and so has everything
-the handler writes for it (`writtenName`). Lean's compiler reads the type of a `module` file's
-program twice, with the file's private scope and with the scope other modules see, and refuses the
-program when the two readings succeed and differ (`Lean.Compiler.LCNF.toLCNFType`). Where the scope
-other modules see holds the library's codes (`LeanIntent.Codes`), because the file reaches them
-through a `public import`, of the library or of a module that imports it publicly, the readings
-differ for the isomorphism, whose type reduces through the private code: that scope holds
-`Ty.denote` and not the code. Where it does not hold them, the second reading fails, which Lean
-passes over. So the handler writes for such a type as a `noncomputable section` does: Lean compiles
-what its compiler accepts, which is everything in the second case, and in the first leaves the
-isomorphism, the instance and whatever else it refuses without compiled code, with no error.
-Statements and proofs reduce them as they reduce a public type's, in both cases. A type marked
-`meta` is the exception: Lean compiles a declaration marked `meta` or reports why it cannot, in any
-section.
-
-In a `module` file, one command that derives a public type together with one that is not is
-refused: Lean runs the handler for both in the private scope, so the public type's code would be
-private too.
-
-What the handler's output rests on: that it reads the constructors and their fields in declaration
-order, and for a recursive type its group and recursive fields from Lean's recursor, which is its own
-code below and not checked by Lean's kernel; and that no other code applies the private constructor
-of `Ty.Stands`. Lean's privacy is a rule of name resolution, so the
-`constructor` tactic, which applies a constructor without resolving its name, or a metaprogram that
-builds the term directly, can still apply it; no mechanism inside Lean's logic prevents this, since
-the logic cannot refer to the constructors of an arbitrary type. The audit of declared types' codes
-(`LeanIntent.CodeAudit`) decides the second for a declaration: it reads every attestation the
-declaration depends on with `checkAttestation`, which re-derives the code through `codeWith` and the
-isomorphism by where it takes each constructor, and compares them by Lean's kernel; for a recursive
-type, the code through `readGroup` and `recCodeWith`, and the isomorphism by what its maps reduce
-to at every constructor of the group (`checkRecMaps`). The handler runs
-`checkAttestation` on what it writes and fails rather than write a code the audit would refuse, so
-the two agree on every type the handler covers. The first stays trusted: the audit derives the code
-through the same functions, not by a second reading of the declaration.
-
-In a `module` file the handler writes the code, the isomorphism and, for a recursive type, the maps
-the isomorphism is built from as exposed definitions, so that a module that imports the type's can
-reduce them, as the proofs of the checks' verdicts do. It reads the attestation it wrote in the
-module's private scope (`withoutExporting`), since the public scope holds a theorem's statement
-without its proof.
--/
-
 public section
 
 namespace LeanIntent.Declared
@@ -418,20 +291,33 @@ has a value. -/
   else (List.range group.size).find? fun l =>
     seen[l]?.getD false && (group[l]?.map (·.2.any GCtor.isBase)).getD false
 
-/-- The representation of the `i`-th type of the recursive group `group`, `Ty.mu b g r i` where the
-type is its own root (`rootOf`) and otherwise `Ty.muAt b g r j i` for its root `j`, as its base `b`,
-data and arguments `g`, recursive fields `r` and root `j`: `b` the representation of the
-constructors of the root whose fields hold no value of a type of the group, in declaration order;
-`g` the chain of the group's types, each the chain of its other constructors, in declaration order,
-each the chain of the chain of the codes of its fields that hold no value of a type of the group and
-the chain of the codes of its recursive fields' arguments, in declaration order (the unit code for a
-field that holds a value of the group, the argument's code for a function of one argument and the
-chain of the arguments' codes for a function of several); `r` the same chain with each constructor
-the chain of `ref l` for each recursive field, `l` the type of the group it holds. Each field's and
-argument's code is the one `codeOf` gives for its type. Refuses a type that reaches no type of its
-group with a constructor of the first kind, or that its root's base values do not reach
-(`Ty.inhabited`), since then it has no value, and a type that does not grow (`Ty.grows`,
-`Ty.growsAt`). -/
+@[expose] def clockName : Name := `LeanIntent.Clock
+
+@[expose] def isClockSort (s : Expr) : Bool := s.getAppFn.isConstOf clockName
+
+@[expose] def reachedClock? (group : Array (Expr × Array GCtor)) (seen : Array Bool) : Option Expr :=
+  (List.range group.size).findSome? fun l =>
+    match group[l]? with
+    | some entry => if seen[l]?.getD false && isClockSort entry.1 then some entry.1 else none
+    | none => none
+
+theorem reachedClock?_eq_none_iff (group : Array (Expr × Array GCtor)) (seen : Array Bool) :
+    reachedClock? group seen = none ↔
+      ∀ l (hl : l < group.size), seen[l]?.getD false = true → isClockSort group[l].1 = false := by
+  simp only [reachedClock?, List.findSome?_eq_none_iff, List.mem_range]
+  constructor
+  · intro h l hl hs
+    have hn := h l hl
+    rw [Array.getElem?_eq_getElem hl] at hn
+    cases hc : isClockSort group[l].1
+    · rfl
+    · simp [hs, hc] at hn
+  · intro h l hl
+    rw [Array.getElem?_eq_getElem hl]
+    cases hs : seen[l]?.getD false
+    · simp
+    · simp [h l hl hs]
+
 @[expose] def recCodeWith {m : Type → Type} [Monad m] [MonadError m] [MonadEnv m] [MonadLCtx m]
     (indVal : InductiveVal) (group : Array (Expr × Array GCtor)) (i : Nat)
     (codeOf : Expr → m Expr) : m (Expr × Expr × Expr × Nat) := asking do
@@ -451,6 +337,8 @@ group with a constructor of the first kind, or that its root's base values do no
       | .ref l _ => some (mkApp (mkConst ``Ty.ref) (toExpr l))
   let some seen := reached group i
     | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: which types of its group it reaches was not settled"
+  if let some s := reachedClock? group seen then
+    throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: its values hold values of `{s}`, a `LeanIntent.Clock` that is a type of its recursive group. A code names the types of a group only by their number, so the trivial-witness check could neither read this clock nor refuse it. Hold the clock outside the recursive group, where the check's clock parts reach it"
   let some root := rootOf group seen i
     | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: it has no value, since each constructor of each type of its group that it reaches has a field that holds a value of a type of the group"
   let some rootEntry := group[root]?
