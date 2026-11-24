@@ -4,83 +4,40 @@ public import LeanIntent.Explain
 public import LeanIntent.Generic
 public import LeanIntent.Progress
 
-/-!
-# A record of a world's day: a description made of functions, generic in the world's types
-
-This is the record the Acorn pilot wrote for a world's day and night (rbeauchamp/acorn,
-`AcornVerif.Intent.DayCycle`), its statements and consequences as they stand there, and it is a witness
-of three things its size and shape exposed:
-
-* Its subject, `DayWorld`, is a description made of functions with no state, so it is declared
-  `Shape.bundle`, of which O4 asks that a world in which any function ignores its input fails the
-  record (`dayCycle_o4`). Declared a plain value, as the pilot had to, O4 asked nothing.
-* It is generic in the world's types, and its explanation in witnesses of them, so its rendering lists
-  them as parameters and prints each statement with them free. With `LeanIntent.Render` imported,
-
-      #render_intent LeanIntentExamples.DayWorld.dayCycleExplained
-      open LeanIntentExamples.DayWorld in
-      #render_intent_at LeanIntentExamples.DayWorld.dayCycleExplained () () rep_lt rep_lt' rep_ne rep_sight
-
-  show it in general and at the representative types `Unit`, `Unit`, `Fin 4` and `Nat`.
-* An obligation of a generic record holds where its witnesses exist, not everywhere.
-  `family_o2Run` and `family_o4` state it for every world with them (`Good`), and `rep_good` shows that
-  condition can be met. `dayCycle_not_o4_without_a_situation` is a world without one where O4 fails,
-  though it holds at the representative types (`rep_o4`): the instance alone would not have shown that.
--/
-
 public section
 
 namespace LeanIntentExamples.DayWorld
 
 open LeanIntent
 
-/-- A world's day and night, over its situations `Ctx`, actions `Act`, what the agent sees `Obs`
-and energy amounts `E`. Time is counted in ticks from the start of a run. -/
 structure DayWorld (Ctx Act Obs E : Type) where
-  /-- The number of ticks in one day. -/
   length : Nat
-  /-- Whether tick `t` falls in the night. -/
   night : Nat → Bool
-  /-- The energy that action `a` costs at tick `t` in situation `c`. -/
   cost : Nat → Ctx → Act → E
-  /-- What the agent sees at tick `t` in situation `c`. -/
   sees : Nat → Ctx → Obs
 
-/-- Tick `t` lies in the night half of a day of `length` ticks whose night begins `start` ticks
-before tick 0, counted around the day: the first `length / 2` ticks of each day so placed. -/
 abbrev NightHalf (length start t : Nat) : Prop := (t + start) % length < length / 2
 
-/-- The quarter, from 0 to 3, of a day of `length` ticks that tick `t` lies in, counted around the
-day from `start` ticks before tick 0. -/
 @[expose] def quarter (length start t : Nat) : Nat := (t + start) % length * 4 / length
 
-/-- A day is a fixed number of ticks, even and positive, whose night is one unbroken stretch of
-half of them, placed alike in every day. -/
 @[expose] def halves (Ctx Act Obs E : Type) : Clause (DayWorld Ctx Act Obs E) :=
   ⟨"each day has a daytime half and a night half of equal length", fun w =>
     0 < w.length ∧ w.length % 2 = 0 ∧
       ∃ start, ∀ t, w.night t = true ↔ NightHalf w.length start t⟩
 
-/-- Every action, in every situation, costs more energy at any night tick than at any daytime
-tick. -/
 @[expose] def nightCostsMore (Ctx Act Obs E : Type) [LT E] : Clause (DayWorld Ctx Act Obs E) :=
   ⟨"at night every action costs more energy", fun w =>
     ∀ c a t t', w.night t = true → w.night t' = false → w.cost t' c a < w.cost t c a⟩
 
-/-- What the agent sees always tells it whether it is day or night: two moments it sees alike
-are both night or both day. -/
 @[expose] def tellsDayFromNight (Ctx Act Obs E : Type) : Clause (DayWorld Ctx Act Obs E) :=
   ⟨"the agent can always tell day from night", fun w =>
     ∀ t t' c c', w.sees t c = w.sees t' c' → w.night t = w.night t'⟩
 
-/-- What the agent sees always tells it which quarter of the day it is in: for some placing of
-the quarters, two moments it sees alike lie in the same quarter. -/
 @[expose] def seesQuarter (Ctx Act Obs E : Type) : Clause (DayWorld Ctx Act Obs E) :=
   ⟨"the agent can always see where in the day it is, at least to a quarter of the day", fun w =>
     ∃ start, ∀ t t' c c', w.sees t c = w.sees t' c' →
       quarter w.length start t = quarter w.length start t'⟩
 
-/-- The intent record of the world's day and night. -/
 @[expose] def dayCycle (Ctx Act Obs E : Type) [LT E] : IntentRecord (DayWorld Ctx Act Obs E) where
   shape := .bundle (fun w => w.length) ⟨"night", Nat, Bool, fun w => w.night⟩
     [⟨"cost", Nat × Ctx × Act, E, fun w p => w.cost p.1 p.2.1 p.2.2⟩,
@@ -94,8 +51,6 @@ the quarters, two moments it sees alike lie in the same quarter. -/
 
 variable {Ctx Act Obs E : Type} [LT E]
 
-/-- A world meets the record exactly when its day has two equal halves, every action costs more
-by night, and its sights tell day from night and the quarter of the day. -/
 theorem dayCycle_meets {w : DayWorld Ctx Act Obs E} :
     (dayCycle Ctx Act Obs E).Meets w ↔
       (0 < w.length ∧ w.length % 2 = 0 ∧
@@ -120,7 +75,6 @@ theorem dayCycle_meets {w : DayWorld Ctx Act Obs E} :
     · exact h3
     · exact h4
 
-/-- A quarter lies below 4 in a day of positive length. -/
 theorem quarter_lt {length : Nat} (hpos : 0 < length) (start t : Nat) :
     quarter length start t < 4 := by
   unfold quarter
@@ -128,28 +82,20 @@ theorem quarter_lt {length : Nat} (hpos : 0 < length) (start t : Nat) :
   have := Nat.mod_lt (t + start) hpos
   omega
 
-/-- In a day of even length, a tick is in the night half exactly when it lies in the first two
-quarters. -/
 theorem nightHalf_iff_quarter {length : Nat} (hpos : 0 < length) (heven : length % 2 = 0)
     (start t : Nat) : NightHalf length start t ↔ quarter length start t < 2 := by
   unfold NightHalf quarter
   rw [Nat.div_lt_iff_lt_mul hpos]
   omega
 
-/-- The quarter of tick `t` as one of four indices. -/
 @[expose] def quarterIndex (length start t : Nat) : Fin 4 := ⟨min (quarter length start t) 3, by omega⟩
 
-/-- The world whose day lasts `length` ticks with its night beginning `start` ticks before tick
-0, where a night action costs `hi` and a daytime one `lo`, and the agent sees `sight q` in quarter
-`q`, whatever the situation. -/
 @[expose] def clockWorld (length start : Nat) (lo hi : E) (sight : Fin 4 → Obs) : DayWorld Ctx Act Obs E where
   length := length
   night t := decide (NightHalf length start t)
   cost t _ _ := if NightHalf length start t then hi else lo
   sees t _ := sight (quarterIndex length start t)
 
-/-- `clockWorld` meets the record for every positive even day length and every start, wherever
-night costs more and the four sights differ. -/
 theorem clockWorld_meets {length start : Nat} {lo hi : E} {sight : Fin 4 → Obs}
     (hpos : 0 < length) (heven : length % 2 = 0) (hlt : lo < hi)
     (hsight : ∀ i j, sight i = sight j → i = j) :
@@ -176,14 +122,10 @@ theorem clockWorld_meets {length start : Nat} {lo hi : E} {sight : Fin 4 → Obs
     rw [decide_eq_decide, nightHalf_iff_quarter hpos heven, nightHalf_iff_quarter hpos heven,
       hq t t' h]
 
-/-- A world in which the agent sees only whether it is day or night, in a day of four ticks. The
-record rules it out by reading "where in the day" as at least the quarter of the day. -/
 @[expose] def dayOrNightOnly (lo hi : E) (o₁ o₂ : Obs) : DayWorld Ctx Act Obs E :=
   { clockWorld (Ctx := Ctx) (Act := Act) 4 0 lo hi (fun _ => o₁) with
     sees := fun t _ => if NightHalf 4 0 t then o₁ else o₂ }
 
-/-- Ticks 0 and 1 of `dayOrNightOnly` are both night and seen alike, yet lie in different
-quarters of the day however the quarters are placed. -/
 theorem dayCycle_refutes_dayOrNightOnly (c : Ctx) (lo hi : E) (o₁ o₂ : Obs) :
     ¬ (dayCycle Ctx Act Obs E).Meets (dayOrNightOnly lo hi o₁ o₂) := by
   intro h
@@ -198,15 +140,6 @@ theorem dayCycle_refutes_dayOrNightOnly (c : Ctx) (lo hi : E) (o₁ o₂ : Obs) 
   simp only [dayOrNightOnly, clockWorld, quarter] at this
   omega
 
-/-! ## Adequacy
-
-The obligations below use witnesses from the world's types, each theorem stating which it needs:
-a situation and an action, sights, and energy amounts with the stated order properties. These are
-sufficient hypotheses, not necessary conditions for a model: `clockWorld_meets` requires no
-situation or action, and a two-tick day can distinguish its two occupied quarters with two sights. -/
-
-/-- O2: the record has a model of its (empty) domain hypotheses and an instance of each
-predicate of its vocabulary. -/
 theorem dayCycle_o2 {lo hi : E} (hlt : lo < hi) (sight : Fin 4 → Obs) :
     O2 (dayCycle Ctx Act Obs E) := by
   refine (o2_correct _).mpr ⟨⟨clockWorld 2 0 lo hi sight, fun _ h => nomatch h⟩, ?_⟩
@@ -217,14 +150,10 @@ theorem dayCycle_o2 {lo hi : E} (hlt : lo < hi) (sight : Fin 4 → Obs) :
   · exact ⟨(lo, hi), hlt⟩
   · exact ⟨(4, 0, 0, 0), show quarter 4 0 0 = 0 by decide⟩
 
-/-- O2 before running: a world meets the whole record. -/
 theorem dayCycle_o2Run {lo hi : E} (hlt : lo < hi) {sight : Fin 4 → Obs}
     (hsight : ∀ i j, sight i = sight j → i = j) : O2Run (dayCycle Ctx Act Obs E) :=
   o2Run_of_meets (clockWorld_meets (length := 2) (start := 0) (by decide) (by decide) hlt hsight)
 
-/-- O3: each property fails of some world. A day of no ticks fails `halves`; a world where every
-action costs the same at every tick fails `nightCostsMore`; a world where the agent always sees
-the same thing fails `tellsDayFromNight` and `seesQuarter`. -/
 theorem dayCycle_o3 (c : Ctx) (a : Act) {lo hi : E} (hirr : ¬ lo < lo) (sight : Fin 4 → Obs) :
     O3 (dayCycle Ctx Act Obs E) := by
   refine (o3_correct _).mpr fun p hp => ?_
@@ -242,7 +171,6 @@ theorem dayCycle_o3 (c : Ctx) (a : Act) {lo hi : E} (hirr : ¬ lo < lo) (sight :
     change (0 + s) % 2 * 4 / 2 = (1 + s) % 2 * 4 / 2 at this
     omega
 
-/-- Some tick of every positive day length lies at any given place of the day. -/
 theorem exists_tick {length : Nat} (start k : Nat) (hk : k < length) :
     ∃ t, (t + start) % length = k := by
   refine ⟨k + (length - start % length), ?_⟩
@@ -254,7 +182,6 @@ theorem exists_tick {length : Nat} (start k : Nat) (hk : k < length) :
   rw [e, Nat.add_mul_mod_self_left, Nat.mod_eq_of_lt hk]
 
 omit [LT E] in
-/-- A world that meets `halves` has a night tick and a daytime tick. -/
 theorem exists_night_and_day {w : DayWorld Ctx Act Obs E} (h : (halves Ctx Act Obs E).holds w) :
     ∃ t t', w.night t = true ∧ w.night t' = false := by
   obtain ⟨hpos, heven, s, hs⟩ := h
@@ -268,11 +195,6 @@ theorem exists_night_and_day {w : DayWorld Ctx Act Obs E} (h : (halves Ctx Act O
       omega
     simpa using this
 
-/-- O4: a world's length and its three functions are the whole subject, each function can be any
-function of its type, and a world in which one of them ignores its input fails the record. It needs
-a situation, an action, an energy amount and a sight to build a world from, and an order on energy
-that holds of no amount and itself: a world with no situation, of which every function that takes a
-situation ignores its input, can meet the record (`dayCycle_not_o4_without_a_situation`). -/
 theorem dayCycle_o4 (c : Ctx) (a : Act) (e : E) (o : Obs) (hirr : ∀ x : E, ¬ x < x) :
     O4 (dayCycle Ctx Act Obs E) := by
   refine o4_of_idle _ ⟨?_, ?_⟩ ?_
@@ -311,7 +233,6 @@ theorem dayCycle_o4 (c : Ctx) (a : Act) (e : E) (o : Obs) (hirr : ∀ x : E, ¬ 
       rw [hn, hd] at this
       exact Bool.noConfusion this
 
-/-- O5 does not hold with equality: a day of two ticks and a day of four both meet the record. -/
 theorem dayCycle_not_o5_eq {lo hi : E} (hlt : lo < hi) {sight : Fin 4 → Obs}
     (hsight : ∀ i j, sight i = sight j → i = j) : ¬ O5 (dayCycle Ctx Act Obs E) .eq :=
   not_o5_eq (clockWorld_meets (length := 2) (start := 0) (by decide) (by decide) hlt hsight)
@@ -320,7 +241,6 @@ theorem dayCycle_not_o5_eq {lo hi : E} (hlt : lo < hi) {sight : Fin 4 → Obs}
 
 theorem dayCycle_o5_widest : O5 (dayCycle Ctx Act Obs E) .widest := o5_widest _
 
-/-- Every day lasts the same even number of ticks, at least two, and is placed alike. -/
 @[expose] def everyDayAlike : Consequence (DayWorld Ctx Act Obs E) :=
   ⟨"every day lasts the same even number of ticks, at least two, placed alike", .entailment,
     fun w => 2 ≤ w.length ∧ w.length % 2 = 0 ∧ ∀ t, w.night (t + w.length) = w.night t⟩
@@ -335,7 +255,6 @@ theorem everyDayAlike_holds : (everyDayAlike (Ctx := Ctx) (Act := Act) (Obs := O
   show (t + w.length + s) % w.length < _ ↔ (t + s) % w.length < _
   rw [Nat.add_right_comm, Nat.add_mod_right]
 
-/-- Every action costs more at every night moment than at every daytime moment. -/
 @[expose] def nightAlwaysDearer : Consequence (DayWorld Ctx Act Obs E) :=
   ⟨"every action costs more at any night moment than at any daytime moment", .entailment,
     fun w => ∀ c a t t', w.night t = true → w.night t' = false → w.cost t' c a < w.cost t c a⟩
@@ -344,7 +263,6 @@ theorem nightAlwaysDearer_holds : (nightAlwaysDearer (Ctx := Ctx) (Act := Act) (
     (E := E)).HoldsOf (dayCycle Ctx Act Obs E) :=
   fun _ hw => (dayCycle_meets.mp hw).2.1
 
-/-- What the agent sees always tells day from night. -/
 @[expose] def tellsDayFromNightAlways : Consequence (DayWorld Ctx Act Obs E) :=
   ⟨"what the agent sees always tells day from night", .entailment,
     fun w => ∀ t t' c c', w.sees t c = w.sees t' c' → w.night t = w.night t'⟩
@@ -353,7 +271,6 @@ theorem tellsDayFromNightAlways_holds : (tellsDayFromNightAlways (Ctx := Ctx) (A
     (Obs := Obs) (E := E)).HoldsOf (dayCycle Ctx Act Obs E) :=
   fun _ hw => (dayCycle_meets.mp hw).2.2.1
 
-/-- What the agent sees always tells it the quarter of the day. -/
 @[expose] def seesQuarterOfDay : Consequence (DayWorld Ctx Act Obs E) :=
   ⟨"what the agent sees always tells it which quarter of the day it is in", .entailment,
     fun w => ∃ start, ∀ t t' c c', w.sees t c = w.sees t' c' →
@@ -363,7 +280,6 @@ theorem seesQuarterOfDay_holds : (seesQuarterOfDay (Ctx := Ctx) (Act := Act) (Ob
     (E := E)).HoldsOf (dayCycle Ctx Act Obs E) :=
   fun _ hw => (dayCycle_meets.mp hw).2.2.2
 
-/-- A day of 1000 ticks is allowed. -/
 @[expose] def longDay : Consequence (DayWorld Ctx Act Obs E) :=
   ⟨"a day may last 1000 ticks", .possibility, fun w => w.length = 1000⟩
 
@@ -373,13 +289,10 @@ theorem longDay_holds {lo hi : E} (hlt : lo < hi) {sight : Fin 4 → Obs}
       (dayCycle Ctx Act Obs E) :=
   ⟨clockWorld 1000 0 lo hi sight, clockWorld_meets (by decide) (by decide) hlt hsight, rfl⟩
 
-/-- The world in which the agent sees only whether it is day or night. -/
 @[expose] def dayOrNightOnlyWorld (lo hi : E) (o₁ o₂ : Obs) : Consequence (DayWorld Ctx Act Obs E) :=
   ⟨"the agent may see only whether it is day or night", .possibility,
     fun w => w = dayOrNightOnly lo hi o₁ o₂⟩
 
-/-- The world of `clockWorld 4 0` whose night action costs `hi` in the first night tick of each
-day and `hi'` in the second. -/
 @[expose] def varyingNight (lo hi hi' : E) (sight : Fin 4 → Obs) : DayWorld Ctx Act Obs E :=
   { clockWorld (Ctx := Ctx) (Act := Act) 4 0 lo hi sight with
     cost := fun t _ _ => if NightHalf 4 0 t then (if t % 4 = 0 then hi else hi') else lo }
@@ -401,7 +314,6 @@ theorem varyingNight_meets {lo hi hi' : E} (hlt : lo < hi) (hlt' : lo < hi')
   · exact hlt
   · exact hlt'
 
-/-- Night costs may differ between two moments of the same night. -/
 @[expose] def nightCostVaries : Consequence (DayWorld Ctx Act Obs E) :=
   ⟨"an action may cost more at one night moment than at another", .possibility,
     fun w => ∃ c a t t', w.night t = true ∧ w.night t' = true ∧ w.cost t c a ≠ w.cost t' c a⟩
@@ -423,11 +335,6 @@ theorem nightCostVaries_holds (c : Ctx) (a : Act) {lo hi hi' : E} (hlt : lo < hi
       rw [ite_eq_left h0, ite_eq_left z0, ite_eq_left h1, ite_eq_right z1]
       exact hne⟩
 
-/-! ## The record explained -/
-
-/-- The day record explained in plain words, with its consequences. The consequences need a
-situation `c`, an action `a`, three energy amounts with `lo` below the two different amounts `hi`
-and `hi'`, and four different sights. -/
 @[expose] def dayCycleExplained (c : Ctx) (a : Act) {lo hi hi' : E} (hlt : lo < hi) (hlt' : lo < hi')
     (hne : hi ≠ hi') {sight : Fin 4 → Obs} (hsight : ∀ i j, sight i = sight j → i = j) :
     Explanation (dayCycle Ctx Act Obs E) where
@@ -519,73 +426,47 @@ and `hi'`, and four different sights. -/
         allows := "A night that is dearer at midnight than at dusk."
         freedom := "Whether the night's extra changes during the night." }, .unsettled⟩]
 
-/-! ## The generic record and a representative instance -/
-
-/-- The parameters of the record, a world's types with its order on energy. -/
 structure World where
-  /-- The situations. -/
   Ctx : Type
-  /-- The actions. -/
   Act : Type
-  /-- What the agent sees. -/
   Obs : Type
-  /-- The energy amounts. -/
   E : Type
-  /-- The order on energy amounts. -/
   lt : LT E
 
-/-- The record as a family over its parameters. -/
 @[expose] def family : Family World (fun p => DayWorld p.Ctx p.Act p.Obs p.E) :=
   fun p => @dayCycle p.Ctx p.Act p.Obs p.E p.lt
 
-/-- The worlds whose types have what the obligations ask: a situation, an action, two energy amounts
-in order, an order that holds of no amount and itself, and four different sights. -/
 @[expose] def Good (p : World) : Prop :=
   Nonempty p.Ctx ∧ Nonempty p.Act ∧ (∃ lo hi : p.E, p.lt.lt lo hi) ∧ (∀ x : p.E, ¬ p.lt.lt x x) ∧
     ∃ sight : Fin 4 → p.Obs, ∀ i j, sight i = sight j → i = j
 
-/-- O2 before running holds of the record at every world with those witnesses. -/
 theorem family_o2Run : Family.HoldsWhere family Good fun _ r => O2Run r := by
   rintro p ⟨-, -, ⟨lo, hi, hlt⟩, -, sight, hsight⟩
   exact @dayCycle_o2Run _ _ _ _ p.lt lo hi hlt sight hsight
 
-/-- O4 holds of the record at every world with those witnesses. -/
 theorem family_o4 : Family.HoldsWhere family Good fun _ r => O4 r := by
   rintro p ⟨⟨c⟩, ⟨a⟩, ⟨lo, -, -⟩, hirr, sight, -⟩
   exact @dayCycle_o4 _ _ _ _ p.lt c a lo (sight 0) hirr
 
-/-- The representative world: one situation, one action, four sights, and energy counted in whole
-numbers. -/
 @[expose] def rep : World := ⟨Unit, Unit, Fin 4, Nat, inferInstance⟩
 
-/-- The representative world has the witnesses, so the generic claims above are not vacuous. -/
 theorem rep_good : Good rep :=
   ⟨⟨()⟩, ⟨()⟩, ⟨(0 : Nat), (1 : Nat), Nat.zero_lt_one⟩, fun x => Nat.lt_irrefl x, id, fun _ _ h => h⟩
 
-/-- O4 at the representative world, which follows from the generic claim and not the other way. -/
 theorem rep_o4 : O4 (family rep) := family_o4.at rep_good
 
-/-- A world with no situation meets the record, and every one of its functions that takes a situation
-ignores its input, so O4 fails there. So O4 holding at the representative world does not make it hold
-of the record at every world. -/
 theorem dayCycle_not_o4_without_a_situation : ¬ O4 (dayCycle Empty Unit (Fin 4) Nat) :=
   not_o4_of_idle (w := clockWorld 2 0 0 1 id)
     ⟨⟨"cost", Nat × Empty × Unit, Nat, fun w p => w.cost p.1 p.2.1 p.2.2⟩,
       List.mem_cons_of_mem _ (List.mem_cons_self ..), fun x => nomatch x.2.1⟩
     (clockWorld_meets (by decide) (by decide) (by decide) fun _ _ h => h)
 
-/-! ## The witnesses of the representative rendering -/
-
-/-- Two energy amounts in order. -/
 theorem rep_lt : (0 : Nat) < 1 := by decide
 
-/-- Another amount above the first. -/
 theorem rep_lt' : (0 : Nat) < 2 := by decide
 
-/-- The two amounts differ. -/
 theorem rep_ne : (1 : Nat) ≠ 2 := by decide
 
-/-- Four different sights. -/
 theorem rep_sight : ∀ i j : Fin 4, id i = id j → i = j := fun _ _ h => h
 
 end LeanIntentExamples.DayWorld

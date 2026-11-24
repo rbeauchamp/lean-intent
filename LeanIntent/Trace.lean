@@ -2,125 +2,39 @@ module
 
 public import LeanIntent.Statement
 
-/-!
-# Tracing an answer's authority back to a declared owner
-
-An answer counts only when a declared owner gave it, or a party acting under a delegation that
-traces back to one, within the scope of every delegation on the way. This module decides that, for
-each answer of a project's log, from the statements of the owners' log (`LeanIntent.Statement`):
-the owners declaration in force, and the delegations, answers, retractions and revocations.
-
-Every statement records who made it (`Authority`): a principal acting as an owner, or acting under
-the delegation it names. So an answer names the one chain its authority rests on: the delegation it
-acts under, the delegation that one was granted under, and so on, until a principal acting as an
-owner. The decision follows that chain and nothing else.
-
-* **The specification** (`Chain`): an authority traces back, for an act on a record, when it is a
-  declared owner acting as owner, or it acts under a delegation whose `Link` holds and whose grantor's
-  authority traces back in turn. The link at a principal `p` acting under the delegation with id `d`
-  holds when the one statement of the project with id `d` is a delegation to `p`, no statement
-  of the log revokes it (`revokes`), its scope allows the act (`allows`), and it may be passed on
-  when its delegate passed it on. An answer is accepted (`Accepted`) when it is the one statement of
-  the project with its id, its authority traces back for what it does, and no retraction whose own
-  authority traces back retracts it (`Retracted`). A chain is a sequence of links that ends at a
-  declared owner (`chain_iff_leads`), and, being finite, never returns to a link it has passed
-  (`Chain.no_cycle`).
-* **The decision** (`check`): walks the chain from the answer, testing each link in turn, and
-  refuses at the first that fails. It visits each id of the log at most once, so it stops on every
-  input and refuses a chain that returns to a link it has passed.
-* **What it decides** (`check_eq_ok_iff`): it accepts exactly the accepted answers, for every log,
-  every owners declaration and every statement. **What a refusal says** (`check_eq_error`): it names
-  the answer, and either that the answer is not the one statement of its id, or not an answer, or
-  the first link that breaks, with every link before it holding (`Leads`) and the test that link
-  fails (`Fails`), or the retraction that retracts it. A link that breaks breaks every chain through
-  it (`Fails.not_chain`).
-* **Monotonicity, where it holds**: a statement added with an id no statement of the log has, that
-  is no revocation, keeps every chain (`Chain.append_fresh`); a statement added that is no
-  delegation makes no chain (`Chain.of_append`), so a revocation only removes authority; and a
-  retraction added with a fresh id accepts no answer the log refused
-  (`Accepted.of_append_retractions`).
-
-The decisions this module makes, each a reading of the statements' meaning:
-
-* A retraction is an act like an answer: it takes effect only when its author's authority traces
-  back, for retracting an answer on the answer's record, which a delegation allows only when it lets
-  its delegate retract.
-* A revocation takes effect when the principal who granted the delegation, or a declared owner acting
-  as owner, made it. It takes effect in every chain that passes through the delegation, whatever the
-  dates: an answer or retraction made under a revoked delegation, before or after the revocation,
-  does not count.
-* Only statements of the project count. A reference to an id that no statement of the project
-  has, or that more than one has, is a broken link; an answer whose id another statement of the
-  project shares is refused, so no retraction is ambiguous.
-* Record names are compared exactly; a delegation that names records covers only those names.
-
-Acceptance is not monotone everywhere: a revocation can restore an answer, by voiding a retraction
-made under the revoked delegation; a delegation added can make such a retraction count; and an owners
-declaration with more owners can make a revocation count.
-
-What it does not decide: which owners declaration is in force, which the caller gives
-(`LeanIntent.Confirmation` gives the log's one declaration, and refuses a log with several, since
-only signatures could settle which is in force, lean-intent #19); whether a statement's author made
-it, which review of the change that commits it checks, and a signature too, for a project that
-signs; whether the log given holds every statement the project has committed, which the caller
-gathers, since a log missing a revocation or a retraction can accept an answer the whole log
-refuses; and the dates, sources and keys of statements, which it does not read.
--/
-
 public section
 
 namespace LeanIntent
 
 namespace Trace
 
-/-- What a statement does that needs authority. -/
 inductive Act.Kind where
-  /-- Confirm a consequence. -/
   | confirm
-  /-- Decline a consequence. -/
   | decline
-  /-- Retract an answer. -/
   | retract
   deriving @[expose] DecidableEq
 
-/-- An act on one intent record, named as statements name it. -/
 structure Act where
-  /-- What is done. -/
   kind : Act.Kind
-  /-- The intent record's name. -/
   record : String
   deriving @[expose] DecidableEq
 
-/-- The act of an answer: it confirms or declines, as its verdict says, a consequence of its
-record. -/
 @[expose] def Act.ofAnswer (a : Statement.Answer) : Act :=
   ⟨match a.verdict with | .confirmed => .confirm | .declined => .decline, a.record⟩
 
-/-- The scope `s` allows the act: it covers the act's record, every record or that name exactly,
-and lets its delegate do that kind of act. -/
 @[expose] def allows (s : Scope) (act : Act) : Bool :=
   (match s.records with | .all => true | .only names => names.contains act.record) &&
     (match act.kind with | .confirm => s.confirm | .decline => s.decline | .retract => s.retract)
 
-/-- Why a link breaks. -/
 inductive Broken where
-  /-- A principal acting as owner is not a declared owner. -/
   | notOwner
-  /-- No statement of the project has the delegation's id. -/
   | unknown
-  /-- More than one statement of the project has the delegation's id. -/
   | ambiguous
-  /-- The statement with the delegation's id is not a delegation. -/
   | notDelegation
-  /-- The principal acting under the delegation is not its delegate. -/
   | notDelegate
-  /-- The statement with the id given revokes the delegation. -/
   | revoked (revocation : Ident)
-  /-- The delegation's scope does not allow the act. -/
   | outOfScope
-  /-- The delegation was passed on, though it may not be. -/
   | notPassable
-  /-- Following the chain from the delegation's grantor leads back to this link. -/
   | cycle
   deriving @[expose] DecidableEq
 
@@ -128,24 +42,17 @@ section
 
 variable (project : Ident) (owners : Statement.Owners) (log : List Statement)
 
-/-- The statements of the project in the log with the id `d`, in the log's order. -/
 @[expose] def named (d : Ident) : List Statement :=
   log.filter fun s => s.project == project && s.id == d
 
-/-- The one statement of the project with the id `d`, or `none` when none or more than one has
-it. -/
 @[expose] def find (d : Ident) : Option Statement :=
   match named project log d with
   | [s] => some s
   | _ => none
 
-/-- `o` is a declared owner. -/
 @[expose] def isOwner (o : Ident) : Bool :=
   (owners.principals.map Principal.name).contains o
 
-/-- The statement `r` revokes the delegation of the project with the id `d`, granted by `g`: it is
-a revocation of the project naming `d`, made by `g`'s principal or by a declared owner acting as
-owner. -/
 @[expose] def revokes (d : Ident) (g : Authority) (r : Statement) : Bool :=
   r.project == project && match r.body with
     | .revocation v => v.delegation == d &&
@@ -153,75 +60,50 @@ owner. -/
           (v.author.delegation == none && isOwner owners v.author.principal))
     | _ => false
 
-/-- The link at the principal `p` acting under the delegation with the id `d` holds for the act
-`act`, its authority passed on when `passed`: the one statement of the project with the id `d`
-states the delegation `del`, whose delegate is `p`, which no statement of the log revokes, whose
-scope allows the act, and which may be passed on if it is. It leads to `del.delegator`, who granted
-it. -/
 @[expose] def Link (act : Act) (passed : Bool) (p d : Ident) (del : Statement.Delegation) : Prop :=
   (∃ s, find project log d = some s ∧ s.body = .delegation del) ∧ del.delegate.name = p ∧
     (∀ r ∈ log, revokes project owners d del.delegator r = false) ∧ allows del.scope act = true ∧
     (passed = true → del.mayPassOn = true)
 
-/-- **The specification.** `Chain act passed a`: the authority `a` traces back to a declared owner
-for the act `act`, within the scope of every delegation on the way. It is passed on when `passed`,
-that is, used to grant a delegation, so the delegation it acts under must allow that. -/
 inductive Chain (act : Act) : Bool → Authority → Prop where
-  /-- A declared owner, acting as owner. -/
   | owner {passed : Bool} {o : Ident} : isOwner owners o = true → Chain act passed ⟨o, none⟩
-  /-- A principal acting under a delegation whose link holds, granted by an authority that traces
-  back, passed on. -/
   | link {passed : Bool} {p d : Ident} {del : Statement.Delegation} :
       Link project owners log act passed p d del → Chain act true del.delegator →
       Chain act passed ⟨p, some d⟩
 
-/-- `Leads act passed a passed' b`: following the chain from `a`, every link holds until `b`. -/
 inductive Leads (act : Act) : Bool → Authority → Bool → Authority → Prop where
-  /-- No link. -/
   | refl {passed : Bool} {a : Authority} : Leads act passed a passed a
-  /-- A link that holds, then the links from its grantor. -/
   | link {passed passed' : Bool} {p d : Ident} {del : Statement.Delegation} {b : Authority} :
       Link project owners log act passed p d del → Leads act true del.delegator passed' b →
       Leads act passed ⟨p, some d⟩ passed' b
 
-/-- `Fails act passed a why`: the link at `a` breaks for the reason `why`. -/
 inductive Fails (act : Act) : Bool → Authority → Broken → Prop where
-  /-- A principal acting as owner is not a declared owner. -/
   | notOwner {passed : Bool} {o : Ident} :
       isOwner owners o = false → Fails act passed ⟨o, none⟩ .notOwner
-  /-- No statement of the project has the id `d`. -/
   | unknown {passed : Bool} {p d : Ident} :
       named project log d = [] → Fails act passed ⟨p, some d⟩ .unknown
-  /-- More than one statement of the project has the id `d`. -/
   | ambiguous {passed : Bool} {p d : Ident} {s t : Statement} {rest : List Statement} :
       named project log d = s :: t :: rest → Fails act passed ⟨p, some d⟩ .ambiguous
-  /-- The statement with the id `d` is not a delegation. -/
   | notDelegation {passed : Bool} {p d : Ident} {s : Statement} :
       find project log d = some s → (∀ del, s.body ≠ .delegation del) →
       Fails act passed ⟨p, some d⟩ .notDelegation
-  /-- The delegation's delegate is not `p`. -/
   | notDelegate {passed : Bool} {p d : Ident} {s : Statement} {del : Statement.Delegation} :
       find project log d = some s → s.body = .delegation del → del.delegate.name ≠ p →
       Fails act passed ⟨p, some d⟩ .notDelegate
-  /-- The statement `r` of the log revokes the delegation. -/
   | revoked {passed : Bool} {p d : Ident} {s r : Statement} {del : Statement.Delegation} :
       find project log d = some s → s.body = .delegation del → r ∈ log →
       revokes project owners d del.delegator r = true → Fails act passed ⟨p, some d⟩ (.revoked r.id)
-  /-- The delegation's scope does not allow the act. -/
   | outOfScope {passed : Bool} {p d : Ident} {s : Statement} {del : Statement.Delegation} :
       find project log d = some s → s.body = .delegation del → allows del.scope act = false →
       Fails act passed ⟨p, some d⟩ .outOfScope
-  /-- The authority is passed on, and the delegation may not be. -/
   | notPassable {passed : Bool} {p d : Ident} {s : Statement} {del : Statement.Delegation} :
       find project log d = some s → s.body = .delegation del → passed = true →
       del.mayPassOn = false → Fails act passed ⟨p, some d⟩ .notPassable
-  /-- The link holds, and links that all hold lead from its grantor back to it. -/
   | cycle {passed passed' : Bool} {p d : Ident} {del : Statement.Delegation} :
       Link project owners log act passed p d del →
       Leads project owners log act true del.delegator passed' ⟨p, some d⟩ →
       Fails act passed ⟨p, some d⟩ .cycle
 
-/-- The author of `r` when it is a retraction of the project of the answer with the id `answer`. -/
 @[expose] def retractionOf (answer : Ident) (r : Statement) : Option Authority :=
   if r.project = project then
     match r.body with
@@ -229,22 +111,14 @@ inductive Fails (act : Act) : Bool → Authority → Broken → Prop where
     | _ => none
   else none
 
-/-- The answer `s`, which states `a`, is retracted: a statement of the log retracts it with
-authority that traces back for retracting an answer on its record. -/
 @[expose] def Retracted (s : Statement) (a : Statement.Answer) : Prop :=
   ∃ r ∈ log, ∃ t, retractionOf project s.id r = some t ∧
     Chain project owners log ⟨.retract, a.record⟩ false t
 
-/-- **The answer `s` is accepted**: it is the one statement of the project with its id, and an
-answer whose authority traces back for what it does and which no retraction retracts. -/
 @[expose] def Accepted (s : Statement) : Prop :=
   find project log s.id = some s ∧ ∃ a, s.body = .answer a ∧
     Chain project owners log (.ofAnswer a) false a.author ∧ ¬ Retracted project owners log s a
 
-/-! ## The decision -/
-
-/-- The link at `p` acting under the delegation with the id `d`, tested in `Link`'s order: the
-grantor when it holds, the first test it fails when not. -/
 @[expose] def link (act : Act) (passed : Bool) (p d : Ident) : Except Broken Authority :=
   match named project log d with
   | [] => .error .unknown
@@ -262,9 +136,6 @@ grantor when it holds, the first test it fails when not. -/
           else .ok del.delegator
     | _ => .error .notDelegation
 
-/-- The walk up the chain from `a`, refusing at the first link that breaks. `rest` holds the ids of
-the log the walk has not passed, so a link whose id it has passed closes a cycle, and `fuel` is at
-least the length of `rest`, so the walk stops. -/
 @[expose] def walk (act : Act) : Nat → List Ident → Bool → Authority → Except (Authority × Broken) Unit
   | _, _, _, ⟨o, none⟩ => if isOwner owners o then .ok () else .error (⟨o, none⟩, .notOwner)
   | fuel, rest, passed, ⟨p, some d⟩ =>
@@ -277,19 +148,14 @@ least the length of `rest`, so the walk stops. -/
         if d ∈ rest then walk act n (rest.filter (· != d)) true g
         else .error (⟨p, some d⟩, .cycle)
 
-/-- Whether the authority `a` traces back for the act `act`, and the first link that breaks when it
-does not: the walk from `a` with no id of the log passed. -/
 @[expose] def trace (act : Act) (a : Authority) : Except (Authority × Broken) Unit :=
   walk project owners log act log.length (log.map Statement.id) false a
 
-/-- `trace` as a `Bool`. -/
 @[expose] def traces (act : Act) (a : Authority) : Bool :=
   match trace project owners log act a with
   | .ok _ => true
   | .error _ => false
 
-/-- The first statement of the log that retracts the answer with the id `answer`, on the record
-`record`, with authority that traces back. -/
 @[expose] def retractedBy (answer : Ident) (record : String) : Option Statement :=
   log.find? fun r =>
     match retractionOf project answer r with
@@ -298,23 +164,15 @@ does not: the walk from `a` with no id of the log passed. -/
 
 end
 
-/-- Why an answer is refused. -/
 inductive Reason where
-  /-- It is not the one statement of the project with its id. -/
   | notOne
-  /-- It is not an answer. -/
   | notAnswer
-  /-- Its chain breaks at the link of the authority `link`, for the reason `why`. -/
   | broken (link : Authority) (why : Broken)
-  /-- The statement with the id given retracts it. -/
   | retracted (retraction : Ident)
   deriving @[expose] DecidableEq
 
-/-- A refusal: the answer refused, by its id, and why. -/
 structure Refusal where
-  /-- The answer's id. -/
   answer : Ident
-  /-- Why it is refused. -/
   reason : Reason
   deriving @[expose] DecidableEq
 
@@ -322,8 +180,6 @@ section
 
 variable (project : Ident) (owners : Statement.Owners) (log : List Statement)
 
-/-- **The decision** on the statement `s`, given the project, its owners declaration and its log:
-`.ok ()` when it accepts it, and the refusal when it does not. -/
 @[expose] def check (s : Statement) : Except Refusal Unit :=
   if find project log s.id ≠ some s then .error ⟨s.id, .notOne⟩
   else
@@ -337,12 +193,10 @@ variable (project : Ident) (owners : Statement.Owners) (log : List Statement)
         | none => .ok ()
     | _ => .error ⟨s.id, .notAnswer⟩
 
-/-- Every answer of the project in the log, in the log's order, with the decision on it. -/
 @[expose] def checkLog : List (Statement × Except Refusal Unit) :=
   (log.filter fun s => s.project == project && (s.body matches .answer _)).map
     fun s => (s, check project owners log s)
 
-/-- What the reason `r` for refusing the statement `s` states. -/
 @[expose] def Reason.Holds (s : Statement) : Reason → Prop
   | .notOne => find project log s.id ≠ some s
   | .notAnswer => ∀ a, s.body ≠ .answer a
@@ -354,28 +208,19 @@ variable (project : Ident) (owners : Statement.Owners) (log : List Statement)
       ∃ r ∈ log, r.id = i ∧ ∃ t, retractionOf project s.id r = some t ∧
         Chain project owners log ⟨.retract, a.record⟩ false t
 
-/-- The authority `a` acts under the delegation of the project that `g` granted: a step up the
-chain, with none of the link's tests. -/
 @[expose] def Step (a g : Authority) : Prop :=
   ∃ p d s del, a = ⟨p, some d⟩ ∧ find project log d = some s ∧ s.body = .delegation del ∧
     del.delegator = g
 
-/-- `Reach a b`: steps up the chain lead from `a` to `b`. -/
 inductive Reach : Authority → Authority → Prop where
-  /-- No step. -/
   | refl {a : Authority} : Reach a a
-  /-- A step, then steps. -/
   | step {a b c : Authority} : Step project log a b → Reach b c → Reach a c
 
-/-- Each id of the log that the walk has passed, those not in `rest`, is the id of a link that
-held, from whose grantor the walk led to `a`. -/
 @[expose] def Visited (act : Act) (rest : List Ident) (passed : Bool) (a : Authority) : Prop :=
   ∀ d ∈ log.map Statement.id, d ∉ rest → ∃ q y del, Link project owners log act y q d del ∧
     Leads project owners log act true del.delegator passed a
 
 end
-
-/-! ## Links, chains and cycles -/
 
 section Proofs
 
@@ -394,7 +239,6 @@ theorem find_mem {d : Ident} {s : Statement} (h : find project log d = some s) :
     s ∈ log ∧ s.project = project ∧ s.id = d :=
   mem_named.mp (by rw [find_eq_some.mp h]; exact List.mem_singleton_self s)
 
-/-- Two links at the same delegation's id lead to the same delegation. -/
 theorem Link.unique {act act' : Act} {passed passed' : Bool} {p p' d : Ident}
     {del del' : Statement.Delegation} (h : Link project owners log act passed p d del)
     (h' : Link project owners log act' passed' p' d del') : del = del' := by
@@ -429,7 +273,6 @@ theorem Reach.tail {a b c : Authority} (h : Reach project log a b) (hs : Step pr
   | refl => exact .step hs .refl
   | step h₁ _ ih => exact .step h₁ (ih hs)
 
-/-- A step from `a` to `g` and steps back from `g` to `a` put `g` on a cycle. -/
 theorem Reach.cycle {a g : Authority} (hr : Reach project log g a) (hs : Step project log a g) :
     ∃ g', Step project log g g' ∧ Reach project log g' g := by
   cases hr with
@@ -452,8 +295,6 @@ theorem Leads.tail {act : Act} {x y : Bool} {a : Authority} {p d : Ident}
   | refl => intro hl; subst hb; exact .link hl .refl
   | link h₀ _ ih => intro hl; exact .link h₀ (ih hb hl)
 
-/-- **A chain has no cycle.** No authority that traces back steps to an authority from which steps
-lead back to it. -/
 theorem Chain.no_cycle {act : Act} {x : Bool} {a g : Authority}
     (h : Chain project owners log act x a) (hs : Step project log a g)
     (hr : Reach project log g a) : False := by
@@ -467,7 +308,6 @@ theorem Chain.no_cycle {act : Act} {x : Bool} {a g : Authority}
     subst hg
     exact ih h₁ h₂
 
-/-- A chain from `a` continues along every link that leads from `a`. -/
 theorem Leads.chain {act : Act} {x y : Bool} {a b : Authority}
     (h : Leads project owners log act x a y b) (hc : Chain project owners log act x a) :
     Chain project owners log act y b := by
@@ -480,7 +320,6 @@ theorem Leads.chain {act : Act} {x y : Bool} {a b : Authority}
       subst this
       exact ih hc'
 
-/-- Links that lead from `a` to an authority that traces back make `a` trace back. -/
 theorem Leads.chain_of {act : Act} {x y : Bool} {a b : Authority}
     (h : Leads project owners log act x a y b) (hc : Chain project owners log act y b) :
     Chain project owners log act x a := by
@@ -488,8 +327,6 @@ theorem Leads.chain_of {act : Act} {x y : Bool} {a b : Authority}
   | refl => exact hc
   | link hl _ ih => exact .link hl (ih hc)
 
-/-- **A chain is a sequence of links that ends at a declared owner.** The authority `a` traces back
-exactly when links that all hold lead from it to a declared owner acting as owner. -/
 theorem chain_iff_leads {act : Act} {x : Bool} {a : Authority} :
     Chain project owners log act x a ↔
       ∃ y o, Leads project owners log act x a y ⟨o, none⟩ ∧ isOwner owners o = true := by
@@ -570,14 +407,10 @@ theorem Fails.not_chain {act : Act} {x : Bool} {b : Authority} {why : Broken}
       cases hm
   | cycle hl hle => exact hc.no_cycle hl.step hle.reach
 
-/-- Every link before a link that breaks holds, so the authority they lead from does not trace
-back. -/
 theorem Leads.not_chain {act : Act} {x y : Bool} {a b : Authority} {why : Broken}
     (hle : Leads project owners log act x a y b) (hf : Fails project owners log act y b why) :
     ¬ Chain project owners log act x a :=
   fun hc => hf.not_chain (hle.chain hc)
-
-/-! ## What the decision decides -/
 
 theorem link_of_Link {act : Act} {passed : Bool} {p d : Ident} {del : Statement.Delegation}
     (h : Link project owners log act passed p d del) :
@@ -699,7 +532,6 @@ theorem Visited.next {act : Act} {rest : List Ident} {passed : Bool} {p d : Iden
     obtain ⟨q, y, del', hl', hle⟩ := hv d' hd' this
     exact ⟨q, y, del', hl', hle.tail hl⟩
 
-/-- A link whose id the walk has passed closes a cycle: links lead from its grantor back to it. -/
 theorem Visited.cycle {act : Act} {rest : List Ident} {passed : Bool} {p d : Ident}
     {del : Statement.Delegation}
     (hv : Visited project owners log act rest passed ⟨p, some d⟩)
@@ -794,12 +626,10 @@ theorem visited_start {act : Act} {passed : Bool} {a : Authority} :
     Visited project owners log act (log.map Statement.id) passed a :=
   fun _ hd hn => absurd hd hn
 
-/-- `trace` accepts exactly the authorities that trace back. -/
 theorem trace_eq_ok_iff {act : Act} {a : Authority} :
     trace project owners log act a = .ok () ↔ Chain project owners log act false a :=
   ⟨walk_sound, fun h => walk_complete h (by simp) visited_start⟩
 
-/-- `trace` names the first link that breaks: every link before it holds. -/
 theorem trace_eq_error {act : Act} {a b : Authority} {why : Broken}
     (h : trace project owners log act a = .error (b, why)) :
     ∃ x, Leads project owners log act false a x b ∧ Fails project owners log act x b why :=
@@ -841,11 +671,6 @@ theorem retractedBy_eq_some {answer : Ident} {record : String} {r : Statement}
     rw [ht] at hp
     exact ⟨t, rfl, traces_iff.mp hp⟩
 
-/-- **What the decision decides.** For every project, owners declaration, log and statement, it
-accepts the statement exactly when the statement is an accepted answer: the one statement of the
-project with its id, an answer whose authority traces back to a declared owner within the scope of
-every delegation on the way, passed on only where each may be, and which no retraction with such
-authority retracts. -/
 theorem check_eq_ok_iff {s : Statement} :
     check project owners log s = .ok () ↔ Accepted project owners log s := by
   unfold check Accepted Retracted
@@ -872,10 +697,6 @@ theorem check_eq_ok_iff {s : Statement} :
     | _ => simp
   · simp [hf]
 
-/-- **What a refusal says.** Every refusal names the answer refused, and its reason holds: the
-statement is not the one statement of the project with its id, or not an answer; or the first link
-of its chain that breaks, every link before it holding, and the test it fails; or a retraction that
-retracts it with authority that traces back. -/
 theorem check_eq_error {s : Statement} {r : Refusal}
     (h : check project owners log s = .error r) :
     r.answer = s.id ∧ r.reason.Holds project owners log s := by
@@ -901,7 +722,6 @@ theorem check_eq_error {s : Statement} {r : Refusal}
       cases h
       exact ⟨rfl, fun a h => hb a h⟩
 
-/-- `checkLog` decides every answer of the project in the log, and nothing else. -/
 theorem mem_checkLog {s : Statement} {d : Except Refusal Unit} :
     (s, d) ∈ checkLog project owners log ↔
       s ∈ log ∧ s.project = project ∧ (∃ a, s.body = .answer a) ∧
@@ -914,8 +734,6 @@ theorem mem_checkLog {s : Statement} {d : Except Refusal Unit} :
     cases s'.body <;> simp
   · rintro ⟨hs, hp, ⟨a, hb⟩, rfl⟩
     exact ⟨s, ⟨hs, hp, by simp [hb]⟩, rfl, rfl⟩
-
-/-! ## Monotonicity, where it holds -/
 
 theorem Chain.append_fresh {act : Act} {x : Bool} {a : Authority} {more : List Statement}
     (hfresh : ∀ t ∈ more, t.project = project → t.id ∉ log.map Statement.id)
@@ -958,7 +776,6 @@ theorem Chain.of_append {act : Act} {x : Bool} {a : Authority} {more : List Stat
       exact absurd hb (hdel s (List.mem_filter.mp this).1 _)
     · exact hl'
 
-/-- **A retraction added with a fresh id accepts no answer the log refused.** -/
 theorem Accepted.of_append_retractions {s : Statement} {more : List Statement}
     (hret : ∀ t ∈ more, ∃ r, t.body = .retraction r)
     (hfresh : ∀ t ∈ more, t.project = project → t.id ∉ log.map Statement.id)

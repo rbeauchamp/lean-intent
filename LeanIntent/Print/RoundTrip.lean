@@ -2,22 +2,11 @@ module
 
 public import LeanIntent.Print.Term
 
-/-!
-# The printer's output parses back to the term it printed
-
-`claims` proves that `psTerm` reads back, from the tokens `pr` writes for a term at the lowest
-precedence, exactly that term, for every term, every scope and every choice of `bare` (`ClaimT`).
-The proof is by induction on the term, with one claim per precedence (`ClaimA`, `ClaimH`,
-`ClaimS` and `ClaimT`).
--/
-
 public section
 
 namespace LeanIntent.Print
 
 open Lean (Name Level Expr Literal BinderInfo)
-
-/-! ## Levels -/
 
 theorem levelOfNat_of_natOf : {l : Level} → {k : Nat} → natOf l = some k → levelOfNat k = l
   | .zero, k, h => by simp [natOf] at h; subst h; rfl
@@ -31,7 +20,6 @@ theorem paren_true (ts : List Tok) : paren true ts = .lparen :: ts ++ [.rparen] 
 theorem paren_false (ts : List Tok) : paren false ts = ts := rfl
 theorem paren_false_eq : paren false = id := rfl
 
-/-- A level at an atom's precedence starts with a numeral, an identifier or `(`. -/
 theorem levelStart_prLevel {l : Level} {ts : List Tok} (h : prLevel l true = some ts)
     (rest : List Tok) : levelStart (ts ++ rest) = true := by
   cases l with
@@ -64,13 +52,11 @@ theorem levelTail_of {a : Level} {rest : List Tok} (h : rest.head? ≠ some .plu
   | nil => rfl
   | cons t r => cases t <;> simp_all [levelTail]
 
-/-- `psLevel` reads a level that starts as an atom does through `psLevelAtom`. -/
 theorem psLevel_of_atom {f : Nat} {ts : List Tok} (h : levelStart ts = true) :
     psLevel (f + 1) ts = (psLevelAtom f ts).bind fun (a, ts) => levelTail a ts :=
   psLevel_default (fun r he => by subst he; simp [levelStart] at h)
     (fun r he => by subst he; simp [levelStart] at h)
 
-/-- Reading a level in parentheses at an atom's precedence, from reading it at the lowest. -/
 theorem psLevelAtom_paren (l : Level) (ts : List Tok) (h : ∀ f, 2 * ts.length + 1 ≤ f → ∀ rest,
     rest.head? ≠ some .plus → psLevel f (ts ++ rest) = some (l, rest)) :
     ∀ f, 2 * (paren true ts).length ≤ f → ∀ rest,
@@ -81,7 +67,6 @@ theorem psLevelAtom_paren (l : Level) (ts : List Tok) (h : ∀ f, 2 * ts.length 
   rw [h f (by simp [paren_true] at hf; omega) (.rparen :: rest) (by simp)]
   rfl
 
-/-- Reading a level that is one token, a numeral or a parameter. -/
 theorem psLevel_single (l : Level) (t : Tok) (ht : levelStart [t] = true)
     (h1 : ∀ rest, psLevelAtom 1 (t :: rest) = some (l, rest)) :
     (∀ f, 2 ≤ f → ∀ rest, psLevelAtom f (t :: rest) = some (l, rest)) ∧
@@ -96,7 +81,6 @@ theorem psLevel_single (l : Level) (t : Tok) (ht : levelStart [t] = true)
   rw [psLevel_of_atom (by cases t <;> simp_all [levelStart]), hat f (by omega) rest]
   exact levelTail_of hr
 
-/-- Reading `max a b` or `imax a b` at the lowest precedence. -/
 theorem psLevel_binary (l : Level) (k : Tok) (a b : Level) (ta tb : List Tok)
     (hk : ∀ f rest, psLevel (f + 1) (k :: rest) = (psLevelAtom f rest).bind fun (a', r) =>
       (psLevelAtom f r).bind fun (b', r) => some (if k = .kwMax then .max a' b' else .imax a' b', r))
@@ -112,8 +96,6 @@ theorem psLevel_binary (l : Level) (k : Tok) (a b : Level) (ta tb : List Tok)
   rw [hk]
   simp only [ha f (by omega), hb f (by omega), Option.bind_some, hl]
 
-/-- `psLevelAtom` and `psLevel` read back what `prLevel` writes, at an atom's precedence before
-anything, and otherwise before anything but `+`. -/
 theorem psLevel_prLevel (l : Level) :
     (∀ ts, prLevel l true = some ts → ∀ f, 2 * ts.length ≤ f → ∀ rest,
       psLevelAtom f (ts ++ rest) = some (l, rest)) ∧
@@ -239,7 +221,6 @@ theorem psLevels_prLevels : (us : List Level) → us ≠ [] → (ts : List Tok) 
     rw [psLevels_prLevels (l' :: ls) (by simp) _ hr f (by simp at hf ⊢; omega) rest]
     rfl
 
-/-- `psUnivs` reads back a constant's universe levels, before anything but `.{`. -/
 theorem psUnivs_prUnivs {us : List Level} {ts : List Tok} (h : prUnivs us = some ts)
     (rest : List Tok) (hr : rest.head? ≠ some .dotBrace) : psUnivs (ts ++ rest) = some (us, rest) := by
   cases us with
@@ -255,9 +236,6 @@ theorem psUnivs_prUnivs {us : List Level} {ts : List Tok} (h : prUnivs us = some
     have := length_le_prLevels _ _ ht
     exact psLevels_prLevels (u :: us) (by simp) t ht _ (by simp at this ⊢; omega) rest
 
-/-! ## Terms -/
-
-/-- Whether `e` printed at `p` is in parentheses. -/
 @[expose] def needsParen : Expr → Prec → Bool
   | .app .., p => p.isArg
   | .sort l, p => !isZero l && p.tight
@@ -265,8 +243,6 @@ theorem psUnivs_prUnivs {us : List Level} {ts : List Tok} (h : prUnivs us = some
   | .lam .., p | .forallE .., p | .letE .., p => !p.isTerm
   | _, _ => false
 
-/-- A term printed at any precedence is the term printed at the lowest, in parentheses where
-`needsParen` says. -/
 theorem pr_prec (bare : Name → Bool) (sc : List Name) (e : Expr) (p : Prec) :
     pr bare sc e p = (pr bare sc e .term).map (paren (needsParen e p)) := by
   cases e with
@@ -309,25 +285,20 @@ theorem pr_prec (bare : Name → Bool) (sc : List Name) (e : Expr) (p : Prec) :
         simp [Prec.isTerm, paren_false]
     · simp
 
-/-- What may follow a term: nothing, a closing bracket, or the `:=` or `;` of a `let`. -/
 @[expose] def FollowsTerm (rest : List Tok) : Prop :=
   ∀ t, rest.head? = some t →
     t = .rparen ∨ t = .rbrace ∨ t = .rbrack ∨ t = .rstrict ∨ t = .colonEq ∨ t = .semicolon
 
-/-- What may follow a term before `→`: what may follow a term, or `→`. -/
 @[expose] def FollowsSimple (rest : List Tok) : Prop :=
   ∀ t, rest.head? = some t → t = .rparen ∨ t = .rbrace ∨ t = .rbrack ∨ t = .rstrict ∨
     t = .colonEq ∨ t = .semicolon ∨ t = .arrow
 
-/-- The application of `h` to the arguments `as`, in order. -/
 @[expose] def mkApps (h : Expr) (as : List Expr) : Expr := as.foldl .app h
 
-/-- `ta` is an argument's tokens, which `psAtom` reads back as `a` before anything but `.{`. -/
 @[expose] def ArgOk (sc : List Name) (a : Expr) (ta : List Tok) : Prop :=
   atomStart ta = true ∧ ∀ rest, rest.head? ≠ some .dotBrace → ∀ f, 4 * ta.length + 1 ≤ f →
     psAtom f sc (ta ++ rest) = some (a, rest)
 
-/-- Each argument of `as` has the tokens of `tas` in the same place, which `psAtom` reads back. -/
 inductive ArgsOk (sc : List Name) : List Expr → List (List Tok) → Prop
   | nil : ArgsOk sc [] []
   | cons {a : Expr} {ta : List Tok} {as : List Expr} {tas : List (List Tok)} :
@@ -378,12 +349,10 @@ theorem noUniv_of_follows {rest : List Tok} (h : FollowsSimple rest) :
 theorem followsSimple_of_term {rest : List Tok} (h : FollowsTerm rest) : FollowsSimple rest :=
   fun t ht => by rcases h t ht with h | h | h | h | h | h <;> simp [h]
 
-/-- Whether a token starts a binder form: `fun`, `∀`, `let` or `have`. -/
 @[expose] def bindStart : Tok → Bool
   | .kwFun | .pi | .kwLet | .kwHave => true
   | _ => false
 
-/-- Text that starts with `t`, which starts no binder form, starts no binder form. -/
 theorem bindStart_append {t : Tok} (h : bindStart t = false) (ts rest : List Tok) :
     ∀ u r, (t :: ts) ++ rest = u :: r → bindStart u = false := by
   intro u r he
@@ -437,7 +406,6 @@ theorem psSimple_default {f : Nat} {sc : List Name} {ts : List Tok} (h : atomSta
   | nil => simp [atomStart] at h
   | cons t ts => cases t <;> first | rfl | simp_all [atomStart]
 
-/-- The arguments' loop reads back the arguments, before what cannot start one or `.{`. -/
 theorem psArgs_loop {sc : List Name} {as : List Expr} {tas : List (List Tok)}
     (h : ArgsOk sc as tas) (g : Expr) (rest : List Tok)
     (hr : rest.head? ≠ some .dotBrace) (hs : atomStart rest = false) :
@@ -457,25 +425,19 @@ theorem psArgs_loop {sc : List Name} {as : List Expr} {tas : List (List Tok)}
     rw [ha.2 _ (noUniv_flatten ‹_› hr) f (by omega), Option.bind_some]
     exact ih (.app g a) f (by omega)
 
-/-! ## The claims, at each precedence -/
-
-/-- At an argument's precedence, `psAtom` reads `e` back. -/
 @[expose] def ClaimA (bare : Name → Bool) (sc : List Name) (e : Expr) : Prop :=
   ∀ ts, pr bare sc e .arg = some ts → ArgOk sc e ts
 
-/-- At a function's precedence, `psSimple` reads back `e` applied to the arguments after it. -/
 @[expose] def ClaimH (bare : Name → Bool) (sc : List Name) (e : Expr) : Prop :=
   ∀ ts, pr bare sc e .head = some ts → ∀ as tas, ArgsOk sc as tas →
     ∀ rest, rest.head? ≠ some .dotBrace → atomStart rest = false →
     ∀ f, 4 * (ts.length + tas.flatten.length) + 2 ≤ f →
     psSimple f sc (ts ++ tas.flatten ++ rest) = some (mkApps e as, rest)
 
-/-- Before `→`, `psSimple` reads `e` back. -/
 @[expose] def ClaimS (bare : Name → Bool) (sc : List Name) (e : Expr) : Prop :=
   ∀ ts, pr bare sc e .simple = some ts → ∀ rest, FollowsSimple rest → ∀ f, 4 * ts.length + 2 ≤ f →
     psSimple f sc (ts ++ rest) = some (e, rest)
 
-/-- At the lowest precedence, `psTerm` reads `e` back. -/
 @[expose] def ClaimT (bare : Name → Bool) (sc : List Name) (e : Expr) : Prop :=
   ∀ ts, pr bare sc e .term = some ts → ∀ rest, FollowsTerm rest → ∀ f, 4 * ts.length + 3 ≤ f →
     psTerm f sc (ts ++ rest) = some (e, rest)
@@ -526,8 +488,6 @@ theorem claimA_of_T (hpe : pr bare sc e .arg = (pr bare sc e .term).map (paren t
       (by simp [paren_true] at hf; omega),
     Option.bind_some]
 
-/-- A term whose printed form is the same at every precedence: its claims follow from `psAtom`
-reading it back. -/
 theorem claims_of_atom (hp : ∀ p, pr bare sc e p = pr bare sc e .arg) (hA : ClaimA bare sc e) :
     ClaimA bare sc e ∧ ClaimH bare sc e ∧ ClaimS bare sc e ∧ ClaimT bare sc e := by
   have hH := claimH_of_A (hp .head) hA
@@ -554,7 +514,6 @@ theorem followsTerm_colonEq (r : List Tok) : FollowsTerm (.colonEq :: r) := by
 theorem followsTerm_semicolon (r : List Tok) : FollowsTerm (.semicolon :: r) := by
   intro t ht; simp_all
 
-/-- `psTerm` reads back `fun` and `∀` with a named binder, from reading back its type and body. -/
 theorem psTerm_binder {kw sep : Tok} (hkw : kw = .kwFun ∧ sep = .darrow ∨ kw = .pi ∧ sep = .comma)
     {n : Name} {t b : Expr} {bi : BinderInfo} {tt tb : List Tok} (hT : ClaimT bare sc t)
     (htt : pr bare sc t .term = some tt) (hB : ClaimT bare (n :: sc) b)
@@ -590,7 +549,6 @@ theorem psTerm_kwLet (f : Nat) (sc : List Name) (ts : List Tok) :
 theorem psTerm_kwHave (f : Nat) (sc : List Name) (ts : List Tok) :
     psTerm (f + 1) sc (.kwHave :: ts) = psLet f sc true ts := rfl
 
-/-- `psTerm` reads back a `let` or a `have`, from reading back its type, value and body. -/
 theorem psTerm_letE {n : Name} {t v b : Expr} {nd : Bool} {tt tv tb : List Tok}
     (hT : ClaimT bare sc t) (htt : pr bare sc t .term = some tt)
     (hV : ClaimT bare sc v) (htv : pr bare sc v .term = some tv)
@@ -622,7 +580,6 @@ theorem pr_eq_of_needsParen {p q : Prec} (h : needsParen e p = needsParen e q) :
     pr bare sc e p = pr bare sc e q := by
   rw [pr_prec _ _ _ p, pr_prec _ _ _ q, h]
 
-/-- At a function's or an argument's precedence, a printed term starts as an argument does. -/
 theorem atomStart_pr (bare : Name → Bool) (e : Expr) :
     ∀ (sc : List Name) (p : Prec) {ts : List Tok}, p.tight = true → pr bare sc e p = some ts →
       atomStart ts = true := by
@@ -678,7 +635,6 @@ theorem atomStart_pr_head (bare : Name → Bool) (e : Expr) (sc : List Name) {ts
     (h : pr bare sc e .head = some ts) : atomStart ts = true :=
   atomStart_pr bare e sc .head rfl h
 
-/-- Before `→`, a printed term starts no binder form: neither `fun`, `∀`, `let` nor `have`. -/
 theorem head_pr_simple (bare : Name → Bool) (e : Expr) (sc : List Name) {ts : List Tok}
     (h : pr bare sc e .simple = some ts) : ∃ t ts', ts = t :: ts' ∧ bindStart t = false := by
   have notStart : ∀ {ts : List Tok}, atomStart ts = true →
@@ -712,7 +668,6 @@ theorem head_pr_simple (bare : Name → Bool) (e : Expr) (sc : List Name) {ts : 
     rw [pr_eq_of_needsParen (q := .arg) (by simp [needsParen, Prec.isTerm])] at h
     exact notStart (atomStart_pr bare _ sc .arg rfl h)
 
-/-- A binder form's claims follow from reading it back at the lowest precedence. -/
 theorem claims_of_binder (hp : ∀ p, needsParen e p = (!p.isTerm)) (hT : ClaimT bare sc e) :
     ClaimA bare sc e ∧ ClaimH bare sc e ∧ ClaimS bare sc e ∧ ClaimT bare sc e := by
   have hA := claimA_of_T (by rw [pr_prec _ _ _ .arg, hp]; rfl) hT
@@ -755,7 +710,6 @@ theorem prSort_cases {l : Level} {ts : List Tok} (h : prSort l = some ts) :
     obtain ⟨tl, htl, rfl⟩ := h
     exact .inr (.inr (.inr ⟨tl, htl, rfl⟩))
 
-/-- Every claim holds of every term, under every scope. -/
 theorem claims (bare : Name → Bool) (e : Expr) : ∀ sc : List Name,
     ClaimA bare sc e ∧ ClaimH bare sc e ∧ ClaimS bare sc e ∧ ClaimT bare sc e := by
   induction e with
