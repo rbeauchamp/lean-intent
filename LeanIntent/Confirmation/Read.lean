@@ -11,9 +11,6 @@ namespace LeanIntent.Confirmation.Read
 
 open Lean Meta LeanIntent.Render
 
-/-- Whether a discovered constant's safety permits relying on the proofs it holds. Definitions
-must be `safe`: `ConstantInfo.isUnsafe` alone also admits `partial` definitions. Other kinds retain
-Lean's unsafe flag check; opaque constants and axioms still fail when their values are read. -/
 @[expose] def proofSafe : ConstantInfo → Bool
   | .defnInfo v =>
     match v.safety with
@@ -21,8 +18,6 @@ Lean's unsafe flag check; opaque constants and axioms still fail when their valu
     | .unsafe | .partial => false
   | ci => !ci.isUnsafe
 
-/-- The admission predicate requires exactly `safe` for every definition, covering every
-`DefinitionSafety` constructor, and preserves the unsafe flag check for all other constants. -/
 theorem proofSafe_iff (ci : ConstantInfo) : proofSafe ci = true ↔
     match ci with
     | .defnInfo v => v.safety = .safe
@@ -31,32 +26,9 @@ theorem proofSafe_iff (ci : ConstantInfo) : proofSafe ci = true ↔
   | defnInfo v => cases h : v.safety <;> simp [proofSafe, h]
   | _ => simp [proofSafe]
 
-/-- The name of the imported module at index `i`, read directly from `header.modules` (in Lean
-v4.36.0's `src/Lean/Environment.lean`, line 165, `header.moduleNames` is a field initialized to
-`modules.map (·.module)`). -/
 @[expose] def moduleName? (header : EnvironmentHeader) (i : Nat) : Option Name :=
   header.modules[i]?.map (·.module)
 
-/-- The definitions, opaque constants and axioms of the modules `mods`, the current one included when
-it is listed, whose type, reduced by unfolding every definition, meets `test`, sorted by name; an
-error when a module given is not imported, since it would hide what it declares, or when the
-environment holds no data for one that is. An opaque constant or an axiom is found so that reading it
-is an error, never a value passed over. A constant found that is unsafe or partial is an error too
-(`proofSafe_iff`): such a definition may refer to itself, so
-the proofs it holds, a deliverable's `keeps` or an implementation's `fulfils`, can prove anything,
-and a safe declaration cannot refer to one, as Lean's kernel refuses
-(`type_checker::infer_constant`).
-
-A constant is of the module Lean records for its name (`Environment.const2ModIdx`), and of the
-current one when Lean records none. Lean v4.36.0 records a module for a name only from that
-module's `constNames` and from the `extraConstNames` of the data it reads as the module's IR
-(`finalizeImport`, `src/Lean/Environment.lean`, lines 2697 to 2712), which is the module's own data
-or its `.ir`, whose `extraConstNames` are the names of the IR declarations it stores
-(`ImportedModule.irData?`, lines 2410 to 2418; `mkIRData`, lines 2233 to 2241 and `src/LeanIR.lean`,
-lines 41 to 57). So the names read for a module given are its data's `constNames` and
-`extraConstNames` and its stored IR declarations' names, each kept only where Lean records that
-module for it, and each constant is found once. An environment that reads a module's `.ir.sig` as
-its IR, which only Lean's `leanir` makes, is outside this account. -/
 def declaredWhere (mods : Array Name) (test : Expr → MetaM Bool) : MetaM (Array Name) := asking do
   let env ← getEnv
   let modData := env.header.moduleData
@@ -103,15 +75,12 @@ def declaredWhere (mods : Array Name) (test : Expr → MetaM Bool) : MetaM (Arra
       found := found.push c
   return found.qsort Name.lt
 
-/-- The constants of the modules `mods` whose type reduces to an application of `head`. -/
 def declaredIn (mods : Array Name) (head : Name) : MetaM (Array Name) := asking <|
   declaredWhere mods fun t => pure (t.getAppFn.isConstOf head)
 
-/-- The constant `decl`, with its own universe parameters. -/
 def constOf (decl : Name) : MetaM Expr := asking do
   return mkConst decl ((← getConstInfo decl).levelParams.map .param)
 
-/-- The name of the constant `e` is, or an error naming `what` must be one. -/
 def constName (e : Expr) (what : String) : MetaM Name := asking do
   match e.consumeMData with
   | .const c _ => return c
@@ -137,11 +106,9 @@ def questionOfVerified (c : Expr) :
     if kind.isConstOf ``Consequence.Kind.entailment then .entailment else .possibility,
     pred⟩, by obtain ⟨p, d, rfl⟩ := hp; exact consequenceBody_ne_restatementPredicate p d⟩
 
-/-- The question of the consequence `c`, a term of type `LeanIntent.Consequence W`. -/
 def questionOf (c : Expr) : MetaM Question := asking <|
   return (← questionOfVerified c).1
 
-/-- The kept answer of `a`, a term of type `LeanIntent.Attributed W`. -/
 def keptOf (a : Expr) : MetaM (Question × Verdict × Answerer) := asking do
   let attributed ← ctorArgs a ``Attributed.mk 3
   let args ← ctorArgs attributed[1] ``Answer.mk 3
@@ -168,25 +135,19 @@ def revisionOfVerified (decl : Name) :
     obtain ⟨y, _, rfl⟩ := List.mem_map.mp hx
     exact y.2⟩
 
-/-- The current revision of the deliverable `decl`, a definition of type `LeanIntent.Deliverable W`,
-as the build shows it. An error, naming what cannot be read or printed, when any of it cannot. -/
 def revisionOf (decl : Name) : MetaM Revision := asking <|
   return (← revisionOfVerified decl).1
 
-/-- The texts of the owners' log `decl`, a definition of type `LeanIntent.OwnersLog`. -/
 def logTexts (decl : Name) : MetaM (List String) := asking do
   let args ← ctorArgs (← constOf decl) ``OwnersLog.mk 1
   return (← (← listElems args[0]).mapM strLit).toList
 
-/-- The statements of the project's one owners' log among `mods`, or what is wrong. -/
 def projectLog (mods : Array Name) : MetaM (Except (List Finding) (List String)) := asking do
   match (← declaredIn mods ``OwnersLog).toList with
   | [] => return .error [.noLog]
   | [log] => return .ok (← logTexts log)
   | logs => return .error [.severalLogs (logs.map toString)]
 
-/-- Whether the explanation `ex` says someone settled something: it records an owner's confirmation
-of the restatement, or an answer, or a derived consequence. -/
 def explanationClaims (ex : Name) : MetaM Bool := asking do
   let ci ← getConstInfo ex
   let us := ci.levelParams.map .param
@@ -197,7 +158,6 @@ def explanationClaims (ex : Name) : MetaM Bool := asking do
       return (← readSettled standing (← ctorArgs e ``Shown.mk 7)[6]) matches .answered .. | .derived
     return standing != .unconfirmed || claims.any id
 
-/-- The answers the constant `decl` holds, of type `LeanIntent.Attributed W` or a list of them. -/
 def attributedOf (decl : Name) : MetaM (Array (Question × Verdict × Answerer)) := asking do
   let t ← readWhnf (← getConstInfo decl).type
   let e ← constOf decl
@@ -216,12 +176,6 @@ def undeclaredIn (mods decls : Array Name) (revs : Array Revision) : MetaM (List
     return (← attributedOf a).any fun x => !kept.contains x
   return (explanations ++ strayAnswers).toList.map toString
 
-/-- **What a checker reads**, from the finished build: the report on the project whose modules are
-`mods`. It is `Confirmation.report` of the texts of the project's one owners' log and the current
-revision of each of its deliverables, with a finding for each value `undeclaredIn` names; so its
-findings are empty exactly when there are none and the deliverables are confirmed
-(`Report.withUndeclared_findings`, `Confirmation.report_findings`). A project with no log, or several,
-has a report that says so. -/
 def check (mods : Array Name) : MetaM Report := asking do
   match ← projectLog mods with
   | .error fs => return ⟨fs, [], [], [], []⟩
@@ -230,10 +184,6 @@ def check (mods : Array Name) : MetaM Report := asking do
     let revs ← decls.mapM revisionOf
     return (report texts revs.toList).withUndeclared (← undeclaredIn mods decls revs)
 
-/-- The rendering of the deliverable `decl` of the project whose modules are `mods`, saying of who
-settled each thing what the project's owners' log holds for this revision (`logStanding`,
-`checked`), whatever the explanation still records: so a record revised after its owner confirmed it
-does not print as confirmed. A log that cannot be read, or that `inForce` refuses, is an error. -/
 def renderChecked (mods : Array Name) (decl : Name) : MetaM String := asking do
   let texts ← match ← projectLog mods with
     | .ok texts => pure texts
