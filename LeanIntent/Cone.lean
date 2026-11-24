@@ -4,82 +4,12 @@ public import Lean.CoreM
 public import Std.Data.HashSet.Lemmas
 public import LeanIntent.Loaded
 
-/-!
-# Cone exclusion: refusing an intent record that depends on its implementation
-
-A specification written from the code proves nothing about intent: the property
-`fun f => f = impl` is met by `impl` whatever the owner meant. This module decides, from Lean's
-own environment, that no declaration of the implementation occurs in the cone of an intent record:
-the declarations its meaning depends on, transitively.
-
-* **What an expression names** (`Mentions`): a constant, the structure a projection reads, or the
-  type of a literal. `exprRefs` lists them (`mem_exprRefs`).
-* **What a declaration refers to** (`RefersTo`): the names its type mentions; a definition's value;
-  an inductive type's block, constructors and recursors, named as Lean names them (`I.rec`, and
-  `b.rec_1` to `b.rec_n` for the `n` auxiliary types of nested occurrences in a block whose first
-  type is `b`); a constructor's inductive type; a recursor's block and rules. `declRefs` lists them
-  (`mem_declRefs`). A theorem's proof and an opaque constant's value are not followed: Lean's
-  kernel never unfolds an opaque constant, and by definitional proof irrelevance any two proofs of
-  a proposition are equal, so neither changes what a term that names the constant means. Nor is the
-  mutual block of a definition, theorem or opaque constant, which Lean's kernel does not read. A
-  recursor reached through `casesOn`, `recOn`, `brecOn` or `below` is found through their values,
-  and one reached through a structure's projection through the structure, which the projection
-  names.
-* **The procedure** (`exclude`): a closure over names from the record, with a set of the names it
-  has visited, that visits each name once and refuses at the first reached name that is a
-  declaration of the implementation, that the environment does not declare, or that is an axiom
-  the caller does not accept, and when it reaches more names than its fuel. `exclude_eq_none_iff`
-  states what it decides, for every environment lookup, every record and every implementation:
-  it accepts exactly when every name reached (`Reaches`) passes those three tests (`Admitted`) and
-  at most `fuel` names are reached (`Within`). `exclude_eq_some` states that every refusal reports
-  a fact about the reached names.
-* **In a Lean environment** (`checkRecord`, `checkRecord_eq_ok_iff`): the lookup is
-  `Environment.find?` with the bodies of the environment's own module visible; the
-  implementation's declarations are the names the caller gives and every declaration named under
-  one of them, which is how Lean names the auxiliary declarations it makes (`isImplDecl`); the
-  only axioms accepted are Lean's three, `propext`, `Classical.choice` and `Quot.sound`
-  (`leanAxioms`), so a record that depends on any other axiom is refused; the fuel is `2 ^ 64`,
-  more than the declarations that fit in a 64-bit address space; and the check refuses when the
-  caller gives no name, or one the environment does not declare, since an exclusion of nothing
-  would accept every record. A record whose cone reaches a declaration of the implementation is
-  refused (`checkRecord_ne_ok_of_reaches`). `requireIndependent` runs the check in `CoreM`.
-
-Every name is reached through declarations of any kind, so a dependency reached only through an
-auxiliary declaration Lean generates, such as a `match` compiler or a recursion helper, or through
-an instance, is found like any other.
-
-What the theorems do not reach, and what is trusted:
-
-* The theorems are about these definitions as Lean's kernel reads them; that Lean's compiler runs
-  them as defined, and that `Environment.find?` returns the declarations the kernel checked, is
-  trusted with Lean.
-* In a module of Lean's module system, Lean shows an imported theorem, and an imported definition
-  whose body is not exposed, as an axiom, so its body cannot be read. The check refuses every
-  axiom but Lean's three, so such an environment is refused rather than accepted on a body it
-  cannot see; the check is meant to run where every module is imported in full, such as in a file
-  outside the module system.
-* That the implementation's declarations are all named under the names the caller gives, beyond
-  those Lean generates. The mutual block of a definition is not followed, and Lean may compile a
-  block of mutually recursive definitions into one helper, named under only one member, that holds
-  every member's body (well-founded mutual `f` and `g` each name only `f._mutual`), so the caller
-  names every member of such a block as the implementation's.
-* A property that restates the implementation's body without naming it passes; its plain-word
-  consequence, "the output is computed exactly as this expression", is left to the owner's
-  confirmation of the record's restatement. That the record was written before its implementation
-  was read is not decided either.
--/
-
 public section
 
 namespace LeanIntent.Cone
 
 open Lean
 
-/-! ## The constants an expression names -/
-
-/-- `Mentions c e`: the expression `e` names the constant `c`, at its top or in a subterm: as a
-constant (`Expr.const`), as the structure a projection reads (`Expr.proj`), or as the type Lean's
-kernel gives a literal, `Nat` for a natural number and `String` for a string. -/
 @[expose] def Mentions (c : Name) : Expr → Prop
   | .const d _ => c = d
   | .proj s _ e => c = s ∨ Mentions c e
@@ -92,7 +22,6 @@ kernel gives a literal, `Nat` for a natural number and `String` for a string. -/
   | .mdata _ e => Mentions c e
   | .bvar _ | .fvar _ | .mvar _ | .sort _ => False
 
-/-- The constants `e` names (`Mentions`), each as often as it occurs, before `acc`. -/
 @[expose] def exprRefs : Expr → List Name → List Name
   | .const c _, acc => c :: acc
   | .proj s _ e, acc => s :: exprRefs e acc
@@ -120,38 +49,23 @@ theorem mem_exprRefs {c : Name} :
   | .mdata _ e, acc => by simp [exprRefs, Mentions, mem_exprRefs e]
   | .bvar _, acc | .fvar _, acc | .mvar _, acc | .sort _, acc => by simp [exprRefs, Mentions]
 
-/-! ## Reachability and the procedure that decides it -/
-
-/-- `Reaches lookup refers roots c`: the name `c` is reached from the names `roots` by following,
-from each reached name that `lookup` finds a declaration under, every name that declaration
-`refers` to. -/
 inductive Reaches (lookup : Name → Option ConstantInfo) (refers : ConstantInfo → Name → Prop)
     (roots : List Name) : Name → Prop where
   | root {c : Name} : c ∈ roots → Reaches lookup refers roots c
   | step {d c : Name} {ci : ConstantInfo} : Reaches lookup refers roots d → lookup d = some ci →
       refers ci c → Reaches lookup refers roots c
 
-/-- Why the procedure refuses. -/
 inductive Refusal where
-  /-- A declaration of the implementation is reached. -/
   | impl (c : Name)
-  /-- A name is reached that the environment declares nothing under. -/
   | unknown (c : Name)
-  /-- An axiom is reached that the caller does not accept: a declaration whose value, if it has
-  one, cannot be read. -/
   | axiom (c : Name)
-  /-- More declarations are reached than the procedure was given fuel to visit. -/
   | fuel
   deriving @[expose] Inhabited, Repr, @[expose] DecidableEq
 
-/-- A reached name `c` passes the procedure's three tests: it is no declaration of the
-implementation, `lookup` finds its declaration, and that declaration is no axiom outside
-`axioms`. -/
 @[expose] def Admitted (lookup : Name → Option ConstantInfo) (isImpl : Name → Bool) (axioms : List Name)
     (c : Name) : Prop :=
   isImpl c = false ∧ ∃ ci, lookup c = some ci ∧ (ci.isAxiom → c ∈ axioms)
 
-/-- The three tests of a reached name, in order, returning its declaration when it passes them. -/
 @[expose] def visit (lookup : Name → Option ConstantInfo) (isImpl : Name → Bool) (axioms : List Name)
     (c : Name) : Except Refusal ConstantInfo :=
   if isImpl c then .error (.impl c) else
@@ -159,14 +73,10 @@ implementation, `lookup` finds its declaration, and that declaration is no axiom
     | none => .error (.unknown c)
     | some ci => if ci.isAxiom && !axioms.contains c then .error (.axiom c) else .ok ci
 
-/-- The first name of `work` that is not in `visited`, with the names after it. -/
 @[expose] def nextNew (visited : Std.HashSet Name) : List Name → Option (Name × List Name)
   | [] => none
   | c :: rest => if visited.contains c then nextNew visited rest else some (c, rest)
 
-/-- The closure: visits each name of `work` not yet in `visited`, tests it (`visit`), and adds
-the names `deps` gives its declaration to the work, spending one unit of `fuel` on each name it
-visits. It refuses at the first name that fails a test, or that it has no fuel left to visit. -/
 @[expose] def explore (lookup : Name → Option ConstantInfo) (deps : ConstantInfo → List Name)
     (isImpl : Name → Bool) (axioms : List Name) :
     Nat → Std.HashSet Name → List Name → Option Refusal
@@ -181,18 +91,14 @@ visits. It refuses at the first name that fails a test, or that it has no fuel l
         | 0 => some .fuel
         | fuel + 1 => explore lookup deps isImpl axioms fuel (visited.insert c) (deps ci ++ rest)
 
-/-- The procedure: `none` when it accepts, the reason when it refuses. -/
 @[expose] def exclude (lookup : Name → Option ConstantInfo) (deps : ConstantInfo → List Name)
     (isImpl : Name → Bool) (axioms : List Name) (fuel : Nat) (roots : List Name) :
     Option Refusal :=
   explore lookup deps isImpl axioms fuel ∅ roots
 
-/-- Some list of at most `fuel` names holds every name reached from `roots`. -/
 @[expose] def Within (lookup : Name → Option ConstantInfo) (refers : ConstantInfo → Name → Prop)
     (roots : List Name) (fuel : Nat) : Prop :=
   ∃ l : List Name, l.length ≤ fuel ∧ ∀ c, Reaches lookup refers roots c → c ∈ l
-
-/-! ## What the procedure decides -/
 
 section Decides
 
@@ -247,8 +153,6 @@ theorem nextNew_eq_some {V : Std.HashSet Name} {c : Name} {rest : List Name} :
       · exact .inr (.inl rfl)
       · exact .inr (.inr hw)
 
-/-- A set of names all in `l`, together with one more name of `l` outside it, is no larger
-than `l`. -/
 theorem size_lt_length {V : Std.HashSet Name} {c : Name} {l : List Name}
     (hV : ∀ v ∈ V, v ∈ l) (hc : c ∉ V) (hcl : c ∈ l) : V.size + 1 ≤ l.length := by
   have hnd : V.toList.Nodup :=
@@ -272,9 +176,6 @@ theorem size_insert_of_not_mem {V : Std.HashSet Name} {c : Name} (hc : c ∉ V) 
 
 variable {refers : ConstantInfo → Name → Prop} {roots : List Name}
 
-/-- When the closure accepts, it has visited a set of names, holding every name it started with
-and no more than one per unit of fuel, all of which pass the tests and whose declarations refer
-only to names in it. -/
 theorem explore_eq_none_closed (hdeps : ∀ ci c, c ∈ deps ci ↔ refers ci c) :
     (fuel : Nat) → (V : Std.HashSet Name) → (W : List Name) →
     (∀ v ∈ V, Admitted lookup isImpl axioms v ∧
@@ -329,9 +230,6 @@ theorem explore_eq_none_closed (hdeps : ∀ ci c, c ∈ deps ci ↔ refers ci c)
             · exact hVV w (mem_insert.mpr (.inl rfl))
             · exact hWV w (List.mem_append_right _ h')
 
-/-- When every name reached from `roots` passes the tests and some list of `l.length` names holds
-them all, the closure accepts from any state whose visited and pending names are reached, given
-fuel for the names of `l` it has not visited. -/
 theorem explore_eq_none_of (hdeps : ∀ ci c, c ∈ deps ci ↔ refers ci c)
     (hAll : ∀ c, Reaches lookup refers roots c → Admitted lookup isImpl axioms c)
     {l : List Name} (hl : ∀ c, Reaches lookup refers roots c → c ∈ l) :
@@ -365,10 +263,6 @@ theorem explore_eq_none_of (hdeps : ∀ ci c, c ∈ deps ci ↔ refers ci c)
         · rw [size_insert_of_not_mem hcV]
           omega
 
-/-- **What the procedure decides.** It accepts exactly when every name reached from `roots`
-through `lookup`'s declarations and `refers` is no declaration of the implementation, is
-declared, and is no axiom outside `axioms`, and at most `fuel` names are reached; `deps` must
-list exactly the names each declaration refers to. -/
 theorem exclude_eq_none_iff (hdeps : ∀ ci c, c ∈ deps ci ↔ refers ci c) (fuel : Nat) :
     exclude lookup deps isImpl axioms fuel roots = none ↔
       (∀ c, Reaches lookup refers roots c → Admitted lookup isImpl axioms c) ∧
@@ -390,8 +284,6 @@ theorem exclude_eq_none_iff (hdeps : ∀ ci c, c ∈ deps ci ↔ refers ci c) (f
       (fun v hv => absurd hv Std.HashSet.not_mem_empty) (fun w hw => .root hw)
       (by simpa using hlen)
 
-/-- A record whose cone reaches a declaration of the implementation is refused, whatever the
-fuel. -/
 theorem exclude_ne_none_of_reaches (hdeps : ∀ ci c, c ∈ deps ci ↔ refers ci c) {fuel : Nat}
     {c : Name} (hc : Reaches lookup refers roots c) (hi : isImpl c = true) :
     exclude lookup deps isImpl axioms fuel roots ≠ none := by
@@ -407,7 +299,6 @@ theorem visit_eq_error {c : Name} {r : Refusal} (h : visit lookup isImpl axioms 
   rename_i ci
   split at h <;> simp_all
 
-/-- What a refusal reports, of the names reached from `roots`. -/
 @[expose] def Refusal.Holds (lookup : Name → Option ConstantInfo) (refers : ConstantInfo → Name → Prop)
     (isImpl : Name → Bool) (axioms : List Name) (roots : List Name) (fuel : Nat) :
     Refusal → Prop
@@ -457,9 +348,6 @@ theorem explore_eq_some (hdeps : ∀ ci c, c ∈ deps ci ↔ refers ci c) (fuel�
           · rw [size_insert_of_not_mem hcV]
             omega
 
-/-- **What a refusal reports is true.** A refusal names a reached declaration of the
-implementation, a reached name with no declaration, or a reached axiom outside `axioms`, or, for
-want of fuel, there are more than `fuel` reached names. -/
 theorem exclude_eq_some (hdeps : ∀ ci c, c ∈ deps ci ↔ refers ci c) {fuel : Nat} {r : Refusal}
     (h : exclude lookup deps isImpl axioms fuel roots = some r) :
     r.Holds lookup refers isImpl axioms roots fuel :=
@@ -468,19 +356,6 @@ theorem exclude_eq_some (hdeps : ∀ ci c, c ∈ deps ci ↔ refers ci c) {fuel 
 
 end Decides
 
-/-! ## The names a declaration refers to -/
-
-/-- `RefersTo ci c`: the declaration `ci` refers to the constant `c`. Its type names `c`
-(`Mentions`); or it is a definition whose value names `c`; or an inductive type whose mutual block
-or constructors hold `c`, or whose recursor is `c`; or a constructor of the inductive type `c`; or
-a recursor whose mutual block holds `c`, or one of whose rules is for the constructor `c` or names
-`c` on its right-hand side. An inductive type `I`'s recursor is `I.rec` (`mkRecName`), and, when
-its mutual block `b :: _` has `n` auxiliary types from nested occurrences, also each of `b.rec_1`
-to `b.rec_n`, which is how Lean names them. A theorem's proof and an opaque constant's value are
-not followed: Lean's kernel never unfolds an opaque constant, and with definitional proof
-irrelevance any two proofs of a proposition are equal, so neither changes what a term that names
-the constant means. Nor is the mutual block of a definition, theorem or opaque constant, which
-Lean's kernel does not read. -/
 @[expose] def RefersTo : ConstantInfo → Name → Prop
   | .axiomInfo v, c => Mentions c v.type
   | .defnInfo v, c => Mentions c v.type ∨ Mentions c v.value
@@ -492,7 +367,6 @@ Lean's kernel does not read. -/
   | .ctorInfo v, c => Mentions c v.type ∨ c = v.induct
   | .recInfo v, c => Mentions c v.type ∨ c ∈ v.all ∨ ∃ r ∈ v.rules, c = r.ctor ∨ Mentions c r.rhs
 
-/-- The names the declaration `ci` refers to (`RefersTo`), each as often as it occurs. -/
 @[expose] def declRefs : ConstantInfo → List Name
   | .axiomInfo v => exprRefs v.type []
   | .defnInfo v => exprRefs v.type (exprRefs v.value [])
@@ -508,43 +382,24 @@ Lean's kernel does not read. -/
 theorem mem_declRefs (ci : ConstantInfo) (c : Name) : c ∈ declRefs ci ↔ RefersTo ci c := by
   cases ci <;> simp [declRefs, RefersTo, mem_exprRefs, eq_comm (a := c)]
 
-/-! ## The check in a Lean environment -/
-
-/-- The axioms the check accepts, and the only ones: Lean's own. -/
 @[expose] def leanAxioms : List Name := [``propext, ``Classical.choice, ``Quot.sound]
 
-/-- `c` is a declaration of the implementation whose declarations `impl` names: some name of
-`impl` is a prefix of `c` or of `c` with Lean's private prefix removed (`Name.isPrefixOf`,
-`privateToUserName`). Lean names the auxiliary declarations it makes for a declaration `f` under
-`f`'s name, such as `f.match_1`, `f._unary` and `f.eq_1`, and a `where` helper of `f` is `f.go`;
-in a module of Lean's module system they may carry a private prefix, as
-`_private.M.0.f.match_1`. -/
 @[expose] def isImplDecl (impl : List Name) (c : Name) : Bool :=
   impl.any fun i => i.isPrefixOf c || i.isPrefixOf (privateToUserName c)
 
-/-- The declaration `env` holds under `c`, read with the bodies of its own module visible. -/
 @[expose] def lookupIn (env : Environment) (c : Name) : Option ConstantInfo :=
   ((env.setExporting false).find? (skipRealize := true) c).orElse fun _ =>
     env.toKernelEnv.find? c
 
-/-- Why the check of a record refuses before it explores. -/
 inductive Unchecked where
-  /-- No declaration of the implementation is named. -/
   | noImpl
-  /-- A name given as the implementation's has no declaration in the environment. -/
   | implUnknown (i : Name)
   deriving @[expose] Inhabited, Repr, @[expose] DecidableEq
 
-/-- The first name of `impl` that `env` holds no declaration under, if any. -/
 @[expose] def firstUnknown (env : Environment) : List Name → Option Name
   | [] => none
   | i :: is => if (lookupIn env i).isSome then firstUnknown env is else some i
 
-/-- The check of the intent record declared as `record` against the implementation whose
-declarations `impl` names, in `env`: `.ok ()` when it accepts. It refuses when `impl` is empty or
-names an undeclared name, since an exclusion of nothing would accept every record, and otherwise
-when `exclude` refuses from `record`, accepting no axiom but Lean's three (`leanAxioms`), with fuel
-`2 ^ 64`, more than the number of declarations that fit in a 64-bit address space. -/
 @[expose] def checkRecord (env : Environment) (record : Name) (impl : List Name) :
     Except (Unchecked ⊕ Refusal) Unit :=
   if impl.isEmpty then .error (.inl .noImpl) else
@@ -562,10 +417,6 @@ theorem firstUnknown_eq_none {env : Environment} :
     unfold firstUnknown
     split <;> simp_all [firstUnknown_eq_none is]
 
-/-- **What the check decides.** It accepts exactly when the implementation names a declaration and
-every name it gives is declared, and every name reached from `record` through the declarations of
-`env` and `RefersTo` is no declaration of the implementation (`isImplDecl`), is declared, and is
-no axiom but Lean's three (`leanAxioms`), with at most `2 ^ 64` names reached. -/
 theorem checkRecord_eq_ok_iff (env : Environment) (record : Name) (impl : List Name) :
     checkRecord env record impl = .ok () ↔
       impl ≠ [] ∧ (∀ i ∈ impl, (lookupIn env i).isSome) ∧
@@ -582,8 +433,6 @@ theorem checkRecord_eq_ok_iff (env : Environment) (record : Name) (impl : List N
     split <;> rename_i h <;> rw [h] <;> simp
     split <;> simp_all
 
-/-- **An intent record defined from its implementation is refused.** If a declaration of the
-implementation is reached from `record`, the check refuses. -/
 theorem checkRecord_ne_ok_of_reaches {env : Environment} {record c : Name} {impl : List Name}
     (hc : Reaches (lookupIn env) RefersTo [record] c) (hi : isImplDecl impl c = true) :
     checkRecord env record impl ≠ .ok () := by
@@ -591,7 +440,6 @@ theorem checkRecord_ne_ok_of_reaches {env : Environment} {record c : Name} {impl
   have := (((checkRecord_eq_ok_iff env record impl).mp h).2.2.1 c hc).1
   simp_all
 
-/-- What a refusal of `checkRecord` says, for the record `record`. -/
 @[expose] def describe (record : Name) : Unchecked ⊕ Refusal → String
   | .inl .noImpl => "no declaration of the implementation is named, so nothing is excluded"
   | .inl (.implUnknown i) => s!"the implementation's name {i} has no declaration here"
@@ -602,10 +450,6 @@ theorem checkRecord_ne_ok_of_reaches {env : Environment} {record c : Name} {impl
       theorem, or an imported definition whose body is not exposed, is shown as an axiom"
   | .inr .fuel => s!"{record} depends on more than 2 ^ 64 declarations"
 
-/-- Throws an error, saying why, unless `checkRecord` accepts the intent record `record` against
-the implementation whose declarations `impl` names, in the current environment: it refuses a
-record whose cone reaches a declaration of the implementation, a name with no declaration, or an
-axiom other than Lean's three. -/
 def requireIndependent (record : Name) (impl : List Name) : CoreM Unit := asking do
   match checkRecord (← getEnv) record impl with
   | .ok () => pure ()

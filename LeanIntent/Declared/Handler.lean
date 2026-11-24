@@ -13,24 +13,19 @@ namespace LeanIntent.Declared
 
 open Lean Elab Command Term Meta Parser.Term
 
-/-- The chain of the codes `cs`: each paired with the chain after it, the last with the unit code. -/
 @[expose] def chainCode (cs : List Expr) : Expr :=
   cs.foldr (fun c acc => mkApp2 (mkConst ``Ty.prod) c acc) (mkConst ``Ty.unit)
 
-/-- The representation of the constructors whose chains are `cs`, in order: the chain of the only
-one, or the sum of the first and the representation of the rest. -/
 @[expose] def sumCode : List Expr → Expr
   | [] => mkConst ``Ty.unit
   | [c] => c
   | c :: cs => mkApp2 (mkConst ``Ty.sum) c (sumCode cs)
 
-/-- The value of the chain whose fields are `vs`, as syntax. -/
 def chainStx (vs : List Term) : TermElabM Term := asking do
   match vs with
   | [] => `(())
   | v :: vs => `(Prod.mk $v $(← chainStx vs))
 
-/-- The value `v` in the alternative `i` of `k`, as syntax. -/
 def injStx (k i : Nat) (v : Term) : TermElabM Term := asking do
   if k == 1 then return v
   let mut t ← if i + 1 == k then pure v else `(Sum.inl $v)
@@ -38,26 +33,21 @@ def injStx (k i : Nat) (v : Term) : TermElabM Term := asking do
     t ← `(Sum.inr $t)
   return t
 
-/-- Why the declaration `indVal` cannot be represented, read from what Lean records of it. -/
 @[expose] def refusal? (indVal : InductiveVal) : Option String :=
   if indVal.isUnsafe then some "it is unsafe"
   else if indVal.numIndices != 0 then some "it is an inductive family with indices"
   else if indVal.ctors.isEmpty then some "it has no constructor, and so no empty value"
   else none
 
-/-- One constructor, as the handler represents it: its name and its fields' names and types. -/
 structure Ctor where
   name : Name
   fields : Array (Name × Expr)
 
-/-- Whether `e`, a sort, is `Type`. -/
 def isType0 (e : Expr) : MetaM Bool := asking do
   match ← whnf e with
   | .sort l => return l.normalize == Level.one
   | _ => return false
 
-/-- Runs `k` on the binders `acc` followed by each type of `xs` with a local instance of `HasCode`
-after it. -/
 def withInsts {α : Type} (xs : List Expr) (acc : Array Expr) (k : Array Expr → TermElabM α) :
     TermElabM α := asking do
   match xs with
@@ -66,10 +56,6 @@ def withInsts {α : Type} (xs : List Expr) (acc : Array Expr) (k : Array Expr �
     withLocalDecl (← mkFreshUserName `inst) .instImplicit (mkApp (mkConst ``HasCode) x)
       fun inst => withInsts xs (acc.push x |>.push inst) k
 
-/-- Runs `k` on the parameters of the declaration `indVal` at level zero, each with a local instance
-of `HasCode`, in the order of the generated binders (each parameter, then its instance), and on the
-type applied to them; refuses a parameter that is not a type of `Type` or a type that does not live
-in `Type`. -/
 def withParams {α : Type} (indVal : InductiveVal)
     (k : Array Expr → Array Expr → Expr → TermElabM α) : TermElabM α := asking do
   let us := indVal.levelParams.map fun _ => Level.zero
@@ -82,8 +68,6 @@ def withParams {α : Type} (indVal : InductiveVal)
         throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: its parameter `{x}` is not a type of `Type`"
     withInsts xs.toList #[] fun binders => k xs binders (mkAppN (mkConst indVal.name us) xs)
 
-/-- The constructors of `indVal` applied to the parameters `xs`, with their fields' names and types;
-refuses a field that depends on an earlier one or whose type is not a type of `Type`. -/
 def ctors (indVal : InductiveVal) (xs : Array Expr) : TermElabM (List Ctor) := asking do
   let us := indVal.levelParams.map fun _ => Level.zero
   indVal.ctors.mapM fun c => do
@@ -103,11 +87,6 @@ where
       ctorFields indName ctorName b (fields.push (n, t))
     | _ => return fields
 
-/-- The code of the declaration `indVal` with parameters `xs` and constructors `cs`: `Ty.decl` of
-its name, its parameters' chain and its representation, where the code of each parameter, and then
-of each constructor's fields in order, is `HasCode.code t i` for the instance `i` that `inst t` gives
-for its type `t`. The handler takes each instance from Lean's instance resolution (`code`), and the
-audit of an attestation (`checkAttestation`) from the attestation it reads. -/
 @[expose] def codeWith {m : Type → Type} [Monad m] (indVal : InductiveVal) (xs : Array Expr) (cs : List Ctor)
     (inst : Expr → m Expr) : m Expr := do
   let codeOf (t : Expr) : m Expr := return mkApp2 (mkConst ``HasCode.code) t (← inst t)
@@ -115,20 +94,12 @@ audit of an attestation (`checkAttestation`) from the attestation it reads. -/
   let reps ← cs.mapM fun c => return chainCode (← c.fields.toList.mapM (codeOf ·.2))
   return mkApp3 (mkConst ``Ty.decl) (toExpr indVal.name) (chainCode ps) (sumCode reps)
 
-/-- The code of the declaration `indVal` with parameters `xs`, each with its instance of `HasCode` in
-the local context: `codeWith`, each instance found by Lean's instance resolution. Refuses a field
-whose type has no code. -/
 def code (indVal : InductiveVal) (xs : Array Expr) (cs : List Ctor) : TermElabM Expr := asking <|
   codeWith indVal xs cs fun t => do
     let some inst ← synthInstance? (mkApp (mkConst ``HasCode) t)
       | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: the type `{t}` of one of its fields has no code; derive `LeanIntent.HasCode` for it first if the project declares it"
     return inst
 
-/-- Adds the definition `name := fun binders => value` of type `∀ binders, type`, or the theorem.
-A definition follows the scope as Lean has one written there follow it (`compileDecl` of Lean's
-`Lean/Elab/PreDefinition/Basic.lean`): in a `meta` scope it is marked `meta`, and in a `noncomputable section`
-that is not `meta`, what Lean's compiler refuses of it is left without compiled code, with no
-error. -/
 def addFun (name : Name) (binders : Array Expr) (type value : Expr) (thm : Bool) : TermElabM Unit := asking do
   let type ← mkForallFVars binders type
   let value ← mkLambdaFVars binders value
@@ -141,47 +112,30 @@ def addFun (name : Name) (binders : Array Expr) (type value : Expr) (thm : Bool)
       { name, levelParams := [], type, value, hints := .abbrev, safety := .safe }
     setReducibleAttribute name
 
-/-- The constructor of `Ty.Stands` that admits a declared type. -/
 def standsDecl : MetaM Name := asking do
   let info ← getConstInfoInduct ``Ty.Stands
   let some c := info.ctors.find? fun c => (privateToUserName? c).getD c == `LeanIntent.Ty.Stands.decl
     | throwError "LeanIntent.HasCode: `Ty.Stands` has no constructor `decl`"
   return c
 
-/-! ## Recursive, nested and mutual types -/
-
-/-- One field of a constructor of a type of a recursive group, as the declaration's recursor presents
-it: a field that holds no value of a type of the group, of type `type`, or a recursive field, which
-holds a value of the group's `sort`-th type, or a function of arguments of the types `doms` to one. -/
 inductive GField where
   | data (type : Expr)
   | ref (sort : Nat) (doms : Array Expr)
 
-/-- Whether a field is recursive. -/
 @[expose] def GField.isRef : GField → Bool
   | .ref _ _ => true
   | .data _ => false
 
-/-- One constructor of a type of a recursive group: its name, the number of parameters of the
-declaration it belongs to, and its fields in declaration order. -/
 structure GCtor where
   name : Name
   numParams : Nat
   fields : Array GField
 
-/-- Whether no field of the constructor holds a value of a type of the group. -/
 @[expose] def GCtor.isBase (c : GCtor) : Bool := !c.fields.any GField.isRef
 
 private def containsAnyExprFVar (e : Expr) (xs : Array Expr) : Bool :=
   xs.any fun x => match x.fvarId? with | some id => e.containsFVar id | none => false
 
-/-- The types of the group of the declaration `indVal`, with the parameters `xs`, and their
-constructors, as the declaration's recursor presents them: one type for each motive of the recursor,
-the types the declaration declares and then those its nested occurrences make, such as `List T`;
-each constructor with the field each induction hypothesis is about marked recursive. Refuses a type
-of the group with indices, a field that depends on an earlier field or whose type is not a type of
-`Type`, and a recursive field that is a function whose arguments depend on a field or on one
-another, or are not types of `Type`. -/
 def readGroup (indVal : InductiveVal) (xs : Array Expr) : TermElabM (Array (Expr × Array GCtor)) := asking do
   let notCovered {α : Type} (why : MessageData) : TermElabM α :=
     throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: {why}"
@@ -249,11 +203,6 @@ def readGroup (indVal : InductiveVal) (xs : Array Expr) : TermElabM (Array (Expr
         ctors := ctors.modify k (·.push ctor)
       return sorts.zip ctors
 
-/-- The types of the group that the `i`-th type reaches: those that the recursive fields of its
-constructors hold, those that those of theirs hold, and so on, the `i`-th type itself among them only
-when it reaches itself. Each type of the group enters the list still to follow at most once, marked
-when it enters, and an index outside the group never enters, so the list is empty after as many
-steps as the group has types; `none`, which the callers refuse, if it were not. -/
 @[expose] def reached (group : Array (Expr × Array GCtor)) (i : Nat) : Option (Array Bool) := Id.run do
   let next (k : Nat) : List Nat := (group[k]?.map (·.2.toList)).getD [] |>.flatMap fun c =>
     c.fields.toList.filterMap fun | .ref l _ => some l | .data _ => none
@@ -276,16 +225,9 @@ steps as the group has types; `none`, which the callers refuse, if it were not. 
             todo := m :: todo
   return if todo.isEmpty then some seen else none
 
-/-- Whether the `i`-th type of the group reaches itself (`reached`): `none`, which the caller
-refuses, when that is not settled. -/
 @[expose] def reachesItself (group : Array (Expr × Array GCtor)) (i : Nat) : Option Bool :=
   (reached group i).map fun seen => seen[i]?.getD false
 
-/-- The *root* of the `i`-th type of the group, whose base values the code of the type's trees
-holds: the type itself when it has a constructor whose fields hold no value of a type of the group,
-and otherwise the first type of the group, in the order of the recursor's motives, that it reaches
-(`reached`) and that has such a constructor. `none` when it reaches none, so that no type it reaches
-has a value. -/
 @[expose] def rootOf (group : Array (Expr × Array GCtor)) (seen : Array Bool) (i : Nat) : Option Nat :=
   if (group[i]?.map (·.2.any GCtor.isBase)).getD false then some i
   else (List.range group.size).find? fun l =>
@@ -362,14 +304,10 @@ theorem reachedClock?_eq_none_iff (group : Array (Expr × Array GCtor)) (seen : 
     throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: its recursive constructors do not build values of every depth, since a type of its group they need has no value"
   return (b, g, r, root)
 
-/-- The representation `recCodeWith` writes, as a code: `Ty.mu b g r i` where the type is its own
-root, and otherwise `Ty.muAt b g r j i`. -/
 @[expose] def recRep (b g r : Expr) (root i : Nat) : Expr :=
   if root == i then mkApp4 (mkConst ``Ty.mu) b g r (toExpr i)
   else mkApp5 (mkConst ``Ty.muAt) b g r (toExpr root) (toExpr i)
 
-/-- `recCodeWith` with the code of each field's type found by Lean's instance resolution, as the
-handler writes it. Refuses a field or argument whose type has no code. -/
 def recCode (indVal : InductiveVal) (group : Array (Expr × Array GCtor)) (i : Nat) :
     TermElabM (Expr × Expr × Expr × Nat) := asking <|
   recCodeWith indVal group i fun t => do
@@ -377,28 +315,19 @@ def recCode (indVal : InductiveVal) (group : Array (Expr × Array GCtor)) (i : N
       | throwError "LeanIntent.HasCode: `{.ofConstName indVal.name}` is not covered: the type `{t}` of one of its fields has no code; derive `LeanIntent.HasCode` for it first if the project declares it"
     return mkApp2 (mkConst ``HasCode.code) t inst
 
-/-! ## Reading an attestation -/
-
-/-- The type a code denotes, `Ty.denote c`. -/
 @[expose] def denoteE (c : Expr) : Expr := mkApp (mkConst ``Ty.denote) c
 
-/-- The type of the alternatives whose types are `ts`, nested as `sumCode` nests their codes. -/
 @[expose] def sumType : List Expr → Expr
   | [] => mkConst ``Unit
   | [t] => t
   | t :: ts => mkApp2 (mkConst ``Sum [Level.zero, Level.zero]) t (sumType ts)
 
-/-- The value `v` in the alternative `i` of the alternatives whose types are `ts`, as `injStx` writes
-it: itself when there is one alternative, and otherwise `Sum.inr` applied `i` times to `Sum.inl v`,
-or to `v` itself in the last alternative. -/
 @[expose] def injExpr : List Expr → Nat → Expr → Expr
   | [], _, v | [_], _, v => v
   | t :: ts, 0, v => mkApp3 (mkConst ``Sum.inl [Level.zero, Level.zero]) t (sumType ts) v
   | t :: ts, i + 1, v =>
     mkApp3 (mkConst ``Sum.inr [Level.zero, Level.zero]) t (sumType ts) (injExpr ts i v)
 
-/-- The value of the chain whose fields have the codes and values `fs`, in order, as `chainStx`
-writes it: each value paired with the chain after it, and the last with the unit value. -/
 @[expose] def chainExpr : List (Expr × Expr) → Expr
   | [] => mkConst ``Unit.unit
   | (c, v) :: fs =>
@@ -455,27 +384,6 @@ def builtinHeads : MetaM (Array Name) := asking do
       heads := heads ++ newHeads
   return heads
 
-/-- Whether `f`, a map from the `i`-th type of the recursive group `group` (as `readGroup` reads it)
-to that type's trees, with the base values of the group's `root`-th type (`rootOf`), is the map the
-handler writes, read constructor by constructor: `none` when it is, and otherwise the reason it is
-not. Starting from `f` for the `i`-th type, it checks, for every constructor of every type of the
-group the maps reach, that the map applied to the constructor and its fields reduces, by Lean's
-`whnf` or else by its kernel, to a value that is, by Lean's kernel:
-
-* for a base constructor of the root, the base value holding the constructor's alternative of the
-  base, with each field carried through its own type's isomorphism;
-* for any other constructor, the node of that constructor, in the type's list, holding the chain
-  of its other fields each so carried, whose child at each recursive field and position is the
-  map of the type that field holds, applied to the field at that position, each argument carried
-  back through its own type's isomorphism.
-
-The map of a type other than the `i`-th is the one `candidate` gives, the handler's beside the
-attestation where there is one, or else the one read from the first child of that type, and every
-child of that type is checked against it. A candidate decides nothing by its name: only these
-equations accept it. Maps that satisfy these equations for every constructor
-are, by structural recursion over the group, the handler's maps, so an isomorphism with this forward
-map is the handler's, its map back being that map's inverse. Each type of the group is read at most
-once. -/
 def checkRecMaps (group : Array (Expr × Array GCtor)) (root i : Nat) (f : Expr)
     (instOf : Expr → MetaM (Option Expr)) (candidate : Nat → MetaM (Option Expr)) :
     MetaM (Option String) := asking do
@@ -734,11 +642,6 @@ def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String ×
         return ← fail s!"its isomorphism does not take `{c.name}` to alternative {j} holding its fields, each carried through its own type's isomorphism"
     return (some ty, none)
 
-/-- The name Lean gives a declaration the handler writes as a command under the name `n`, which is
-also the name under which the handler adds one directly, so that the two agree. In a `module` file a
-type that is not `public` has a private name, Lean then runs the handler in the private scope
-(`Lean.Elab.applyDerivingHandlers`), and a command there that states no visibility declares a
-private name (`Lean.Elab.applyVisibility`); everywhere else it declares `n`. -/
 def writtenName : CommandElabM (Name → Name) := asking do
   let env ← getEnv
   return if env.header.isModule && !(← getScope).isPublic then mkPrivateName env else id
@@ -750,11 +653,6 @@ private def mkEqIdent (c : Name) : Lean.Ident :=
   let id := addMacroScope `_internal `eqLemma reservedMacroScope
   ⟨Syntax.ident SourceInfo.none (toString c).toRawSubstring id [.decl c []]⟩
 
-/-- Writes the proof that the code `codeName` stands for the declaration `declName` through the
-isomorphism `isoName`, through the private constructor of `Ty.Stands` that admits a declared type,
-and the instance of `HasCode` that carries the three. `codeName`, `isoName` and `standsName` are the
-names Lean knows the three by (`writtenName`); `instName` is the name the instance is written
-under. -/
 def mkStandsAndInstance (declName : Name) (indVal : InductiveVal) (instName codeName isoName standsName : Name)
     (binders : Array (TSyntax ``Lean.Parser.Term.bracketedBinder)) (args : Array Term) (tStx : Term) :
     CommandElabM Unit := asking do
@@ -787,27 +685,16 @@ structure CtorPlan where
   role : Role
   alt : Nat
 
-/-- The syntax of the `q`-th item of the chain `d`. -/
 def chainGet (d : Term) (q : Nat) : TermElabM Term := asking do
   match q with
   | 0 => `(Prod.fst $d)
   | q + 1 => chainGet (← `(Prod.snd $d)) q
 
-/-- The proof that the chain of the values `ps` proves equal, item by item, is equal to the chain
-they are about: `Prod.ext` of each, ending with `rfl`. -/
 def chainEq (ps : List Term) : TermElabM Term := asking do
   match ps with
   | [] => `(rfl)
   | p :: ps => `(Prod.ext $p $(← chainEq ps))
 
-/-- Writes the code, the isomorphism, the proof that the code stands for the type, and the instance
-of `HasCode` for `declName`, the `i`-th type of a recursive group: the code `Ty.decl` of its name,
-its parameters' codes and the representation `recCode` writes, `Ty.mu` of its base and group where
-the type is its own root and otherwise `Ty.muAt` with its root (`rootOf`); the map from each type of
-the group to its trees, with the root's base values, by structural recursion over the group (`to0`,
-`to1`, …); the map back, the fold (`Ty.muFold`) of the map from base values (`baseInv`) and of the
-map from nodes (`alg`); and the proofs, by the same recursion, that each map undoes the other, which
-Lean's kernel checks. -/
 def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandElabM Unit := asking do
   let instName := (← getCurrNamespace) ++ (← liftTermElabM <| Deriving.mkInstName ``HasCode declName)
   let codeName := instName ++ `code
@@ -1065,8 +952,6 @@ def mkRecHasCode (declName : Name) (indVal : InductiveVal) (i : Nat) : CommandEl
       to_inv := @$(mkCIdent (act toInvName)) $args* $iq))
   mkStandsAndInstance declName indVal instName (act codeName) (act isoName) (act standsName) binders args tStx
 
-/-- Writes the code, the isomorphism, the proof that the code stands for the type, and the instance
-of `HasCode`, for the declaration named `declName`. -/
 def mkHasCode (declName : Name) : CommandElabM Unit := asking do
   let indVal ← getConstInfoInduct declName
   if let some why := refusal? indVal then
@@ -1132,12 +1017,6 @@ def mkHasCode (declName : Name) : CommandElabM Unit := asking do
   mkStandsAndInstance declName indVal instName (act codeName) (act isoName) (act standsName) binders
     (args.map fun a => ⟨a.raw⟩) tStx
 
-/-- The deriving handler of `HasCode`. For types that are not public in a `module` file, whose
-codes are private (`writtenName`), it writes as a `noncomputable section` does, so that what Lean's
-compiler refuses of a private code's programs is left without compiled code where it would be an
-error. It refuses a command that derives a public type together with one that is not, in a `module`
-file: Lean runs the handler for all of a command's types in the private scope when one of them is
-private (`Lean.Elab.applyDerivingHandlers`), which would make the public type's code private. -/
 def handler (declNames : Array Name) : CommandElabM Bool := asking do
   unless ← declNames.allM isInductive do
     return false

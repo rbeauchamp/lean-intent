@@ -2,112 +2,18 @@ module
 
 public import LeanIntent.Confirmation
 
-/-!
-# The implementation of a deliverable
-
-A proof that an implementation fulfils its intent record binds the code only when what the project
-declares names that code. A deliverable (`LeanIntent.Deliverable`) holds a record, its explanation
-and the answers it keeps, which its owner confirms before any implementation exists, and names no
-implementation. This module adds the value that does, declared once the implementation exists: an
-`Implementation d` holds the constant that implements the deliverable `d`, as the record's subject,
-and the proof that it fulfils the record (`IntentRecord.Fulfilled`).
-
-* **The proof is of the recorded constant, by its type.** The field `fulfils` has the type
-  `d.record.Fulfilled subject`, and Lean's kernel checks every declaration, so a value is accepted
-  only when its proof proves that proposition of the subject it records. A theorem that another
-  constant fulfils the record is a proof of it only where the two constants are definitionally
-  equal, so that the proposition is the same one; anywhere else Lean refuses the declaration, naming
-  the proof and both propositions, and the project does not build. So a subject can be recorded
-  exactly when it fulfils the record (`exists_iff`), and the fulfilment a gate reads is of the
-  constant recorded.
-* **It is tied to the owners' log through the deliverable.** A value names its deliverable in its
-  type, the deliverable names its record, and the answers of the project's owners' log name that
-  record and its revision (`LeanIntent.Confirmation`).
-* **Nothing of it enters a revision's text.** The texts an answer holds are computed from the
-  deliverable's explanation and what its meaning reaches (`LeanIntent.Render.revisionText`,
-  `LeanIntent.Render.consequenceText`), and a value of `Implementation d` is declared after `d`,
-  which its type names, so nothing `d` holds refers to it. Recording the implementation, or replacing
-  it with another, changes no answer's text, and the confirmations stand. Renaming a constant still
-  changes the text of every revision whose meaning reaches it, as it always has; a record's meaning
-  reaches no declaration of its implementation where cone exclusion (`LeanIntent.Cone`) accepts it
-  against that implementation.
-* **A deliverable may await its implementation.** Its owner confirms its record before any
-  implementation exists, so for a while a deliverable is deliberately unimplemented. A value of
-  `AwaitingImplementation d` declares that state of the deliverable `d`, with the reason, such as
-  the issue that tracks the work, whose text cannot be blank (`AwaitingImplementation.stated`). It
-  is declared after `d` too, so nothing of it enters a revision's text either, and the project
-  retires it by replacing it with a value of `Implementation d`, which leaves the decision's verdict
-  as it was (`replace_nil_iff`).
-* **The decision** (`findings`) reads, for each value of a project, the deliverable its type names
-  and either the constant its subject is (`Entry`) or the reason it awaits one (`AwaitingEntry`), as
-  `LeanIntent.Implementation.Read` computes them from the build. It finds nothing exactly when the
-  project declares a deliverable, each deliverable has exactly one value recording its
-  implementation or exactly one value declaring it awaiting one, and not both, each value names one
-  of the project's deliverables, and each implementation records a constant (`findings_eq_nil_iff`,
-  whose statement `Accounted` shares no definition with the decision). Each finding holds and names
-  the deliverable or value it is about (`findings_sound`), and the report lists each deliverable
-  with the value that records its implementation and that constant's module and name
-  (`mem_implementations`), or with the value that declares it awaiting one and its reason
-  (`mem_awaiting`).
-
-The decisions this module makes, each on the owner's behalf:
-
-* **One implementation for each deliverable, or one declaration that it awaits one.** A deliverable
-  with neither is refused, naming it, since nothing then says which code fulfils it or that none is
-  meant to yet; one with several implementations is refused, naming them, since the project's
-  declarations would then not tell which of the programs is the deliverable's; and one with several
-  declarations that it awaits an implementation, or with an implementation and such a declaration,
-  is refused, naming those declarations, since a declaration left in place after the implementation
-  exists says something false of the project. A project with two programs for one record declares
-  two deliverables.
-* **A declaration that a deliverable awaits its implementation names its reason.** A blank reason
-  is no value of `AwaitingImplementation d`, whose field `stated` proves the reason is not blank,
-  which is false of a blank one; the decision does not read the reason, and the report gives it.
-* **One constant may implement several deliverables.** Each value's proof is of its own
-  deliverable's record, so a theorem about one record discharges no other, and a program may be what
-  two contracts are about.
-* **The subject is a constant.** A term, such as `fun l => sort l` or a polymorphic function applied
-  to the record's types, names no constant a reader can find, and is refused, naming the value: the
-  project records a definition of it instead.
-* **A value whose type names no deliverable of the project is refused**, naming it, whether it
-  records an implementation or declares one awaited: a term in place of a constant, or a deliverable
-  that the modules read do not declare, ties it to nothing the log is tied to.
-
-What this module does not establish: that the recorded constant is what a program runs, such as an
-executable's entry point calling it, which `LeanIntent.Execution` checks of each executable a
-project says runs the deliverable, or that its compiled code computes its definition, which
-`implemented_by` and `extern` replace; that the proof rests only on axioms the project accepts, which
-`#print axioms` lists of a value and a project's own gate audits, as it audits its other proofs; that
-Lean's kernel checked each value, which the option `debug.skipKernelTC` skips; that the entries are
-those of the build, which `LeanIntent.Implementation.Read` reads through Lean; and that work on a
-deliverable declared awaiting its implementation goes on, or for how long it may wait: the
-declaration is accepted for as long as it stands, and its reason is what a reader sees of it.
--/
-
 public section
 
 namespace LeanIntent
 
 universe u
 
-/-- **An implementation of the deliverable `d`**: the constant that implements it, as the subject of
-its record, and the proof that it fulfils the record. A project declares one for each deliverable
-once its implementation exists, in a module that imports the deliverable and the implementation. -/
 structure Implementation {W : Type u} (d : Deliverable W) where
-  /-- The implementation: the constant the record's subject is. -/
   subject : W
-  /-- It fulfils the deliverable's record. -/
   fulfils : d.record.Fulfilled subject
 
-/-- **The deliverable `d` awaits its implementation**, for the reason given, such as the address of
-the issue that tracks the work. A project declares one for a deliverable whose record is confirmed
-before its implementation exists, in a module that imports the deliverable, and replaces it with a
-value of `Implementation d` once the implementation exists. -/
 structure AwaitingImplementation {W : Type u} (d : Deliverable W) where
-  /-- Why the implementation is awaited, or where its work is tracked. -/
   reason : String
-  /-- The reason is not blank: it holds a character that is not whitespace. The default proof,
-  `decide +kernel`, has Lean's kernel decide it of the reason written. -/
   stated : reason.toList.any (!·.isWhitespace) = true := by decide +kernel
 
 namespace Implementation
@@ -116,93 +22,58 @@ section
 
 variable {W : Type u} {d : Deliverable W}
 
-/-- What a value records fulfils the deliverable's record. -/
 theorem fulfilled (v : Implementation d) : d.record.Fulfilled v.subject := v.fulfils
 
-/-- **A subject can be recorded as the implementation of `d` exactly when it fulfils the record**:
-no value records a subject that does not, so a proof about another subject is no proof of it. -/
 theorem exists_iff {w : W} : (∃ v : Implementation d, v.subject = w) ↔ d.record.Fulfilled w :=
   ⟨fun ⟨v, h⟩ => h ▸ v.fulfils, fun h => ⟨⟨w, h⟩, rfl⟩⟩
 
-/-- Wherever the record's domain hypotheses hold of the implementation, it meets the record. -/
 theorem meets (v : Implementation d) (hd : d.record.Dom v.subject) : d.record.Meets v.subject :=
   IntentRecord.meets_of_fulfilled v.fulfils hd
 
 end
 
-/-! ## The decision -/
-
-/-- A constant, by the module that declares it and its name. -/
 structure Constant where
-  /-- The module that declares it. -/
   module : Lean.Name
-  /-- Its name. -/
   name : Lean.Name
   deriving @[expose] DecidableEq, Repr
 
-/-- A value of an `Implementation` type that a project declares, as the build shows it. -/
 structure Entry where
-  /-- The constant of that type. -/
   name : Lean.Name
-  /-- The deliverable its type names, where that is a constant. -/
   deliverable : Option Lean.Name
-  /-- The constant its subject is, where it is one. -/
   subject : Option Constant
   deriving @[expose] DecidableEq, Repr
 
-/-- A value of an `AwaitingImplementation` type that a project declares, as the build shows it. -/
 structure AwaitingEntry where
-  /-- The constant of that type. -/
   name : Lean.Name
-  /-- The deliverable its type names, where that is a constant. -/
   deliverable : Option Lean.Name
-  /-- The reason it gives. -/
   reason : String
   deriving @[expose] DecidableEq, Repr
 
-/-- What is wrong with a project's implementations. -/
 inductive Finding where
-  /-- The project declares no deliverable. -/
   | noDeliverable
-  /-- No value records the implementation of this deliverable, and none declares that it awaits
-  one. -/
   | unimplemented (deliverable : Lean.Name)
-  /-- These values all record the implementation of this deliverable. -/
   | several (deliverable : Lean.Name) (values : List Lean.Name)
-  /-- The type of this value names no deliverable of the project. -/
   | untied (value : Lean.Name)
-  /-- The subject this value records is not a constant. -/
   | notConstant (value : Lean.Name)
-  /-- These values all declare that this deliverable awaits its implementation. -/
   | severalAwaiting (deliverable : Lean.Name) (values : List Lean.Name)
-  /-- A value records the implementation of this deliverable, and these values declare that it
-  awaits one. -/
   | awaitingImplemented (deliverable : Lean.Name) (values : List Lean.Name)
-  /-- The type of this value, which declares a deliverable awaiting its implementation, names no
-  deliverable of the project. -/
   | untiedAwaiting (value : Lean.Name)
   deriving @[expose] DecidableEq, Repr
 
-/-- The entries among `vs` that record the implementation of the deliverable `d`. -/
 @[expose] def implementing (vs : List Entry) (d : Lean.Name) : List Entry :=
   vs.filter fun v => v.deliverable == some d
 
-/-- The entries among `as` that declare that the deliverable `d` awaits its implementation. -/
 @[expose] def awaitingFor (as : List AwaitingEntry) (d : Lean.Name) : List AwaitingEntry :=
   as.filter fun a => a.deliverable == some d
 
-/-- The deliverable `o` names, where it names one, is one of the deliverables `ds`. -/
 @[expose] def tiesTo (ds : List Lean.Name) : Option Lean.Name → Bool
   | some d => ds.contains d
   | none => false
 
-/-- The entry `v` names one of the deliverables `ds`. -/
 @[expose] def Entry.ties (ds : List Lean.Name) (v : Entry) : Bool := tiesTo ds v.deliverable
 
-/-- The entry `a` names one of the deliverables `ds`. -/
 @[expose] def AwaitingEntry.ties (ds : List Lean.Name) (a : AwaitingEntry) : Bool := tiesTo ds a.deliverable
 
-/-- What is wrong with the deliverable `d`, given the entries `vs` and `as`. -/
 @[expose] def deliverableFindings (vs : List Entry) (as : List AwaitingEntry) (d : Lean.Name) :
     List Finding :=
   (if (implementing vs d).isEmpty && (awaitingFor as d).isEmpty then [.unimplemented d] else []) ++
@@ -213,26 +84,17 @@ inductive Finding where
     (if !(implementing vs d).isEmpty && !(awaitingFor as d).isEmpty then
       [.awaitingImplemented d ((awaitingFor as d).map (·.name))] else [])
 
-/-- What is wrong with the entry `v`, given the deliverables `ds`. -/
 @[expose] def entryFindings (ds : List Lean.Name) (v : Entry) : List Finding :=
   (if v.ties ds then [] else [.untied v.name]) ++
     (if v.subject.isSome then [] else [.notConstant v.name])
 
-/-- What is wrong with the entry `a`, given the deliverables `ds`. -/
 @[expose] def awaitingFindings (ds : List Lean.Name) (a : AwaitingEntry) : List Finding :=
   if a.ties ds then [] else [.untiedAwaiting a.name]
 
-/-- **The decision**: everything wrong with the implementations the entries `vs` record, and the
-entries `as` declare awaited, of the deliverables `ds`. -/
 @[expose] def findings (ds : List Lean.Name) (vs : List Entry) (as : List AwaitingEntry) : List Finding :=
   (if ds.isEmpty then [.noDeliverable] else []) ++ ds.flatMap (deliverableFindings vs as) ++
     vs.flatMap (entryFindings ds) ++ as.flatMap (awaitingFindings ds)
 
-/-- **Every deliverable of `ds` is accounted for** by the entries `vs`, which record
-implementations, and `as`, which declare implementations awaited: there is at least one deliverable;
-each has exactly one implementation and no declaration that it awaits one, or no implementation and
-exactly one such declaration; each entry names one of the deliverables; and each implementation
-records a constant. It is stated over the lists alone, with no definition the decision uses. -/
 @[expose] def Accounted (ds : List Lean.Name) (vs : List Entry) (as : List AwaitingEntry) : Prop :=
   ds ≠ [] ∧
     (∀ d ∈ ds,
@@ -243,39 +105,25 @@ records a constant. It is stated over the lists alone, with no definition the de
     (∀ v ∈ vs, (∃ d ∈ ds, v.deliverable = some d) ∧ v.subject.isSome = true) ∧
     ∀ a ∈ as, ∃ d ∈ ds, a.deliverable = some d
 
-/-- The value that records the implementation of the deliverable `d`, and the constant it records,
-where exactly one entry does and records a constant. -/
 @[expose] def implementationOf (vs : List Entry) (d : Lean.Name) : Option (Lean.Name × Constant) :=
   match implementing vs d with
   | [v] => v.subject.map fun c => (v.name, c)
   | _ => none
 
-/-- The value that declares that the deliverable `d` awaits its implementation, and the reason it
-gives, where exactly one entry declares it. -/
 @[expose] def awaitedOf (as : List AwaitingEntry) (d : Lean.Name) : Option (Lean.Name × String) :=
   match awaitingFor as d with
   | [a] => some (a.name, a.reason)
   | _ => none
 
-/-- Everything a gate reads of a project's implementations. -/
 structure Report where
-  /-- What is wrong: empty exactly when every deliverable is accounted for
-  (`findings_eq_nil_iff`). -/
   findings : List Finding
-  /-- Each deliverable whose implementation exactly one value records, with that value and the
-  constant it records (`mem_implementations`). -/
   implementations : List (Lean.Name × Lean.Name × Constant)
-  /-- Each deliverable that exactly one value declares awaiting its implementation, with that value
-  and the reason it gives (`mem_awaiting`). -/
   awaiting : List (Lean.Name × Lean.Name × String)
   deriving Repr
 
-/-- **What a gate reads**, given the project's deliverables and the entries of its values. -/
 @[expose] def report (ds : List Lean.Name) (vs : List Entry) (as : List AwaitingEntry) : Report :=
   ⟨findings ds vs as, ds.filterMap fun d => (implementationOf vs d).map fun x => (d, x),
     ds.filterMap fun d => (awaitedOf as d).map fun x => (d, x)⟩
-
-/-! ## What the decision decides -/
 
 section
 
@@ -297,7 +145,6 @@ theorem ties_iff {v : Entry} : v.ties ds = true ↔ ∃ d ∈ ds, v.deliverable 
 theorem AwaitingEntry.ties_iff {a : AwaitingEntry} :
     a.ties ds = true ↔ ∃ d ∈ ds, a.deliverable = some d := tiesTo_iff
 
-/-- The entries recording the implementation of `d` are those whose deliverable is `d`. -/
 theorem length_implementing {d : Lean.Name} :
     (implementing vs d).length = vs.countP (fun v => decide (v.deliverable = some d)) := by
   simp only [implementing, List.countP_eq_length_filter]
@@ -305,7 +152,6 @@ theorem length_implementing {d : Lean.Name} :
   funext v
   exact Bool.eq_iff_iff.mpr (by simp)
 
-/-- The entries declaring `d` awaited are those whose deliverable is `d`. -/
 theorem length_awaitingFor {d : Lean.Name} :
     (awaitingFor as d).length = as.countP (fun a => decide (a.deliverable = some d)) := by
   simp only [awaitingFor, List.countP_eq_length_filter]
@@ -333,9 +179,6 @@ theorem awaitingFindings_eq_nil_iff {a : AwaitingEntry} :
   rw [← AwaitingEntry.ties_iff]
   cases a.ties ds <;> simp
 
-/-- **The decision finds nothing exactly when every deliverable is accounted for**: there is a
-deliverable, each has exactly one implementation or exactly one declaration that it awaits one, and
-not both, each entry names one of the deliverables, and each implementation records a constant. -/
 theorem findings_eq_nil_iff : findings ds vs as = [] ↔ Accounted ds vs as := by
   have one : ∀ i w : Nat, i + w = 1 ↔ (i = 1 ∧ w = 0) ∨ (i = 0 ∧ w = 1) := by omega
   unfold findings Accounted
@@ -344,10 +187,6 @@ theorem findings_eq_nil_iff : findings ds vs as = [] ↔ Accounted ds vs as := b
     awaitingFindings_eq_nil_iff]
   cases ds <;> simp [and_assoc]
 
-/-- **Replacing a declaration that a deliverable awaits its implementation with a value recording
-it** leaves the decision's verdict as it was: given an implementation `v` naming the deliverable the
-awaiting entry `a` names, and recording a constant, the decision finds nothing with `v` in place of
-`a` exactly when it finds nothing with `a`. -/
 theorem replace_nil_iff {as₁ as₂ : List AwaitingEntry} {a : AwaitingEntry} {v : Entry}
     (hd : v.deliverable = a.deliverable) (hs : v.subject.isSome = true) :
     findings ds (v :: vs) (as₁ ++ as₂) = [] ↔ findings ds vs (as₁ ++ a :: as₂) = [] := by
@@ -372,9 +211,6 @@ theorem replace_nil_iff {as₁ as₂ : List AwaitingEntry} {a : AwaitingEntry} {
       · exact ha b (.inl hb)
       · exact ha b (.inr (.inr hb))
 
-/-! ## What a finding says -/
-
-/-- What the finding `f` states of the deliverables `ds` and the entries `vs` and `as`. -/
 @[expose] def Finding.Holds (ds : List Lean.Name) (vs : List Entry) (as : List AwaitingEntry) :
     Finding → Prop
   | .noDeliverable => ds = []
@@ -433,7 +269,6 @@ theorem awaitingFindings_sound {a : AwaitingEntry} (ha : a ∈ as) {f : Finding}
     rw [List.mem_singleton.mp hf]
     exact ⟨a, ha, rfl, fun d hd had => hn (AwaitingEntry.ties_iff.mpr ⟨d, hd, had⟩)⟩
 
-/-- **Each finding holds**, and names the deliverable or the value it is about. -/
 theorem findings_sound {f : Finding} (hf : f ∈ findings ds vs as) : f.Holds ds vs as := by
   unfold findings at hf
   simp only [List.mem_append, List.mem_flatMap] at hf
@@ -446,8 +281,6 @@ theorem findings_sound {f : Finding} (hf : f ∈ findings ds vs as) : f.Holds ds
   · exact deliverableFindings_sound hd hf
   · exact entryFindings_sound hv hf
   · exact awaitingFindings_sound ha hf
-
-/-! ## What the report lists -/
 
 theorem implementationOf_eq_some_iff {d n : Lean.Name} {c : Constant} :
     implementationOf vs d = some (n, c) ↔
@@ -464,8 +297,6 @@ theorem implementationOf_eq_some_iff {d n : Lean.Name} {c : Constant} :
       exact ⟨c, hs, rfl, rfl⟩
   | _ :: _ :: _ => simp
 
-/-- **The report lists a deliverable with a value and a constant exactly when** that value is the one
-entry recording the deliverable's implementation, and that constant its subject. -/
 theorem mem_implementations {d n : Lean.Name} {c : Constant} :
     (d, n, c) ∈ (report ds vs as).implementations ↔
       d ∈ ds ∧ ∃ v, implementing vs d = [v] ∧ v.name = n ∧ v.subject = some c := by
@@ -490,8 +321,6 @@ theorem awaitedOf_eq_some_iff {d n : Lean.Name} {r : String} :
   | [a] => simp [eq_comm]
   | _ :: _ :: _ => simp
 
-/-- **The report lists a deliverable with a value and a reason exactly when** that value is the one
-entry declaring that the deliverable awaits its implementation, and that reason the one it gives. -/
 theorem mem_awaiting {d n : Lean.Name} {r : String} :
     (d, n, r) ∈ (report ds vs as).awaiting ↔
       d ∈ ds ∧ ∃ a, awaitingFor as d = [a] ∧ a.name = n ∧ a.reason = r := by
@@ -508,10 +337,6 @@ theorem mem_awaiting {d n : Lean.Name} {r : String} :
   · rintro ⟨hd, h⟩
     exact ⟨d, hd, by simp [h]⟩
 
-/-- Where the decision finds nothing, the report lists every deliverable either with the value that
-records its implementation and the constant that value records, no value declaring it awaited, or
-with the value that declares it awaiting its implementation and the reason given, no value recording
-one. -/
 theorem listed_of_nil (h : findings ds vs as = []) {d : Lean.Name} (hd : d ∈ ds) :
     (∃ v c, v ∈ vs ∧ v.deliverable = some d ∧ v.subject = some c ∧
         (d, v.name, c) ∈ (report ds vs as).implementations ∧ ∀ a ∈ as, a.deliverable ≠ some d) ∨

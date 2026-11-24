@@ -50,4 +50,4 @@ Warm thanks to [Matt Pocock](https://github.com/mattpocock) for the excellent or
 
 - Deleting `/--` docstrings removes their documentation text from Lean LSP hover tooltips (declarations keep their hover signatures and `#print` output, as Lean v4.36.0's `elabPrint` / `printIdCore` does not consult docstrings) and other docstring consumers; module specifications and non-obvious design rationale must live in `docs/` and `docs/adr/`.
 - Any documentation link referencing a removed module comment (such as `README.md`, `.no-mistakes.yaml`, and `docs/*.md`) must be updated in the same change that removes that comment.
-- Once every entry in `tools/comment-ratchet.json` is drained to `[]`, the codebase will carry zero Lean comments and `NO-COMMENTS` enforces a total ban.
+- Every legacy entry in `tools/comment-ratchet.json` is now drained to `[]` (#101), so all 73 tracked `.lean` files carry zero Lean comments and `NO-COMMENTS` enforces a total ban across the codebase.
