@@ -2,6 +2,7 @@ module
 
 public import LeanIntent.Cone
 public import LeanIntent.Declared
+public import LeanIntent.MachineDeclared
 public import LeanIntent.Loaded
 public import Lean.Util.CollectAxioms
 
@@ -66,59 +67,59 @@ theorem applies_eq_true (ctor : Name) (ci : ConstantInfo) :
   unfold applies Applies
   cases ci.value? (allowOpaque := true) <;> simp [mem_exprRefs]
 
-/-- A reached name the procedure refuses beyond those cone exclusion refuses. One that `relevant`
-admits is refused as an attestation not read as the handler's: when `exempt` does not hold it, its
-declaration names `ctor` (`applies`), and `verified` does not hold it. One that `relevant` does not
-admit, whose module cannot name `ctor` and whose dependencies are not followed, is refused when
-`axiomsOf` reports an axiom it rests on other than Lean's three. -/
-@[expose] def unattested (lookup : Name → Option ConstantInfo) (relevant exempt verified : Name → Bool)
-    (axiomsOf : Name → Array Name) (ctor : Name) (c : Name) : Bool :=
+structure Attestor where
+  ctor : Name
+  exempt : Name → Bool
+  verified : Name → Bool
+
+@[expose] def unattested (lookup : Name → Option ConstantInfo) (relevant : Name → Bool)
+    (kinds : List Attestor) (axiomsOf : Name → Array Name) (c : Name) : Bool :=
   if relevant c then
-    !exempt c && !verified c &&
-      match lookup c with
-      | some ci => applies ctor ci
-      | none => false
+    match lookup c with
+    | some ci => kinds.any fun k => !k.exempt c && !k.verified c && applies k.ctor ci
+    | none => false
   else (axiomsOf c).any fun a => !leanAxioms.contains a
 
 /-- The procedure: cone exclusion's closure from `first :: rest`, a scope that is never empty,
 following `Follows relevant`, refusing an unattested name (`unattested`), a name with no declaration
 and an axiom other than Lean's three (`leanAxioms`), with fuel `2 ^ 64`, more than the declarations
 that fit in a 64-bit address space. `none` when it accepts. -/
-@[expose] def decide (lookup : Name → Option ConstantInfo) (relevant exempt verified : Name → Bool)
-    (axiomsOf : Name → Array Name) (ctor first : Name) (rest : List Name) : Option Refusal :=
-  exclude lookup (follow relevant) (unattested lookup relevant exempt verified axiomsOf ctor)
+@[expose] def decide (lookup : Name → Option ConstantInfo) (relevant : Name → Bool)
+    (kinds : List Attestor) (axiomsOf : Name → Array Name) (first : Name) (rest : List Name) :
+    Option Refusal :=
+  exclude lookup (follow relevant) (unattested lookup relevant kinds axiomsOf)
     leanAxioms (2 ^ 64) (first :: rest)
 
 section Decides
 
-variable {lookup : Name → Option ConstantInfo} {relevant exempt verified : Name → Bool}
-  {axiomsOf : Name → Array Name} {ctor first : Name} {rest : List Name}
+variable {lookup : Name → Option ConstantInfo} {relevant : Name → Bool} {kinds : List Attestor}
+  {axiomsOf : Name → Array Name} {first : Name} {rest : List Name}
 
 /-- **What the procedure decides.** It accepts exactly when every name reached from `first :: rest`
 through `Follows relevant` is not unattested, is declared and is no axiom but Lean's three, and at
 most `2 ^ 64` names are reached. -/
 theorem decide_eq_none_iff :
-    decide lookup relevant exempt verified axiomsOf ctor first rest = none ↔
+    decide lookup relevant kinds axiomsOf first rest = none ↔
       (∀ c, Reaches lookup (Follows relevant) (first :: rest) c →
-        Admitted lookup (unattested lookup relevant exempt verified axiomsOf ctor) leanAxioms c) ∧
+        Admitted lookup (unattested lookup relevant kinds axiomsOf) leanAxioms c) ∧
       Within lookup (Follows relevant) (first :: rest) (2 ^ 64) :=
   exclude_eq_none_iff (mem_follow relevant) _
 
-/-- **An acceptance leaves no attestation unread.** Every reached declaration that names `ctor`,
-in a module `relevant` admits and not `exempt`, is `verified`. -/
 theorem verified_of_decide_eq_none
-    (h : decide lookup relevant exempt verified axiomsOf ctor first rest = none)
+    (h : decide lookup relevant kinds axiomsOf first rest = none)
     {c : Name} {ci : ConstantInfo} (hc : Reaches lookup (Follows relevant) (first :: rest) c)
-    (hl : lookup c = some ci) (hr : relevant c = true) (he : exempt c = false)
-    (ha : Applies ctor ci) : verified c = true := by
-  have := (decide_eq_none_iff.mp h).1 c hc |>.1
-  simp_all [unattested, (applies_eq_true ctor ci).mpr ha]
+    (hl : lookup c = some ci) (hr : relevant c = true) {k : Attestor} (hk : k ∈ kinds)
+    (he : k.exempt c = false) (ha : Applies k.ctor ci) : k.verified c = true := by
+  have hu := (decide_eq_none_iff.mp h).1 c hc |>.1
+  simp only [unattested, hr, ↓reduceIte, hl, List.any_eq_false] at hu
+  have := hu k hk
+  simp_all [(applies_eq_true k.ctor ci).mpr ha]
 
 /-- **An acceptance leaves no axiom but Lean's three behind a declaration it does not follow.**
 Every reached name that `relevant` does not admit rests, by `axiomsOf`, on Lean's three axioms
 alone. -/
 theorem axioms_mem_leanAxioms_of_decide_eq_none
-    (h : decide lookup relevant exempt verified axiomsOf ctor first rest = none) {c : Name}
+    (h : decide lookup relevant kinds axiomsOf first rest = none) {c : Name}
     (hc : Reaches lookup (Follows relevant) (first :: rest) c) (hr : relevant c = false) :
     ∀ a ∈ axiomsOf c, a ∈ leanAxioms := by
   intro a ha
@@ -129,7 +130,7 @@ theorem axioms_mem_leanAxioms_of_decide_eq_none
 
 /-- **An acceptance leaves no axiom but Lean's three.** -/
 theorem mem_leanAxioms_of_decide_eq_none
-    (h : decide lookup relevant exempt verified axiomsOf ctor first rest = none) {c : Name}
+    (h : decide lookup relevant kinds axiomsOf first rest = none) {c : Name}
     {ci : ConstantInfo} (hc : Reaches lookup (Follows relevant) (first :: rest) c)
     (hl : lookup c = some ci) (hax : ci.isAxiom = true) : c ∈ leanAxioms := by
   obtain ⟨-, ci', hl', hax'⟩ := (decide_eq_none_iff.mp h).1 c hc
@@ -169,11 +170,6 @@ is a declaration of the module `env` is elaborating, which has no module index. 
   | some i => mods.contains i.toNat
   | none => true
 
-/-- The declarations Lean v4.36.0 generates for the inductive proposition `stands`, whose
-constructors take proofs of it, that name its constructors in their statements or values: its
-recursor `stands.rec`, `stands.casesOn` and `stands.recOn`, and the inductive type `stands.below`
-with its constructors, recursor and `casesOn`. A declaration counts only when the module that
-declares `stands` declares it too, where no other code can add one. -/
 @[expose] def generatedBy (env : Environment) (stands : Name) (c : Name) : Bool :=
   (env.getModuleIdxFor? stands).isSome && env.getModuleIdxFor? c == env.getModuleIdxFor? stands &&
     (c == .str stands "rec" || c == .str stands "casesOn" || c == .str stands "recOn" ||
@@ -194,20 +190,23 @@ imported declaration, those Lean recorded when it exported the declaration's mod
 def isCarrier (ci : ConstantInfo) : MetaM Bool := asking <| withoutExporting do
   let defHasCode ← getDefaultInstances ``HasCode
   let defCovered ← getDefaultInstances ``Covered
-  if defHasCode.any (·.1 == ci.name) || defCovered.any (·.1 == ci.name) then
+  let defCoveredMachine ← getDefaultInstances ``CoveredMachine
+  if defHasCode.any (·.1 == ci.name) || defCovered.any (·.1 == ci.name) ||
+      defCoveredMachine.any (·.1 == ci.name) then
     return true
   else
     let env ← getEnv
     match (instanceExtension.getState (genRecorded := true) env).instanceNames.find? ci.name with
     | some entry =>
       if (match entry.keys[0]? with
-          | some (DiscrTree.Key.const cls _) => cls == ``HasCode || cls == ``Covered
+          | some (DiscrTree.Key.const cls _) =>
+            cls == ``HasCode || cls == ``Covered || cls == ``CoveredMachine
           | _ => false) then
         return true
       else
         let cls ← MetaM.run' (ctx := {}) (s := {}) <|
           forallTelescopeReducing ci.type fun _ target => isClass? target
-        return cls == some ``HasCode || cls == some ``Covered
+        return cls == some ``HasCode || cls == some ``Covered || cls == some ``CoveredMachine
     | none =>
       return false
 
@@ -215,21 +214,25 @@ theorem isCarrier_eq (ci : ConstantInfo) :
     isCarrier ci = asking (withoutExporting do
       let defHasCode ← getDefaultInstances ``HasCode
       let defCovered ← getDefaultInstances ``Covered
+      let defCoveredMachine ← getDefaultInstances ``CoveredMachine
       if Decidable.decide ((∃ e ∈ defHasCode, e.1 = ci.name) ∨
-          (∃ e ∈ defCovered, e.1 = ci.name)) then
+          (∃ e ∈ defCovered, e.1 = ci.name) ∨
+          (∃ e ∈ defCoveredMachine, e.1 = ci.name)) then
         pure true
       else
         let env ← getEnv
         match (instanceExtension.getState (genRecorded := true) env).instanceNames.find? ci.name with
         | some entry =>
           if (match entry.keys[0]? with
-              | some (DiscrTree.Key.const cls _) => Decidable.decide (cls = ``HasCode ∨ cls = ``Covered)
+              | some (DiscrTree.Key.const cls _) =>
+                Decidable.decide (cls = ``HasCode ∨ cls = ``Covered ∨ cls = ``CoveredMachine)
               | _ => false) then
             pure true
           else
             let cls ← MetaM.run' (ctx := {}) (s := {}) <|
               forallTelescopeReducing ci.type fun _ target => isClass? target
-            pure (Decidable.decide (cls = some ``HasCode ∨ cls = some ``Covered))
+            pure (Decidable.decide (cls = some ``HasCode ∨ cls = some ``Covered ∨
+              cls = some ``CoveredMachine))
         | none =>
           pure false) := by
   have any_eq : ∀ (l : List (Name × Nat)),
@@ -239,8 +242,10 @@ theorem isCarrier_eq (ci : ConstantInfo) :
     simp only [List.any_eq_true, beq_iff_eq, decide_eq_true_eq]
   unfold isCarrier
   refine congrArg asking (congrArg withoutExporting ?_)
-  refine bind_congr fun defHasCode => bind_congr fun defCovered => ?_
-  rw [any_eq defHasCode, any_eq defCovered, ← Bool.decide_or]
+  refine bind_congr fun defHasCode => bind_congr fun defCovered =>
+    bind_congr fun defCoveredMachine => ?_
+  rw [any_eq defHasCode, any_eq defCovered, any_eq defCoveredMachine, Bool.or_assoc,
+    ← Bool.decide_or, ← Bool.decide_or]
   split
   · rfl
   · refine bind_congr fun env => ?_
@@ -249,8 +254,8 @@ theorem isCarrier_eq (ci : ConstantInfo) :
     | some entry =>
       dsimp only
       cases entry.keys[0]? with
-      | none => simp [Bool.beq_eq_decide_eq]
-      | some k => cases k <;> simp [Bool.beq_eq_decide_eq, Bool.decide_or]
+      | none => simp [Bool.beq_eq_decide_eq, ← Bool.decide_or, or_assoc]
+      | some k => cases k <;> simp [Bool.beq_eq_decide_eq, ← Bool.decide_or, or_assoc]
 
 /-- `AttestedType ctor e α`: `α` is the first argument of an application of `ctor` in `e`,
 abstracted over the binders enclosing that occurrence. Both `fun` and `∀` binders become `fun`
@@ -309,50 +314,50 @@ def diagnosticType (α : Expr) : MetaM String := asking <| withOptions
       `pp.letVarTypes true) do
   return toString (← ppExpr α)
 
-/-- An attestation the audit refuses: the declaration `decl` that holds it, the types it applies
-the constructor to with their enclosing binders (none only for an unapplied constructor), why it
-is not the handler's, and the reached instances of `HasCode` or `Covered` that depend on `decl`,
-each paired with its full quantified declaration type even if the constructor is unapplied. -/
+inductive KindTag where
+  | declared
+  | machine
+
+structure Kind where
+  stands : Name
+  ctor : Name
+  tag : KindTag
+
+def Kind.check (k : Kind) (ci : ConstantInfo) : MetaM (Option String × Option String) := asking do
+  match k.tag with
+  | .declared => Declared.checkAttestation k.ctor ci
+  | .machine => MachineDeclared.checkAttestation k.ctor ci
+
+def kinds : MetaM (List Kind) := asking do
+  let code : Kind := ⟨``Ty.Stands, ← Declared.standsDecl, .declared⟩
+  if (lookupIn (← getEnv) ``Machine.Stands).isNone then
+    return [code]
+  return [code, ⟨``Machine.Stands, ← MachineDeclared.standsDecl, .machine⟩]
+
 structure Finding where
   decl : Name
+  stands : Name
   type? : Option String
   why : String
   carriers : Array (Name × String)
 
-/-- What an audit found: the declarations it audited, `first :: rest`, the attestations it
-refuses, and the refusal of `decide`, if any, with, for a refusal at a name outside the modules
-that can name the constructor, the axioms other than Lean's three that the name rests on. -/
 structure Outcome where
   first : Name
   rest : List Name
   findings : Array Finding
-  refusal? : Option (Refusal × Option (Array Name))
+  refusal? : Option (Refusal × Option (Array Name) × List Name)
 
-/-- The audit of the declarations `first :: rest` in the current environment, a scope that is never
-empty. It collects the reached declarations, through `Follows`, that name the private constructor
-of `Ty.Stands` that admits a declared type and are not among those Lean generates for `Ty.Stands`;
-reads each with `Declared.checkAttestation`; and decides with `decide`, the verified attestations
-being exactly those it read as the handler's. Returns the scope with a finding for each attestation
-it refuses and the refusal of `decide` (`Outcome`).
-
-Lean's limit on the steps a metaprogram takes (`maxHeartbeats`) applies to each reading of an
-attestation and, for one the audit refuses, to the printing of the types it attests, to each test
-of whether a declaration that depends on it is a carrier and to the printing of each carrier's
-type, each counted from where it starts (`withCurrHeartbeats`), and not to the audit as a whole. The collection before them is no
-elaboration: it takes steps in proportion to the declarations reached, with the library, and Lean
-would count them against the first reading. -/
 def audit (first : Name) (rest : List Name) : MetaM Outcome := askingIn fun env loaded => do
-  let ctor ← Declared.standsDecl
+  let ks ← kinds
   let some m := env.getModuleIdxFor? ``Ty.Stands
     | throwError "the audit of declared types' codes runs in a module that imports `LeanIntent.Degenerate`"
   let relevant := relevantIn env (importers env m)
-  let exempt := generatedBy env ``Ty.Stands
   let lookup := lookupIn env
   let baseConsts := (env.setExporting false).constants
   let constBound := baseConsts.map₂.foldl (fun k _ _ => k + 1) baseConsts.map₁.size
   let mut visited : Std.HashSet Name := {}
   let mut refs : Std.HashMap Name (List Name) := {}
-  let mut candidates : Array (Name × ConstantInfo) := #[]
+  let mut candidates : Array (Name × ConstantInfo × Kind) := #[]
   let mut initial : Array Name := #[]
   for c in first :: rest do
     if !visited.contains c && (lookup c).isSome then
@@ -373,20 +378,23 @@ def audit (first : Name) (rest : List Name) : MetaM Outcome := askingIn fun env 
             visited := visited.insert d
             push := push.push d
         work := push.toList ++ work
-        if relevant c && !exempt c && applies ctor ci then
-          candidates := candidates.push (c, ci)
-  let mut verified : Std.HashSet Name := {}
-  let mut refused : Array (Name × Option String × String) := #[]
-  for (c, ci) in candidates do
-    match ← withCurrHeartbeats (Declared.checkAttestation ctor ci) with
-    | (_, none) => verified := verified.insert c
+        if relevant c then
+          for k in ks do
+            if !generatedBy env k.stands c && applies k.ctor ci then
+              candidates := candidates.push (c, ci, k)
+  let mut verified : Std.HashMap Name (Std.HashSet Name) := {}
+  let mut refused : Array (Name × Name × Option String × String) := #[]
+  for (c, ci, k) in candidates do
+    match ← withCurrHeartbeats (k.check ci) with
+    | (_, none) => verified := verified.insert k.ctor ((verified.getD k.ctor {}).insert c)
     | (_, some why) =>
-      let es := attestedTypes ctor ci.type ++ (match ci.value? (allowOpaque := true) with
-        | some v => attestedTypes ctor v
+      let es := attestedTypes k.ctor ci.type ++ (match ci.value? (allowOpaque := true) with
+        | some v => attestedTypes k.ctor v
         | none => [])
       let tys ← withCurrHeartbeats (es.toArray.mapM diagnosticType)
       let tys := tys.foldl (fun acc t => if acc.contains t then acc else acc.push t) #[]
-      refused := refused.push (c, if tys.isEmpty then none else some (", ".intercalate tys.toList), why)
+      refused := refused.push
+        (c, k.stands, if tys.isEmpty then none else some (", ".intercalate tys.toList), why)
   let mut dependents : Std.HashMap Name (List Name) := {}
   unless refused.isEmpty do
     for (c, ds) in refs.toList do
@@ -396,7 +404,7 @@ def audit (first : Name) (rest : List Name) : MetaM Outcome := askingIn fun env 
           once := once.insert d
           dependents := dependents.insert d (c :: dependents.getD d [])
   let mut findings := #[]
-  for (c, ty, why) in refused do
+  for (c, stands, ty, why) in refused do
     let mut seen : Std.HashSet Name := ({} : Std.HashSet Name).insert c
     let mut up := [c]
     for _ in [0 : visited.size] do
@@ -415,11 +423,19 @@ def audit (first : Name) (rest : List Name) : MetaM Outcome := askingIn fun env 
       if let some ci := lookup d then
         if ← withCurrHeartbeats (isCarrier ci) then
           carriers := carriers.push (d, ← withCurrHeartbeats (diagnosticType ci.type))
-    findings := findings.push { decl := c, type? := ty, why, carriers }
-  let refusal? := decide lookup relevant exempt verified.contains (axiomsIn env loaded) ctor first rest
+    findings := findings.push { decl := c, stands, type? := ty, why, carriers }
+  let attestors := ks.map fun k =>
+    { ctor := k.ctor, exempt := generatedBy env k.stands,
+      verified := fun c => (verified.getD k.ctor {}).contains c : Attestor }
+  let refusal? := decide lookup relevant attestors (axiomsIn env loaded) first rest
   let outside (c : Name) : Option (Array Name) :=
     if relevant c then none else some ((axiomsIn env loaded c).filter fun a => !leanAxioms.contains a)
-  let refusal? := refusal?.map fun r => (r, match r with | .impl c => outside c | _ => none)
+  let named (c : Name) : List Name := match lookup c with
+    | some ci => (ks.filter fun k => applies k.ctor ci).map (·.stands)
+    | none => []
+  let refusal? := refusal?.map fun r => match r with
+    | .impl c => (r, outside c, named c)
+    | _ => (r, none, [])
   return { first, rest, findings, refusal? }
 
 /-- What the audit reports: a line for each finding, and one for the refusal of `decide` unless it
@@ -427,28 +443,27 @@ names a declaration a finding already names. Empty exactly when the audit accept
 @[expose] def report (o : Outcome) : Array String :=
   let lines := o.findings.map fun f =>
     let carried := if f.carriers.isEmpty then
-        "no instance of `LeanIntent.HasCode` or `LeanIntent.Covered` declared among the dependencies depends on it"
+        "no instance of `LeanIntent.HasCode`, `LeanIntent.Covered` or `LeanIntent.CoveredMachine` declared among the dependencies depends on it"
       else s!"the instances that depend on it: {", ".intercalate (f.carriers.toList.map fun (c, ty) => s!"{c} : {ty}")}"
     let what := match f.type? with
       | some ty => s!"to the types (abstracted over their enclosing binders) {ty} with a code or isomorphism the deriving handler does not write from their declarations"
       | none => "in a form the deriving handler does not write"
-    s!"{f.decl} applies the private constructor of `LeanIntent.Ty.Stands` {what}: {f.why}; {carried}"
+    s!"{f.decl} applies the private constructor of `{f.stands}` {what}: {f.why}; {carried}"
   match o.refusal? with
   | none => lines
-  | some (.impl c, some axs) =>
+  | some (.impl c, some axs, _) =>
     let what := if axs == #[c] then s!"the axiom {c}" else s!"{c}, which rests on the axioms {axs.toList}"
     lines.push s!"a dependency is {what}, not among Lean's three (propext, Classical.choice, Quot.sound), which could prove an attestation without naming the constructor"
-  | some (.impl c, none) =>
+  | some (.impl c, none, stands) =>
     if o.findings.any (·.decl == c) then lines
-    else lines.push s!"{c} applies the private constructor of `LeanIntent.Ty.Stands`, and the audit did not read it"
-  | some (.unknown c, _) => lines.push s!"the audit reaches {c}, which has no declaration here"
-  | some (.axiom c, _) => lines.push s!"a dependency rests on the axiom {c}, which is not one of Lean's three (propext, Classical.choice, Quot.sound) and could state an attestation without the constructor; in a module of Lean's module system an imported theorem is shown as an axiom"
-  | some (.fuel, _) => lines.push "the dependencies number more than 2 ^ 64"
+    else
+      let which := if stands.isEmpty then "a private constructor the audit reads"
+        else s!"the private constructor of {", ".intercalate (stands.map fun n => s!"`{n}`")}"
+      lines.push s!"{c} applies {which}, and the audit did not read it"
+  | some (.unknown c, _, _) => lines.push s!"the audit reaches {c}, which has no declaration here"
+  | some (.axiom c, _, _) => lines.push s!"a dependency rests on the axiom {c}, which is not one of Lean's three (propext, Classical.choice, Quot.sound) and could state an attestation without the constructor; in a module of Lean's module system an imported theorem is shown as an axiom"
+  | some (.fuel, _, _) => lines.push "the dependencies number more than 2 ^ 64"
 
-/-- Throws an error, saying why, unless the audit accepts the declaration `c`: unless no
-declaration it depends on attests a declared type's code with a code or isomorphism other than the
-one the deriving handler writes from the type's declaration, and it rests on no axiom but Lean's
-three. -/
 def requireCodes (c : Name) : MetaM Unit := asking do
   let lines := report (← audit c [])
   unless lines.isEmpty do

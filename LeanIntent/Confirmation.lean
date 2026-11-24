@@ -163,15 +163,16 @@ the record and the question, with the same text and verdict, at any revision. -/
   match question with
   | .restatement => .ok (restatementAnswer author rev.record rev.text verdict)
   | .consequence name =>
-    match (rev.shown.map (·.1)).find? (·.consequence == name) with
-    | some q =>
+    match (rev.shown.map (·.1)).filter (·.consequence == name) with
+    | [q] =>
       let a : Statement.Answer :=
         { author, record := rev.record, revision := rev.text, consequence := q.consequence,
           kind := q.kind, predicate := q.predicate, verdict }
       if isRestatementAnswer a then
         .error s!"consequence {name} collides with the restatement sentinel"
       else .ok a
-    | none => .error s!"asks no consequence named {name}"
+    | [] => .error s!"asks no consequence named {name}"
+    | _ :: _ :: _ => .error s!"asks more than one consequence named {name}"
 
 theorem buildAnswer_restatement (rev : Revision) (author : Authority) (verdict : Verdict) :
     ∃ a, buildAnswer rev .restatement author verdict = .ok a ∧
@@ -184,63 +185,82 @@ theorem buildAnswer_restatement (rev : Revision) (author : Authority) (verdict :
 theorem buildAnswer_consequence {rev : Revision} {name : String} {author : Authority}
     {verdict : Verdict} {a : Statement.Answer}
     (h : buildAnswer rev (.consequence name) author verdict = .ok a) :
-    ∃ q ∈ rev.shown.map (·.1), q.consequence = name ∧ a.author = author ∧
+    ∃ q ∈ rev.shown.map (·.1),
+      (rev.shown.map (·.1)).filter (·.consequence == name) = [q] ∧
+      (∀ q' ∈ rev.shown.map (·.1), q'.consequence = name → q' = q) ∧
+      q.consequence = name ∧ a.author = author ∧
       a.record = rev.record ∧ a.revision = rev.text ∧ a.consequence = q.consequence ∧
       a.kind = q.kind ∧ a.predicate = q.predicate ∧ a.verdict = verdict ∧
       isRestatementAnswer a = false ∧ rev.answersNow (.consequence q) a = true := by
   unfold buildAnswer at h
-  cases hf : (rev.shown.map (·.1)).find? (·.consequence == name) with
-  | none => simp [hf] at h
-  | some q =>
-    simp only [hf] at h
-    split at h
-    · cases h
-    · rename_i hnr
-      simp only [Except.ok.injEq] at h
-      subst h
-      have hmem := List.mem_of_find?_eq_some hf
-      have hname : q.consequence = name := by simpa using List.find?_some hf
-      have hfalse : isRestatementAnswer
-          { author, record := rev.record, revision := rev.text,
-            consequence := q.consequence, kind := q.kind,
-            predicate := q.predicate, verdict } = false := by
-        simpa using hnr
-      refine ⟨q, hmem, hname, rfl, rfl, rfl, rfl, rfl, rfl, rfl, hfalse, ?_⟩
-      simp [Revision.answersNow, Target.names, Question.names, hfalse]
+  cases hf : (rev.shown.map (·.1)).filter (·.consequence == name) with
+  | nil => simp [hf] at h
+  | cons q rest =>
+    cases rest with
+    | cons q₂ rest' => simp [hf] at h
+    | nil =>
+      simp only [hf] at h
+      split at h
+      · cases h
+      · rename_i hnr
+        simp only [Except.ok.injEq] at h
+        subst h
+        have hq : q ∈ (rev.shown.map (·.1)).filter (·.consequence == name) :=
+          hf ▸ List.mem_cons_self
+        have ⟨hmem, hbeq⟩ := List.mem_filter.mp hq
+        have hname : q.consequence = name := beq_iff_eq.mp hbeq
+        have huniq : ∀ q' ∈ rev.shown.map (·.1), q'.consequence = name → q' = q := by
+          intro q' hq' hqn
+          have hq'f : q' ∈ (rev.shown.map (·.1)).filter (·.consequence == name) :=
+            List.mem_filter.mpr ⟨hq', beq_iff_eq.mpr hqn⟩
+          rw [hf] at hq'f
+          exact List.mem_singleton.mp hq'f
+        have hfalse : isRestatementAnswer
+            { author, record := rev.record, revision := rev.text,
+              consequence := q.consequence, kind := q.kind,
+              predicate := q.predicate, verdict } = false := by
+          simpa using hnr
+        refine ⟨q, hmem, rfl, huniq, hname, rfl, rfl, rfl, rfl, rfl, rfl, rfl, hfalse, ?_⟩
+        simp [Revision.answersNow, Target.names, Question.names, hfalse]
+
+theorem buildAnswer_consequence_ambiguous {rev : Revision} {name : String} {author : Authority}
+    {verdict : Verdict}
+    (h : 2 ≤ ((rev.shown.map (·.1)).filter (·.consequence == name)).length) :
+    buildAnswer rev (.consequence name) author verdict =
+      .error s!"asks more than one consequence named {name}" := by
+  unfold buildAnswer
+  cases hf : (rev.shown.map (·.1)).filter (·.consequence == name) with
+  | nil => simp [hf] at h
+  | cons q rest =>
+    cases rest with
+    | nil => simp [hf] at h
+    | cons q₂ rest' => simp [hf]
 
 theorem buildAnswer_consequence_not_restatement {rev : Revision} {name : String}
     {author : Authority} {verdict : Verdict} {a : Statement.Answer}
     (h : buildAnswer rev (.consequence name) author verdict = .ok a) :
     isRestatementAnswer a = false ∧ Target.restatement.names a = false := by
-  obtain ⟨q, -, -, -, -, -, -, -, -, -, hf, -⟩ := buildAnswer_consequence h
+  obtain ⟨q, -, -, -, -, -, -, -, -, -, -, -, hf, -⟩ := buildAnswer_consequence h
   exact ⟨hf, hf⟩
 
 theorem buildAnswer_consequence_of_mem {rev : Revision} {q : Question} {author : Authority}
     {verdict : Verdict} (hpred : ∀ x ∈ rev.shown, x.1.predicate ≠ restatementPredicate)
-    (hq : q ∈ rev.shown.map (·.1)) (hname : q.consequence = restatementConsequence) :
-    ∃ a q', buildAnswer rev (.consequence restatementConsequence) author verdict = .ok a ∧
-      q' ∈ rev.shown.map (·.1) ∧ q'.consequence = restatementConsequence ∧
-      isRestatementAnswer a = false ∧ rev.answersNow (.consequence q') a = true := by
-  have hne : (rev.shown.map (·.1)).find? (·.consequence == restatementConsequence) ≠ none := by
-    intro hf
-    have hfalse := List.find?_eq_none.mp hf q hq
-    simp [hname] at hfalse
-  cases hf : (rev.shown.map (·.1)).find? (·.consequence == restatementConsequence) with
-  | none => exact absurd hf hne
-  | some q' =>
-    have hmem' := List.mem_of_find?_eq_some hf
-    obtain ⟨x, hx, hxq⟩ := List.mem_map.mp hmem'
-    have hxpred : x.1.predicate ≠ restatementPredicate := hpred x hx
-    have hqpred : q'.predicate ≠ restatementPredicate := hxq ▸ hxpred
-    let a : Statement.Answer :=
-      { author, record := rev.record, revision := rev.text, consequence := q'.consequence,
-        kind := q'.kind, predicate := q'.predicate, verdict }
-    have hnr : isRestatementAnswer a = false :=
-      isRestatementAnswer_false_of_predicate_ne hqpred
-    have hb : buildAnswer rev (.consequence restatementConsequence) author verdict = .ok a := by
-      simp [buildAnswer, hf, hnr, a]
-    obtain ⟨q'', hmem, hcn, -, -, -, -, -, -, -, hfalse, hans⟩ := buildAnswer_consequence hb
-    exact ⟨a, q'', hb, hmem, hcn, hfalse, hans⟩
+    (huniq : (rev.shown.map (·.1)).filter (·.consequence == q.consequence) = [q]) :
+    ∃ a, buildAnswer rev (.consequence q.consequence) author verdict = .ok a ∧
+      isRestatementAnswer a = false ∧ rev.answersNow (.consequence q) a = true := by
+  have hmem : q ∈ rev.shown.map (·.1) :=
+    (List.mem_filter.mp (huniq ▸ List.mem_cons_self)).1
+  obtain ⟨x, hx, hxq⟩ := List.mem_map.mp hmem
+  have hqpred : q.predicate ≠ restatementPredicate := hxq ▸ hpred x hx
+  let a : Statement.Answer :=
+    { author, record := rev.record, revision := rev.text, consequence := q.consequence,
+      kind := q.kind, predicate := q.predicate, verdict }
+  have hnr : isRestatementAnswer a = false :=
+    isRestatementAnswer_false_of_predicate_ne hqpred
+  have hb : buildAnswer rev (.consequence q.consequence) author verdict = .ok a := by
+    simp [buildAnswer, huniq, hnr, a]
+  refine ⟨a, hb, hnr, ?_⟩
+  simp [Revision.answersNow, Target.names, Question.names, hnr, a]
 
 /-- The answerer the statement `s`, stating the answer `a`, shows: its author, for the reason its
 source gives. -/

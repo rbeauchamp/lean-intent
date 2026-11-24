@@ -349,6 +349,18 @@ theorem kernelReduction_result (env : Environment) (h : Loaded env) (lctx : Loca
   generalize Kernel.whnf env lctx e = result
   cases result <;> rfl
 
+@[expose] def kernelIsDefEq (env : Environment) (_h : Loaded env) (lctx : LocalContext) (a b : Expr) :
+    Except Kernel.Exception { ok : Bool // Kernel.isDefEq env lctx a b = .ok ok } :=
+  match Kernel.isDefEq env lctx a b with
+  | .ok ok => .ok ⟨ok, rfl⟩
+  | .error ex => .error ex
+
+theorem kernelIsDefEq_result (env : Environment) (h : Loaded env) (lctx : LocalContext)
+    (a b : Expr) : (kernelIsDefEq env h lctx a b).map Subtype.val = Kernel.isDefEq env lctx a b := by
+  unfold kernelIsDefEq
+  generalize Kernel.isDefEq env lctx a b = result
+  cases result <;> rfl
+
 /-- Read weak head normal form through the kernel, with no elaborator reduction fallback.
 The expression must be kernel-ready: declared values have no metavariables, and generic renderings
 supply their free variables through the current local context. -/
@@ -382,10 +394,46 @@ where
       | .app (.const ``List.nil _) _ => return acc
       | _ => throwError "expected a list, found{indentExpr e}"
 
-/-- The string a string literal is. -/
-def strLit (e : Expr) : MetaM String := asking do
+def readNatBelow (bound : Nat) (e : Expr) : MetaM Nat := asking <|
+  go (bound + 1) 0 e
+where
+  go (fuel acc : Nat) (e : Expr) : MetaM Nat := asking do
+    match fuel with
+    | 0 => throwError "expected a natural number below {bound}, found{indentExpr e}"
+    | fuel + 1 =>
+      match ← readWhnf e with
+      | .lit (.natVal n) =>
+        if acc + n < bound then return acc + n
+        throwError "expected a natural number below {bound}, found {acc + n}"
+      | .const ``Nat.zero _ =>
+        if acc < bound then return acc
+        throwError "expected a natural number below {bound}, found {acc}"
+      | .app (.const ``Nat.succ _) prev =>
+        if acc + 1 < bound then go fuel (acc + 1) prev
+        else throwError "expected a natural number below {bound}, found at least {acc + 1}"
+      | e => throwError "expected a natural number below {bound}, found{indentExpr e}"
+
+def readByte (e : Expr) : MetaM UInt8 := asking do
+  let u ← ctorArgs e ``UInt8.ofBitVec 1
+  let bv ← ctorArgs u[0] ``BitVec.ofFin 2
+  let fin ← ctorArgs bv[1] ``Fin.mk 3
+  return UInt8.ofNat (← readNatBelow 256 fin[1])
+
+def strLit (e : Expr) : MetaM String := askingIn fun env h => do
   match ← readWhnf e with
   | .lit (.strVal s) => return s
+  | .app (.app (.const ``String.ofByteArray _) baExpr) _ =>
+    let ba ← ctorArgs baExpr ``ByteArray.mk 1
+    let arr ← ctorArgs ba[0] ``Array.mk 2
+    let bytes ← (← listElems arr[1]).mapM readByte
+    let some s := String.fromUTF8? (ByteArray.mk bytes)
+      | throwError "expected a valid UTF-8 string, found{indentExpr e}"
+    match kernelIsDefEq env h (← getLCtx) e (.lit (.strVal s)) with
+    | .ok ⟨true, _⟩ => return s
+    | .ok ⟨false, _⟩ =>
+      throwError "Lean's kernel did not find{indentExpr e}\nequal to string literal {repr s}"
+    | .error _ =>
+      throwError "Lean's kernel could not check{indentExpr e}\nagainst string literal {repr s}"
   | e => throwError "expected a string literal, found{indentExpr e}"
 
 /-- A gloss's four parts, in order: what it requires, rules out, still allows, and the freedom it
@@ -1189,16 +1237,15 @@ def answerText (ex : Name) (a : Expr) : MetaM String := asking do
     | throwError "expected `Answer.mk` constant head"
   let .const _ cus := (← readWhnf ans[1]).getAppFn
     | throwError "expected `Consequence.mk` constant head"
-  let name ← readWhnf c[1]
-  unless name matches .lit (.strVal _) do
-    throwError "expected a string literal, found{indentExpr name}"
+  let nameStr ← strLit c[1]
+  let name := Expr.lit (.strVal nameStr)
   let (kind, shownAs) ← kindWords c[2]
   let verdict ← readWhnf ans[2]
   let attribution := answerer.says (← readVerdict verdict)
   let term := mkApp3 (.const ``Answer.mk aus) ans[0]
     (mkApp4 (.const ``Consequence.mk cus) c[0] name kind c[3]) verdict
   let answer := s!"# {answerer.title}\n\n{String.ofList attribution}\nThe consequence \
-    answered is {repr (← strLit name)}, shown as {shownAs}. Who gave the answer is printed as this \
+    answered is {repr nameStr}, shown as {shownAs}. Who gave the answer is printed as this \
     record holds it; `LeanIntent.Trace` decides, from a project's owners' log, whether its \
     authority traces back to a declared owner, and this document does not. The answer, printed \
     exactly: as Lean syntax that Lean elaborates back to the term its kernel checks, binder names \
