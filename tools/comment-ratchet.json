@@ -1,5 +1,5 @@
 [
-  {"file": "LeanIntent/Clocks.lean", "comments": 195, "lines": 340, "fingerprints": [
+  {"file": "LeanIntent/Clocks.lean", "comments": 193, "lines": 331, "fingerprints": [
     "0115586ca6d2f067",
     "013cff42c0b3c1cd",
     "033cb973d11e1927",
@@ -79,7 +79,6 @@
     "59fc7c12f3629bbd",
     "5ac63badfea7a32e",
     "5c547607c6b2106c",
-    "5cb41fdaf8130ba1",
     "5d4e9c6de64bf927",
     "5d8f7b3e6a8bac92",
     "5edf8b80edeb0430",
@@ -183,7 +182,6 @@
     "f464448e9080b1db",
     "f4bbf87ee216f361",
     "f5b3936adb25a5b6",
-    "f82105a8269e81fd",
     "fa9763ac4268bd03",
     "facdf593f18e18de",
     "fb76c5eb033c9331",

@@ -2252,6 +2252,68 @@ instance {as : List Ty} (k : ArgClock as) : Decidable k.InClock :=
 
 end ArgClock
 
+@[expose] def Ty.reachStep (r : Ty) (o s : Nat) (P : Nat → Bool) (m : Nat) : Bool :=
+  (m == s && Ty.treeInh r o s) ||
+    (List.range r.items).any fun l =>
+      P l && (List.range (r.muN l)).any fun c =>
+        Ty.ctorInh r o l c && (List.range (r.muA l c)).any fun f => r.muS l c f == m
+
+theorem Ty.reachStep_mono (r : Ty) (o s : Nat) : Ty.StepMono (Ty.reachStep r o s) := by
+  intro P Q hPQ m h
+  simp only [Ty.reachStep, Bool.or_eq_true, List.any_eq_true, List.mem_range, Bool.and_eq_true] at h ⊢
+  rcases h with h | ⟨l, hl, hpl, c, hc, hci, f, hf, hmf⟩
+  · exact .inl h
+  · exact .inr ⟨l, hl, hPQ _ hpl, c, hc, hci, f, hf, hmf⟩
+
+@[expose] def Ty.treeReach (r : Ty) (o s m : Nat) : Bool :=
+  (Ty.roundsOf (Ty.groupBound r o) (Ty.reachStep r o s) (Ty.groupBound r o)).getD m false
+
+theorem Ty.treeInh_root (r : Ty) (o : Nat) : Ty.treeInh r o o = true :=
+  Ty.roundsOf_fix (Ty.inhStep_mono r o) (by unfold Ty.groupBound; omega) (by simp [Ty.inhStep])
+
+theorem Ty.treeInh_of_growsAt {r : Ty} {j i : Nat} (h : r.growsAt j i = true) :
+    Ty.treeInh r j i = true :=
+  (Ty.treeInh_iff (b := .unit) (g := .unit)).mpr
+    (Ty.inhabited_sound (by rw [Ty.inhabited_eq_marks]; exact Ty.marks_of_growsAt h))
+
+theorem Ty.treeReach_self {r : Ty} {o s : Nat} (h : Ty.treeInh r o s = true) :
+    Ty.treeReach r o s s = true :=
+  Ty.roundsOf_fix (Ty.reachStep_mono r o s) (Ty.roundsOf_lt _ _ h) (by simp [Ty.reachStep, h])
+
+theorem Ty.treeReach_step {r : Ty} {o s l c f : Nat} (hl : Ty.treeReach r o s l = true)
+    (hc : c < r.muN l) (hci : Ty.ctorInh r o l c = true) (hf : f < r.muA l c) :
+    Ty.treeReach r o s (r.muS l c f) = true := by
+  have hi : Ty.treeInh r o (r.muS l c f) = true := by
+    simp only [Ty.ctorInh, List.all_eq_true, List.mem_range] at hci
+    exact hci f hf
+  apply Ty.roundsOf_fix (Ty.reachStep_mono r o s) (Ty.roundsOf_lt _ _ hi)
+  simp only [Ty.reachStep, Bool.or_eq_true, List.any_eq_true, List.mem_range, Bool.and_eq_true,
+    beq_iff_eq]
+  exact .inr ⟨l, Ty.lt_items_of_muN (by omega), hl, c, hc, hci, f, hf, rfl⟩
+
+theorem Ty.treeReach_trans {r : Ty} {o s l m : Nat}
+    (hsl : Ty.treeReach r o s l = true) (hlm : Ty.treeReach r o l m = true) :
+    Ty.treeReach r o s m = true := by
+  suffices key : ∀ n m,
+      (Ty.roundsOf (Ty.groupBound r o) (Ty.reachStep r o l) n).getD m false = true →
+        Ty.treeReach r o s m = true from key _ m hlm
+  intro n
+  induction n with
+  | zero =>
+    intro m hm
+    rw [Ty.roundsOf_zero] at hm
+    exact absurd hm Bool.false_ne_true
+  | succ n ih =>
+    intro m hm
+    rw [Ty.roundsOf_succ] at hm
+    simp only [Ty.reachStep, Bool.and_eq_true, Bool.or_eq_true, beq_iff_eq, List.any_eq_true,
+      List.mem_range] at hm
+    rcases hm.2 with ⟨rfl, _⟩ | ⟨l', _, hpl', c, hc, hci, f, hf, rfl⟩
+    · exact hsl
+    · exact Ty.treeReach_step (ih l' hpl') hc hci hf
+
+mutual
+
 /-- Whether a value of the code holds a `LeanIntent.Clock` anywhere: in a field of a declared type, or
 the declared type itself. A declared type's parameters are not read: a parameter is part of a value
 only through the fields that use it, which its representation holds. Its match has no catch-all
@@ -2272,35 +2334,92 @@ case, so a code former added to `Ty` must say whether it holds one. -/
   | .arrow a b => a.namesClock || b.namesClock
   | .decl n _ r => decide (n = Clock.codeName) || r.namesClock
   | .ref _ => false
-  | .mu b g r _ => b.namesClock || g.namesClock || r.namesClock
-  | .muAt b g r _ _ => b.namesClock || g.namesClock || r.namesClock
+  | .mu b g r i =>
+    b.namesClock || (r.grows i &&
+      (List.range r.items).any fun m =>
+        Ty.treeReach r i i m && (List.range (r.muN m)).any fun c =>
+          Ty.ctorInh r i m c &&
+            (g.pathNamesClock m [c, 0] ||
+              (List.range (r.muA m c)).any fun f => g.pathNamesClock m [c, 1, f]))
+  | .muAt b g r j i =>
+    r.growsAt j i &&
+      ((Ty.treeReach r j i j && b.namesClock) ||
+        (List.range r.items).any fun m =>
+          Ty.treeReach r j i m && (List.range (r.muN m)).any fun c =>
+            Ty.ctorInh r j m c &&
+              (g.pathNamesClock m [c, 0] ||
+                (List.range (r.muA m c)).any fun f => g.pathNamesClock m [c, 1, f]))
+
+@[expose] def Ty.pathNamesClock : Ty → Nat → List Nat → Bool
+  | .prod a _, 0, [] => a.namesClock
+  | .prod a _, 0, q :: p => a.pathNamesClock q p
+  | .prod _ b, n + 1, p => b.pathNamesClock n p
+  | _, _, _ => false
+
+end
+
+theorem Ty.pathNamesClock_nil (t : Ty) (k : Nat) :
+    t.pathNamesClock k [] = (t.item k).namesClock := by
+  induction t generalizing k with
+  | prod a b _ ihb =>
+    cases k with
+    | zero => rfl
+    | succ n => exact ihb n
+  | _ => rfl
+
+theorem Ty.pathNamesClock_cons (t : Ty) (k q : Nat) (p : List Nat) :
+    t.pathNamesClock k (q :: p) = (t.item k).pathNamesClock q p := by
+  induction t generalizing k with
+  | prod a b _ ihb =>
+    cases k with
+    | zero => rfl
+    | succ n => exact ihb n
+  | _ => rfl
+
+theorem Ty.pathNamesClock_ctorData (g : Ty) (m c : Nat) :
+    g.pathNamesClock m [c, 0] = (g.ctorData m c).namesClock := by
+  rw [Ty.pathNamesClock_cons, Ty.pathNamesClock_cons, Ty.pathNamesClock_nil]
+  rfl
+
+theorem Ty.pathNamesClock_ctorArg (g : Ty) (m c f : Nat) :
+    g.pathNamesClock m [c, 1, f] = (g.ctorArg m c f).namesClock := by
+  rw [Ty.pathNamesClock_cons, Ty.pathNamesClock_cons, Ty.pathNamesClock_cons, Ty.pathNamesClock_nil]
+  rfl
+
+@[expose] def Ty.treeNamesClock (b g r : Ty) (o s : Nat) : Bool :=
+  (Ty.treeReach r o s o && b.namesClock) ||
+    (List.range r.items).any fun m =>
+      Ty.treeReach r o s m && (List.range (r.muN m)).any fun c =>
+        Ty.ctorInh r o m c &&
+          (g.pathNamesClock m [c, 0] ||
+            (List.range (r.muA m c)).any fun f => g.pathNamesClock m [c, 1, f])
+
+theorem Ty.treeNamesClock_mono {b g r : Ty} {o s l : Nat}
+    (h : Ty.treeReach r o s l = true) (hc : Ty.treeNamesClock b g r o l = true) :
+    Ty.treeNamesClock b g r o s = true := by
+  simp only [Ty.treeNamesClock, Bool.or_eq_true, Bool.and_eq_true, List.any_eq_true,
+    List.mem_range] at hc ⊢
+  rcases hc with ⟨hlo, hb⟩ | ⟨m, hm, hlm, c, hc, hci, hdata⟩
+  · exact .inl ⟨Ty.treeReach_trans h hlo, hb⟩
+  · exact .inr ⟨m, hm, Ty.treeReach_trans h hlm, c, hc, hci, hdata⟩
 
 theorem Clock.namesClock_code (α : Type) [HasCode α] :
     (HasCode.code (Clock α)).namesClock = true := by
   rw [Clock.code_eq]
   simp [Ty.namesClock]
 
-/-- Whether a tree of the `l`-th type of the group with the base `b`, data and arguments `g` and
-recursive fields `r`, rooted at its `o`-th type, holds a `LeanIntent.Clock` where no clock part
-reaches it, given whether its base (`baseS`), the data of the first constructor of each type
-(`dataS`) and each child of the `m`-th type (`kid m`) hold one so: where every value is a base value,
-its base does; where every value is a node of one constructor, its data or a child does, a child at a
-field that holds a function holding one wherever the field's arguments or the group name one; and
-otherwise, one does wherever the group names one. -/
 @[expose] def Place.treeStrayAt (b g r : Ty) (o : Nat) (baseS : Bool) (dataS : Nat → Bool)
     (kid : Nat → Bool) (l : Nat) : Bool :=
   if l = o ∧ r.muN l = 0 then baseS
-  else if l ≠ o ∧ r.muN l = 1 then
+  else if l ≠ o ∧ r.muN l = 1 ∧ Ty.ctorInh r o l 0 = true then
     dataS l || (List.range (r.muA l 0)).any fun f =>
       if g.ctorArg l 0 f = .unit then kid (r.muS l 0 f)
-      else (g.ctorArg l 0 f).namesClock || b.namesClock || g.namesClock
-  else b.namesClock || g.namesClock
+      else (g.ctorArg l 0 f).namesClock || Ty.treeNamesClock b g r o (r.muS l 0 f)
+  else Ty.treeNamesClock b g r o l
 
-/-- `treeStrayAt` for the clock parts that descend into at most `n` more children: past that bound,
-a child holds one wherever the group names one. -/
 @[expose] def Place.treeStray (b g r : Ty) (o : Nat) (baseS : Bool) (dataS : Nat → Bool) :
     (n l : Nat) → Bool
-  | 0, l => Place.treeStrayAt b g r o baseS dataS (fun _ => b.namesClock || g.namesClock) l
+  | 0, l => Place.treeStrayAt b g r o baseS dataS (fun m => Ty.treeNamesClock b g r o m) l
   | n + 1, l => Place.treeStrayAt b g r o baseS dataS (Place.treeStray b g r o baseS dataS n) l
 
 /-- Whether a value of a recursive type holds a `LeanIntent.Clock` where no clock part reaches it,
@@ -2359,6 +2478,184 @@ recursion on `g`. -/
 
 end
 
+theorem Ty.sizeOf_unit_le (t : Ty) : sizeOf Ty.unit ≤ sizeOf t := by
+  cases t <;> simp <;> omega
+
+theorem Ty.sizeOf_item_le (t : Ty) (n : Nat) : sizeOf (t.item n) ≤ sizeOf t := by
+  induction t generalizing n with
+  | prod a b _ ihb =>
+    cases n with
+    | zero => simp [Ty.item]; omega
+    | succ n =>
+      have := ihb n
+      simp [Ty.item] at this ⊢
+      omega
+  | _ => exact Ty.sizeOf_unit_le _
+
+theorem Ty.sizeOf_ctorData_le (g : Ty) (m c : Nat) : sizeOf (g.ctorData m c) ≤ sizeOf g :=
+  Nat.le_trans (Ty.sizeOf_item_le _ _)
+    (Nat.le_trans (Ty.sizeOf_item_le _ _) (Ty.sizeOf_item_le _ _))
+
+theorem Ty.sizeOf_ctorArg_le (g : Ty) (m c f : Nat) : sizeOf (g.ctorArg m c f) ≤ sizeOf g :=
+  Nat.le_trans (Ty.sizeOf_item_le _ _)
+    (Nat.le_trans (Ty.sizeOf_item_le _ _)
+      (Nat.le_trans (Ty.sizeOf_item_le _ _) (Ty.sizeOf_item_le _ _)))
+
+theorem Ty.dataStrayClock_eq (g : Ty) (l : Nat) :
+    Ty.dataStrayClock g l = Ty.fieldStrayClock (g.ctorData l 0) := by
+  induction g generalizing l with
+  | prod t rest _ ihr =>
+    cases l with
+    | succ l => exact ihr l
+    | zero =>
+      cases t with
+      | prod c _ =>
+        cases c <;> rfl
+      | _ => rfl
+  | _ => rfl
+
+theorem Place.treeStrayAt_eq_false {b g r : Ty} {o s : Nat}
+    {baseS : Bool} {dataS : Nat → Bool} {kid : Nat → Bool}
+    (ht : Ty.treeNamesClock b g r o s = false)
+    (hb : Ty.treeReach r o s o = true → baseS = false)
+    (hd : ∀ l, Ty.treeReach r o s l = true → l ≠ o → r.muN l = 1 →
+      Ty.ctorInh r o l 0 = true → dataS l = false)
+    (hk : ∀ l, Ty.treeReach r o s l = true → kid l = false)
+    {l : Nat} (hl : Ty.treeReach r o s l = true) :
+    Place.treeStrayAt b g r o baseS dataS kid l = false := by
+  have htl : Ty.treeNamesClock b g r o l = false := by
+    cases h : Ty.treeNamesClock b g r o l
+    · rfl
+    · exact absurd (Ty.treeNamesClock_mono hl h) (by simp [ht])
+  unfold Place.treeStrayAt
+  by_cases h1 : l = o ∧ r.muN l = 0
+  · rw [ite_eq_left h1]
+    exact hb (h1.1 ▸ hl)
+  · rw [ite_eq_right h1]
+    by_cases h2 : l ≠ o ∧ r.muN l = 1 ∧ Ty.ctorInh r o l 0 = true
+    · rw [ite_eq_left h2, hd l hl h2.1 h2.2.1 h2.2.2, Bool.false_or, List.any_eq_false]
+      intro f hf
+      have hf' := List.mem_range.mp hf
+      have hm := Ty.treeReach_step hl (by omega) h2.2.2 hf'
+      by_cases hu : g.ctorArg l 0 f = .unit
+      · simp [hu, hk _ hm]
+      · have harg : (g.ctorArg l 0 f).namesClock = false := by
+          cases ha : (g.ctorArg l 0 f).namesClock
+          · rfl
+          · have : Ty.treeNamesClock b g r o s = true := by
+              simp only [Ty.treeNamesClock, Bool.or_eq_true, Bool.and_eq_true, List.any_eq_true,
+                List.mem_range]
+              exact .inr ⟨l, Ty.lt_items_of_muN (by omega), hl, 0, by omega, h2.2.2,
+                .inr ⟨f, hf', by rw [Ty.pathNamesClock_ctorArg]; exact ha⟩⟩
+            rw [ht] at this
+            exact Bool.noConfusion this
+        have htm : Ty.treeNamesClock b g r o (r.muS l 0 f) = false := by
+          cases h : Ty.treeNamesClock b g r o (r.muS l 0 f)
+          · rfl
+          · exact absurd (Ty.treeNamesClock_mono hm h) (by simp [ht])
+        simp [hu, harg, htm]
+    · rw [ite_eq_right h2]
+      exact htl
+
+theorem Place.treeStray_eq_false {b g r : Ty} {o s : Nat}
+    {baseS : Bool} {dataS : Nat → Bool}
+    (ht : Ty.treeNamesClock b g r o s = false)
+    (hb : Ty.treeReach r o s o = true → baseS = false)
+    (hd : ∀ l, Ty.treeReach r o s l = true → l ≠ o → r.muN l = 1 →
+      Ty.ctorInh r o l 0 = true → dataS l = false) :
+    ∀ n l, Ty.treeReach r o s l = true → Place.treeStray b g r o baseS dataS n l = false := by
+  intro n
+  induction n with
+  | zero =>
+    intro l hl
+    refine Place.treeStrayAt_eq_false ht hb hd (fun m hm => ?_) hl
+    cases h : Ty.treeNamesClock b g r o m
+    · rfl
+    · exact absurd (Ty.treeNamesClock_mono hm h) (by simp [ht])
+  | succ n ih =>
+    intro l hl
+    exact Place.treeStrayAt_eq_false ht hb hd ih hl
+
+theorem Ty.not_stray_of_namesClock_eq_false : (t : Ty) → t.namesClock = false →
+    t.strayClock = false ∧ t.fieldStrayClock = false
+  | .prod a b, h => by
+    simp only [Ty.namesClock, Bool.or_eq_false_iff] at h
+    have ha := Ty.not_stray_of_namesClock_eq_false a h.1
+    have hb := Ty.not_stray_of_namesClock_eq_false b h.2
+    simp [Ty.strayClock, Ty.fieldStrayClock, ha.1, hb.1, hb.2]
+  | .decl n ps r, h => by
+    simp only [Ty.namesClock, Bool.or_eq_false_iff] at h
+    have hr := Ty.not_stray_of_namesClock_eq_false r h.2
+    simp [Ty.strayClock, Ty.fieldStrayClock, h.1, hr.2]
+  | .mu b g r i, h => by
+    simp only [Ty.namesClock, Bool.or_eq_false_iff] at h
+    have hbf := (Ty.not_stray_of_namesClock_eq_false b h.1).2
+    cases hgr : r.grows i
+    · simp [Ty.strayClock, Ty.fieldStrayClock, Place.muStray, hgr, hbf]
+    · have hg := h.2
+      simp only [hgr, Bool.true_and] at hg
+      have ht : Ty.treeNamesClock b g r i i = false := by
+        simp [Ty.treeNamesClock, h.1, hg]
+      have hd : ∀ l, Ty.treeReach r i i l = true → l ≠ i → r.muN l = 1 →
+          Ty.ctorInh r i l 0 = true → Ty.dataStrayClock g l = false := by
+        intro l hl _ h1 hci
+        have hd0 : (g.ctorData l 0).namesClock = false := by
+          cases hd' : (g.ctorData l 0).namesClock
+          · rfl
+          · have : Ty.treeNamesClock b g r i i = true := by
+              simp only [Ty.treeNamesClock, Bool.or_eq_true, Bool.and_eq_true, List.any_eq_true,
+                List.mem_range]
+              exact .inr ⟨l, Ty.lt_items_of_muN (by omega), hl, 0, by omega, hci,
+                .inl (by rw [Ty.pathNamesClock_ctorData]; exact hd')⟩
+            rw [ht] at this
+            exact Bool.noConfusion this
+        have hsz : sizeOf (g.ctorData l 0) ≤ sizeOf g := Ty.sizeOf_ctorData_le g l 0
+        rw [Ty.dataStrayClock_eq]
+        exact (Ty.not_stray_of_namesClock_eq_false (g.ctorData l 0) hd0).2
+      have hts := Place.treeStray_eq_false ht (fun _ => hbf) hd r.items i
+        (Ty.treeReach_self (Ty.treeInh_root r i))
+      simp [Ty.strayClock, Ty.fieldStrayClock, Place.muStray, hgr, hts]
+  | .muAt b g r j i, h => by
+    cases hgr : r.growsAt j i
+    · simp [Ty.strayClock, Ty.fieldStrayClock, Place.muAtStray, hgr]
+    · have ht : Ty.treeNamesClock b g r j i = false := by
+        simpa [Ty.namesClock, Ty.treeNamesClock, hgr] using h
+      have hb : Ty.treeReach r j i j = true → Ty.fieldStrayClock b = false := by
+        intro hreach
+        have hb0 : b.namesClock = false := by
+          cases hb' : b.namesClock
+          · rfl
+          · have : Ty.treeNamesClock b g r j i = true := by
+              simp [Ty.treeNamesClock, hreach, hb']
+            rw [ht] at this
+            exact Bool.noConfusion this
+        exact (Ty.not_stray_of_namesClock_eq_false b hb0).2
+      have hd : ∀ l, Ty.treeReach r j i l = true → l ≠ j → r.muN l = 1 →
+          Ty.ctorInh r j l 0 = true → Ty.dataStrayClock g l = false := by
+        intro l hl _ h1 hci
+        have hd0 : (g.ctorData l 0).namesClock = false := by
+          cases hd' : (g.ctorData l 0).namesClock
+          · rfl
+          · have : Ty.treeNamesClock b g r j i = true := by
+              simp only [Ty.treeNamesClock, Bool.or_eq_true, Bool.and_eq_true, List.any_eq_true,
+                List.mem_range]
+              exact .inr ⟨l, Ty.lt_items_of_muN (by omega), hl, 0, by omega, hci,
+                .inl (by rw [Ty.pathNamesClock_ctorData]; exact hd')⟩
+            rw [ht] at this
+            exact Bool.noConfusion this
+        have hsz : sizeOf (g.ctorData l 0) ≤ sizeOf g := Ty.sizeOf_ctorData_le g l 0
+        rw [Ty.dataStrayClock_eq]
+        exact (Ty.not_stray_of_namesClock_eq_false (g.ctorData l 0) hd0).2
+      have hts := Place.treeStray_eq_false ht hb hd r.items i
+        (Ty.treeReach_self (Ty.treeInh_of_growsAt hgr))
+      simp [Ty.strayClock, Ty.fieldStrayClock, Place.muAtStray, hgr, hts]
+  | .unit, h | .bool, h | .nat, h | .int, h | .string, h | .fin _, h | .atom _, h | .ref _, h
+  | .list _, h | .array _, h | .option _, h | .sum _ _, h | .arrow _ _, h => by
+    simp [Ty.strayClock, Ty.fieldStrayClock, h]
+termination_by t => sizeOf t
+decreasing_by
+  all_goals (simp_wf; omega)
+
 inductive Ty.NamedClock : Ty → Type
   | here (ps r : Ty) : Ty.NamedClock (.decl Clock.codeName ps r)
   | list {a : Ty} : Ty.NamedClock a → Ty.NamedClock (.list a)
@@ -2372,12 +2669,23 @@ inductive Ty.NamedClock : Ty → Type
   | cod (a : Ty) {b : Ty} : Ty.NamedClock b → Ty.NamedClock (.arrow a b)
   | rep (n : Lean.Name) (ps : Ty) {r : Ty} : Ty.NamedClock r → Ty.NamedClock (.decl n ps r)
   | muBase {b : Ty} (g r : Ty) (i : Nat) : Ty.NamedClock b → Ty.NamedClock (.mu b g r i)
-  | muGroup (b : Ty) {g : Ty} (r : Ty) (i : Nat) : Ty.NamedClock g → Ty.NamedClock (.mu b g r i)
-  | muRefs (b g : Ty) {r : Ty} (i : Nat) : Ty.NamedClock r → Ty.NamedClock (.mu b g r i)
-  | muAtBase {b : Ty} (g r : Ty) (j i : Nat) : Ty.NamedClock b → Ty.NamedClock (.muAt b g r j i)
-  | muAtGroup (b : Ty) {g : Ty} (r : Ty) (j i : Nat) :
-      Ty.NamedClock g → Ty.NamedClock (.muAt b g r j i)
-  | muAtRefs (b g : Ty) {r : Ty} (j i : Nat) : Ty.NamedClock r → Ty.NamedClock (.muAt b g r j i)
+  | muData (b g r : Ty) (i m c : Nat) :
+      r.grows i = true → Ty.treeReach r i i m = true → c < r.muN m → Ty.ctorInh r i m c = true →
+      Ty.NamedClock (g.ctorData m c) → Ty.NamedClock (.mu b g r i)
+  | muArg (b g r : Ty) (i m c f : Nat) :
+      r.grows i = true → Ty.treeReach r i i m = true → c < r.muN m → Ty.ctorInh r i m c = true →
+      f < r.muA m c → Ty.NamedClock (g.ctorArg m c f) → Ty.NamedClock (.mu b g r i)
+  | muAtBase {b : Ty} (g r : Ty) (j i : Nat) :
+      r.growsAt j i = true → Ty.treeReach r j i j = true →
+      Ty.NamedClock b → Ty.NamedClock (.muAt b g r j i)
+  | muAtData (b g r : Ty) (j i m c : Nat) :
+      r.growsAt j i = true → Ty.treeReach r j i m = true → c < r.muN m →
+      Ty.ctorInh r j m c = true →
+      Ty.NamedClock (g.ctorData m c) → Ty.NamedClock (.muAt b g r j i)
+  | muAtArg (b g r : Ty) (j i m c f : Nat) :
+      r.growsAt j i = true → Ty.treeReach r j i m = true → c < r.muN m →
+      Ty.ctorInh r j m c = true → f < r.muA m c →
+      Ty.NamedClock (g.ctorArg m c f) → Ty.NamedClock (.muAt b g r j i)
 
 theorem Ty.NamedClock.namesClock : {t : Ty} → Ty.NamedClock t → t.namesClock = true
   | _, .here _ _ => by simp [Ty.namesClock]
@@ -2392,11 +2700,23 @@ theorem Ty.NamedClock.namesClock : {t : Ty} → Ty.NamedClock t → t.namesClock
   | _, .cod _ o => by simp [Ty.namesClock, o.namesClock]
   | _, .rep _ _ o => by simp [Ty.namesClock, o.namesClock]
   | _, .muBase _ _ _ o => by simp [Ty.namesClock, o.namesClock]
-  | _, .muGroup _ _ _ o => by simp [Ty.namesClock, o.namesClock]
-  | _, .muRefs _ _ _ o => by simp [Ty.namesClock, o.namesClock]
-  | _, .muAtBase _ _ _ _ o => by simp [Ty.namesClock, o.namesClock]
-  | _, .muAtGroup _ _ _ _ o => by simp [Ty.namesClock, o.namesClock]
-  | _, .muAtRefs _ _ _ _ o => by simp [Ty.namesClock, o.namesClock]
+  | _, .muData _ _ _ _ m c hg hr hc hi o => by
+    simp only [Ty.namesClock, Bool.or_eq_true, Bool.and_eq_true, List.any_eq_true, List.mem_range]
+    exact .inr ⟨hg, m, Ty.lt_items_of_muN (by omega), hr, c, hc, hi,
+      .inl (by rw [Ty.pathNamesClock_ctorData]; exact o.namesClock)⟩
+  | _, .muArg _ _ _ _ m c f hg hr hc hi hf o => by
+    simp only [Ty.namesClock, Bool.or_eq_true, Bool.and_eq_true, List.any_eq_true, List.mem_range]
+    exact .inr ⟨hg, m, Ty.lt_items_of_muN (by omega), hr, c, hc, hi,
+      .inr ⟨f, hf, by rw [Ty.pathNamesClock_ctorArg]; exact o.namesClock⟩⟩
+  | _, .muAtBase _ _ _ _ hg hr o => by simp [Ty.namesClock, hg, hr, o.namesClock]
+  | _, .muAtData _ _ _ _ _ m c hg hr hc hi o => by
+    simp only [Ty.namesClock, Bool.and_eq_true, Bool.or_eq_true, List.any_eq_true, List.mem_range]
+    exact ⟨hg, .inr ⟨m, Ty.lt_items_of_muN (by omega), hr, c, hc, hi,
+      .inl (by rw [Ty.pathNamesClock_ctorData]; exact o.namesClock)⟩⟩
+  | _, .muAtArg _ _ _ _ _ m c f hg hr hc hi hf o => by
+    simp only [Ty.namesClock, Bool.and_eq_true, Bool.or_eq_true, List.any_eq_true, List.mem_range]
+    exact ⟨hg, .inr ⟨m, Ty.lt_items_of_muN (by omega), hr, c, hc, hi,
+      .inr ⟨f, hf, by rw [Ty.pathNamesClock_ctorArg]; exact o.namesClock⟩⟩⟩
 
 theorem Ty.namedClock_of_namesClock : (t : Ty) → t.namesClock = true → Nonempty (Ty.NamedClock t)
   | .unit, h | .bool, h | .nat, h | .int, h | .string, h | .fin _, h | .atom _, h | .ref _, h => by
@@ -2428,17 +2748,34 @@ theorem Ty.namedClock_of_namesClock : (t : Ty) → t.namesClock = true → Nonem
     · exact ⟨.here ps r⟩
     · exact (Ty.namedClock_of_namesClock r h).elim fun o => ⟨.rep n ps o⟩
   | .mu b g r i, h => by
-    simp only [Ty.namesClock, Bool.or_eq_true] at h
-    rcases h with (h | h) | h
-    · exact (Ty.namedClock_of_namesClock b h).elim fun o => ⟨.muBase g r i o⟩
-    · exact (Ty.namedClock_of_namesClock g h).elim fun o => ⟨.muGroup b r i o⟩
-    · exact (Ty.namedClock_of_namesClock r h).elim fun o => ⟨.muRefs b g i o⟩
+    simp only [Ty.namesClock, Bool.or_eq_true, Bool.and_eq_true, List.any_eq_true,
+      List.mem_range] at h
+    rcases h with hb | ⟨hg, m, _, hr, c, hc, hi, hd | ⟨f, hf, ha⟩⟩
+    · exact (Ty.namedClock_of_namesClock b hb).elim fun o => ⟨.muBase g r i o⟩
+    · rw [Ty.pathNamesClock_ctorData] at hd
+      have hsz : sizeOf (g.ctorData m c) ≤ sizeOf g := Ty.sizeOf_ctorData_le g m c
+      exact (Ty.namedClock_of_namesClock (g.ctorData m c) hd).elim fun o =>
+        ⟨.muData b g r i m c hg hr hc hi o⟩
+    · rw [Ty.pathNamesClock_ctorArg] at ha
+      have hsz : sizeOf (g.ctorArg m c f) ≤ sizeOf g := Ty.sizeOf_ctorArg_le g m c f
+      exact (Ty.namedClock_of_namesClock (g.ctorArg m c f) ha).elim fun o =>
+        ⟨.muArg b g r i m c f hg hr hc hi hf o⟩
   | .muAt b g r j i, h => by
-    simp only [Ty.namesClock, Bool.or_eq_true] at h
-    rcases h with (h | h) | h
-    · exact (Ty.namedClock_of_namesClock b h).elim fun o => ⟨.muAtBase g r j i o⟩
-    · exact (Ty.namedClock_of_namesClock g h).elim fun o => ⟨.muAtGroup b r j i o⟩
-    · exact (Ty.namedClock_of_namesClock r h).elim fun o => ⟨.muAtRefs b g j i o⟩
+    simp only [Ty.namesClock, Bool.and_eq_true, Bool.or_eq_true, List.any_eq_true,
+      List.mem_range] at h
+    rcases h with ⟨hg, ⟨hr, hb⟩ | ⟨m, _, hr, c, hc, hi, hd | ⟨f, hf, ha⟩⟩⟩
+    · exact (Ty.namedClock_of_namesClock b hb).elim fun o => ⟨.muAtBase g r j i hg hr o⟩
+    · rw [Ty.pathNamesClock_ctorData] at hd
+      have hsz : sizeOf (g.ctorData m c) ≤ sizeOf g := Ty.sizeOf_ctorData_le g m c
+      exact (Ty.namedClock_of_namesClock (g.ctorData m c) hd).elim fun o =>
+        ⟨.muAtData b g r j i m c hg hr hc hi o⟩
+    · rw [Ty.pathNamesClock_ctorArg] at ha
+      have hsz : sizeOf (g.ctorArg m c f) ≤ sizeOf g := Ty.sizeOf_ctorArg_le g m c f
+      exact (Ty.namedClock_of_namesClock (g.ctorArg m c f) ha).elim fun o =>
+        ⟨.muAtArg b g r j i m c f hg hr hc hi hf o⟩
+termination_by t => sizeOf t
+decreasing_by
+  all_goals (simp_wf; try omega)
 
 theorem Ty.namesClock_iff (t : Ty) : t.namesClock = true ↔ Nonempty (Ty.NamedClock t) :=
   ⟨Ty.namedClock_of_namesClock t, fun ⟨o⟩ => o.namesClock⟩
@@ -2475,6 +2812,22 @@ mutual
 
 end
 
+theorem Ty.read_of_namesClock_eq_false : (t : Ty) → t.namesClock = false →
+    t.clocksRead = true ∧ t.fieldsRead = true
+  | .prod a b, h => by
+    simp only [Ty.namesClock, Bool.or_eq_false_iff] at h
+    have ha := Ty.read_of_namesClock_eq_false a h.1
+    have hb := Ty.read_of_namesClock_eq_false b h.2
+    simp [Ty.clocksRead, Ty.fieldsRead, ha.1, hb.1, hb.2]
+  | .decl n ps r, h => by
+    simp only [Ty.namesClock, Bool.or_eq_false_iff] at h
+    have hr := Ty.read_of_namesClock_eq_false r h.2
+    simp [Ty.clocksRead, Ty.fieldsRead, h.1, hr.2]
+  | .unit, h | .bool, h | .nat, h | .int, h | .string, h | .fin _, h | .atom _, h | .ref _, h
+  | .list _, h | .array _, h | .option _, h | .sum _ _, h | .arrow _ _, h
+  | .mu _ _ _ _, h | .muAt _ _ _ _ _, h => by
+    simp [Ty.clocksRead, Ty.fieldsRead, h]
+
 mutual
 
 theorem Ty.NamedClock.path?_of_clocksRead : {t : Ty} → (o : Ty.NamedClock t) →
@@ -2499,12 +2852,24 @@ theorem Ty.NamedClock.path?_of_clocksRead : {t : Ty} → (o : Ty.NamedClock t) �
   | _, .inr _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
   | _, .dom _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
   | _, .cod _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
-  | _, .muBase _ _ _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
-  | _, .muGroup _ _ _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
-  | _, .muRefs _ _ _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
-  | _, .muAtBase _ _ _ _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
-  | _, .muAtGroup _ _ _ _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
-  | _, .muAtRefs _ _ _ _ o, h => by simp [Ty.clocksRead, Ty.namesClock, o.namesClock] at h
+  | _, .muBase g r i o, h => by
+    have hn := (Ty.NamedClock.muBase g r i o).namesClock
+    simp [Ty.clocksRead, hn] at h
+  | _, .muData b g r i m c hg hr hc hi o, h => by
+    have hn := (Ty.NamedClock.muData b g r i m c hg hr hc hi o).namesClock
+    simp [Ty.clocksRead, hn] at h
+  | _, .muArg b g r i m c f hg hr hc hi hf o, h => by
+    have hn := (Ty.NamedClock.muArg b g r i m c f hg hr hc hi hf o).namesClock
+    simp [Ty.clocksRead, hn] at h
+  | _, .muAtBase g r j i hg hr o, h => by
+    have hn := (Ty.NamedClock.muAtBase g r j i hg hr o).namesClock
+    simp [Ty.clocksRead, hn] at h
+  | _, .muAtData b g r j i m c hg hr hc hi o, h => by
+    have hn := (Ty.NamedClock.muAtData b g r j i m c hg hr hc hi o).namesClock
+    simp [Ty.clocksRead, hn] at h
+  | _, .muAtArg b g r j i m c f hg hr hc hi hf o, h => by
+    have hn := (Ty.NamedClock.muAtArg b g r j i m c f hg hr hc hi hf o).namesClock
+    simp [Ty.clocksRead, hn] at h
 
 theorem Ty.NamedClock.fieldPath?_of_fieldsRead : {t : Ty} → (o : Ty.NamedClock t) →
     t.fieldsRead = true → ∃ q, o.fieldPath? = some q ∧ q.1.isClock = true
@@ -2528,44 +2893,64 @@ theorem Ty.NamedClock.fieldPath?_of_fieldsRead : {t : Ty} → (o : Ty.NamedClock
   | _, .inr _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
   | _, .dom _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
   | _, .cod _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
-  | _, .muBase _ _ _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
-  | _, .muGroup _ _ _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
-  | _, .muRefs _ _ _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
-  | _, .muAtBase _ _ _ _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
-  | _, .muAtGroup _ _ _ _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
-  | _, .muAtRefs _ _ _ _ o, h => by simp [Ty.fieldsRead, Ty.namesClock, o.namesClock] at h
+  | _, .muBase g r i o, h => by
+    have hn := (Ty.NamedClock.muBase g r i o).namesClock
+    simp [Ty.fieldsRead, hn] at h
+  | _, .muData b g r i m c hg hr hc hi o, h => by
+    have hn := (Ty.NamedClock.muData b g r i m c hg hr hc hi o).namesClock
+    simp [Ty.fieldsRead, hn] at h
+  | _, .muArg b g r i m c f hg hr hc hi hf o, h => by
+    have hn := (Ty.NamedClock.muArg b g r i m c f hg hr hc hi hf o).namesClock
+    simp [Ty.fieldsRead, hn] at h
+  | _, .muAtBase g r j i hg hr o, h => by
+    have hn := (Ty.NamedClock.muAtBase g r j i hg hr o).namesClock
+    simp [Ty.fieldsRead, hn] at h
+  | _, .muAtData b g r j i m c hg hr hc hi o, h => by
+    have hn := (Ty.NamedClock.muAtData b g r j i m c hg hr hc hi o).namesClock
+    simp [Ty.fieldsRead, hn] at h
+  | _, .muAtArg b g r j i m c f hg hr hc hi hf o, h => by
+    have hn := (Ty.NamedClock.muAtArg b g r j i m c f hg hr hc hi hf o).namesClock
+    simp [Ty.fieldsRead, hn] at h
 
 end
 
 @[expose] def Place.ArgPath.From {a : Ty} {p : Place} (q : Place.Path (.code a) p) :
-    {as : List Ty} → Place.ArgPath p as → Prop
-  | b :: _, .here q' => a = b ∧ HEq q q'
-  | _ :: _, .there r => Place.ArgPath.From q r
+    {as : List Ty} → Nat → Place.ArgPath p as → Prop
+  | b :: _, 0, .here q' => a = b ∧ HEq q q'
+  | _ :: _, i + 1, .there r => Place.ArgPath.From q i r
+  | _, _, _ => False
 
-theorem Place.ArgPath.exists_from {p : Place} {a : Ty} (q : Place.Path (.code a) p) :
-    {as : List Ty} → a ∈ as → ∃ r : Place.ArgPath p as, r.From q
-  | [], h => absurd h List.not_mem_nil
-  | b :: as, h => by
-    by_cases e : a = b
-    · subst e
-      exact ⟨.here q, rfl, HEq.rfl⟩
-    · obtain ⟨r, hr⟩ := Place.ArgPath.exists_from q (as := as) ((List.mem_cons.mp h).resolve_left e)
-      exact ⟨.there r, hr⟩
+theorem Place.ArgPath.exists_from {p : Place} :
+    {as : List Ty} → (i : Nat) → (hi : i < as.length) →
+    (q : Place.Path (.code as[i]) p) → ∃ r : Place.ArgPath p as, r.From q i
+  | [], _, hi, _ => absurd hi (Nat.not_lt_zero _)
+  | _ :: _, 0, _, q => ⟨.here q, rfl, HEq.rfl⟩
+  | _ :: as, i + 1, hi, q =>
+    let ⟨r, hr⟩ := Place.ArgPath.exists_from (as := as) i (Nat.lt_of_succ_lt_succ hi) q
+    ⟨.there r, hr⟩
 
 @[expose] def Sig.strayClock (σ : Sig) : Bool := σ.args.any fun a => a.strayClock || !a.clocksRead
 
-theorem Sig.read_of_strayClock_eq_false {σ : Sig} (h : σ.strayClock = false) {a : Ty}
-    (ha : a ∈ σ.args) (o : Ty.NamedClock a) :
-    ∃ (q : Σ p, Place.Path (.code a) p) (r : Place.ArgPath q.1 σ.args),
-      o.path? = some q ∧ r.From q.2 ∧ ArgClock.InClock ⟨q.1, r, .value⟩ := by
-  have hr : a.clocksRead = true := by
-    cases hc : a.clocksRead
-    · have : σ.strayClock = true := List.any_eq_true.mpr ⟨a, ha, by rw [hc]; simp⟩
+theorem Sig.strayClock_eq_false_of_not_namesClock {σ : Sig}
+    (h : ∀ a ∈ σ.args, a.namesClock = false) : σ.strayClock = false := by
+  simp only [Sig.strayClock, List.any_eq_false]
+  intro a ha
+  simp [(Ty.not_stray_of_namesClock_eq_false a (h a ha)).1,
+    (Ty.read_of_namesClock_eq_false a (h a ha)).1]
+
+theorem Sig.read_of_strayClock_eq_false {σ : Sig} (h : σ.strayClock = false)
+    (i : Nat) (hi : i < σ.args.length) (o : Ty.NamedClock σ.args[i]) :
+    ∃ (q : Σ p, Place.Path (.code σ.args[i]) p) (r : Place.ArgPath q.1 σ.args),
+      o.path? = some q ∧ r.From q.2 i ∧ ArgClock.InClock ⟨q.1, r, .value⟩ := by
+  have ha : σ.args[i] ∈ σ.args := List.getElem_mem hi
+  have hr : σ.args[i].clocksRead = true := by
+    cases hc : σ.args[i].clocksRead
+    · have : σ.strayClock = true := List.any_eq_true.mpr ⟨σ.args[i], ha, by rw [hc]; simp⟩
       rw [h] at this
       exact Bool.noConfusion this
     · rfl
   obtain ⟨q, hq, hc⟩ := o.path?_of_clocksRead hr
-  obtain ⟨r, hfrom⟩ := Place.ArgPath.exists_from q.2 ha
+  obtain ⟨r, hfrom⟩ := Place.ArgPath.exists_from i hi q.2
   exact ⟨q, r, hq, hfrom, (Place.isClock_iff q.1).mp hc⟩
 
 /-! ## Scripts of timed actions -/

@@ -533,12 +533,12 @@ theorem not_witnessVerdicts_of_strayClock (h : c.sig.strayClock = true) (q : Pai
   exact Bool.noConfusion hs
 
 theorem timed_mem_of_namedClock {q : Pair W} {bs : List Bool} (h : WitnessVerdicts q bs)
-    {a : Ty} (ha : a ∈ c.sig.args) (o : Ty.NamedClock a) :
-    ∃ (p : Σ p, Place.Path (.code a) p) (r : Place.ArgPath p.1 c.sig.args),
-      o.path? = some p ∧ r.From p.2 ∧ ArgClock.InClock ⟨p.1, r, .value⟩ ∧
+    (i : Nat) (hi : i < c.sig.args.length) (o : Ty.NamedClock c.sig.args[i]) :
+    ∃ (p : Σ p, Place.Path (.code c.sig.args[i]) p) (r : Place.ArgPath p.1 c.sig.args),
+      o.path? = some p ∧ r.From p.2 i ∧ ArgClock.InClock ⟨p.1, r, .value⟩ ∧
         Witness.timed ⟨p.1, r, .value⟩ ∈ witnesses W := by
   obtain ⟨p, r, hp, hr, hk⟩ :=
-    Sig.read_of_strayClock_eq_false ((witnessVerdicts_correct q bs).mp h).1 ha o
+    Sig.read_of_strayClock_eq_false ((witnessVerdicts_correct q bs).mp h).1 i hi o
   exact ⟨p, r, hp, hr, hk, Witness.timed_mem (.inr hk)⟩
 
 /-- Proved verdicts are the verdicts, in order, on the members of the class. -/
