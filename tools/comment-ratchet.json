@@ -194,20 +194,17 @@
     "ff6783e84511697b",
     "ffc3dfcf3c898b07"
   ]},
-  {"file": "LeanIntent/CodeAudit.lean", "comments": 30, "lines": 80, "fingerprints": [
+  {"file": "LeanIntent/CodeAudit.lean", "comments": 23, "lines": 44, "fingerprints": [
     "065d531b8ad73cc1",
     "08ee005c4dbc8c67",
     "0ca703fbca8bf60f",
     "1bda58dc21657ed9",
     "2439ba90fe07ef02",
     "24df61aaf68af7cf",
-    "26de4738c7f990c3",
     "3778a0832833c1c3",
     "3a837a046649f8be",
     "400611f35c80c3fd",
     "5fdd02b1318b62b9",
-    "6181aeb866937688",
-    "65d5ba65e22a5eeb",
     "6e29c9c704c8cb70",
     "70a90a22bc9d156f",
     "741edbac93ee0845",
@@ -215,12 +212,8 @@
     "7cf65073d6c45dbb",
     "8028a3bcee3a3072",
     "87299aa0f5545785",
-    "91710247e503b329",
     "b752961c5c7777b7",
-    "bc988d9984283ece",
-    "c896c13492feabdc",
     "cbe8a74499110c80",
-    "d03cb9979df89e07",
     "d502a2956c9dad95",
     "dd79d88a108c9867",
     "e2eb881b048bbedd",
@@ -613,7 +606,7 @@
     "f8187fb2915bb8ab",
     "f9c0ee7dbdd5f457"
   ]},
-  {"file": "LeanIntent/Degenerate.lean", "comments": 119, "lines": 279, "fingerprints": [
+  {"file": "LeanIntent/Degenerate.lean", "comments": 118, "lines": 197, "fingerprints": [
     "03cdc6ff4e3748e0",
     "072938ec2e5248c4",
     "0837eb60f4ccc7c3",
@@ -646,7 +639,6 @@
     "31f7d59e78ffa9ef",
     "32255216f2bfc6d8",
     "32fe4dd15d189df1",
-    "372eab5927e7d731",
     "3a205e43724a02ab",
     "3bae27b4139ebe30",
     "3bae27b4139ebe30",

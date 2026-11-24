@@ -61,7 +61,8 @@ Furthermore, any downstream project gate that imports with `loadExts := false` a
 
 ### 5. Exhaustive Reader Guard Inventory across Modules
 
-- **`LeanIntent/CodeAudit.lean`**: `audit` (`askingIn`, passing `Loaded env` to `axiomsIn`); `isCarrier` (`asking`, querying `defaultInstanceExtension`, `instanceExtension`, and `classExtension` under `withoutExporting`, specified in `isCarrier_eq`; see [ADR-0006](0006-declared-type-coding-and-code-audit-internals.md) for its branch logic), `diagnosticType`, `requireCodes` (`asking`); `relevantIn`, `importers`, `generatedBy`, `instMonadEnvEnvM` (`stateless`).
+- **`LeanIntent/CodeAudit.lean`**: `audit` (`askingIn`, passing `Loaded env` to `axiomsIn`); `isCarrier` (`asking`, querying `defaultInstanceExtension`, `instanceExtension`, and `classExtension` under `withoutExporting` for `HasCode`, `Covered`, and `CoveredMachine`, specified in `isCarrier_eq`; see [ADR-0006](0006-declared-type-coding-and-code-audit-internals.md) for its branch logic), `diagnosticType`, `Kind.check`, `kinds`, `requireCodes` (`asking`); `relevantIn`, `importers`, `generatedBy`, `instMonadEnvEnvM` (`stateless`).
+- **`LeanIntent/MachineDeclared/Handler.lean`**: All 6 monadic functions (`standsDecl`, `readRoles`, `mkIso`, `checkAttestation`, `mkCoveredMachine`, `handler`) guarded with `asking`.
 - **`LeanIntent/Cone.lean`**: `requireIndependent` (`asking`); `lookupIn`, `checkRecord`, `firstUnknown` (`stateless`).
 - **`LeanIntent/Confirmation/Read.lean`**: All `MetaM` readers (`declaredWhere`, `declaredIn`, `constOf`, `constName`, `questionOfVerified`, `questionOf`, `keptOf`, `deliverableParts`, `revisionOfVerified`, `revisionOf`, `logTexts`, `projectLog`, `explanationClaims`, `attributedOf`, `undeclaredIn`, `check`, `renderChecked`, `answerStatement`) guarded with `asking` / `asking <|`.
 - **`LeanIntent/Implementation/Read.lean`**: `moduleOf`, `entryOf`, `awaitingEntryOf`, `check` guarded with `asking`.
