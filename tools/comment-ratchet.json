@@ -1083,7 +1083,7 @@
     "dc2886b19a562a6a",
     "eae5d8191d058bbe"
   ]},
-  {"file": "LeanIntent/Render/Text.lean", "comments": 82, "lines": 340, "fingerprints": [
+  {"file": "LeanIntent/Render/Text.lean", "comments": 81, "lines": 339, "fingerprints": [
     "009675d0a16fea5a",
     "01a6aa3fd9a09ce5",
     "028ba99a98937305",
@@ -1161,7 +1161,6 @@
     "e8c80b9653ebe575",
     "e8df4e0054ca0bb9",
     "ea4480b72e05e7de",
-    "ed3c65e9d4d84e73",
     "f76e7555db8a2ef3",
     "f8da0e97197601c2",
     "f9250ecc7f64fa22",

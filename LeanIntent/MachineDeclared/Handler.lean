@@ -79,14 +79,30 @@ def mkIso (indVal : InductiveVal) (us : List Level) (as : Array Expr) (r : Roles
     MetaM Expr := asking do
   let some ctorName := indVal.ctors.head?
     | throwError "LeanIntent.CoveredMachine: `{.ofConstName indVal.name}` has no constructor"
+  let env := (← getEnv).setExporting false
+  let some sinfo := getStructureInfo? env indVal.name
+    | throwError "LeanIntent.CoveredMachine: `{.ofConstName indVal.name}` has no structure info"
+  let projOf (k : Nat) : MetaM Name := do
+    let some fieldName := sinfo.fieldNames[k]?
+      | throwError "LeanIntent.CoveredMachine: `{.ofConstName indVal.name}` has no field at index {k}"
+    let some fi := getFieldInfo? env indVal.name fieldName
+      | throwError "LeanIntent.CoveredMachine: `{.ofConstName indVal.name}` has no field info for `{fieldName}`"
+    let some pinfo := env.getProjectionFnInfo? fi.projFn
+      | throwError "LeanIntent.CoveredMachine: `{.ofConstName fi.projFn}` is not a registered projection function for `{.ofConstName indVal.name}`"
+    unless pinfo.ctorName == ctorName && pinfo.numParams == indVal.numParams && pinfo.i == k do
+      throwError "LeanIntent.CoveredMachine: `{.ofConstName fi.projFn}` does not project field {k} of `{.ofConstName ctorName}`"
+    return fi.projFn
+  let memProj ← projOf r.memory
+  let initProj ← projOf r.initial
+  let stepProj ← projOf r.step
   let W := mkAppN (mkConst indVal.name us) as
   let I := r.input
   let O := r.output
   let machine := mkApp2 (mkConst ``Machine) I O
   let toFn ← withLocalDeclD `w W fun w => do
-    let get (k : Nat) := Expr.proj indVal.name k w
-    mkLambdaFVars #[w] (mkApp5 (mkConst ``Machine.mk) I O (get r.memory) (get r.initial)
-      (get r.step))
+    let get (projFn : Name) := mkAppN (mkConst projFn us) (as.push w)
+    mkLambdaFVars #[w] (mkApp5 (mkConst ``Machine.mk) I O (get memProj) (get initProj)
+      (get stepProj))
   let invFn ← withLocalDeclD `x machine fun x => do
     let memVal := mkApp3 (mkConst ``Machine.Memory) I O x
     let initVal := mkApp3 (mkConst ``Machine.initial) I O x
