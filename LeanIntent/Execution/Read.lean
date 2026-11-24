@@ -14,8 +14,6 @@ namespace LeanIntent.Execution.Read
 
 open Lean Meta LeanIntent.Render LeanIntent.Confirmation.Read LeanIntent.Imported
 
-/-- The name `e` reduces to, through the kernel: `Name.anonymous`, or `Name.str` or `Name.num`
-applied to a name and a literal. An error when it reduces to anything else. -/
 def nameLit (e : Expr) : MetaM Name := asking <|
   go (2 ^ 64) e
 where
@@ -34,9 +32,6 @@ where
         | n' => throwError "expected a natural number literal, found{indentExpr n'}"
       | _ => throwError "expected a name, found{indentExpr e}"
 
-/-- What the build shows of the value `decl`, a constant whose type reduces to `Runs d`: the
-deliverable its type names, where that is a constant, and the executable it names. An error when
-its value does not reduce to `Runs.mk`'s application, or the executable to a name. -/
 def claimOf (decl : Name) : MetaM Claim := asking do
   let t ← readWhnf (← getConstInfo decl).type
   let .app (.app (.const ``Runs _) _) d := t
@@ -46,12 +41,9 @@ def claimOf (decl : Name) : MetaM Claim := asking do
     throwError "the executable {decl} names is not read as a name: {e.toMessageData}"
   return ⟨decl, Implementation.Read.constOf? d, executable⟩
 
-/-- The values of `Runs d` the modules `mods` declare, as the build shows them. -/
 def claims (mods : Array Name) : MetaM (Array Claim) := asking do
   (← declaredIn mods ``Runs).mapM claimOf
 
-/-- The declarations the IR expression `e` calls (`IR.Expr.fap`) or makes a closure of
-(`IR.Expr.pap`). -/
 @[expose] def exprRefs : IR.Expr → List Name
   | .fap c _ | .pap c _ => [c]
   | .ctor .. | .reset .. | .reuse .. | .proj .. | .uproj .. | .sproj .. | .ap .. | .box ..
@@ -59,8 +51,6 @@ def claims (mods : Array Name) : MetaM (Array Claim) := asking do
 
 mutual
 
-/-- The declarations the IR body `b` calls or makes a closure of, in each of its instructions, join
-points and alternatives. -/
 @[expose] def bodyRefs : IR.FnBody → List Name
   | .vdecl _ _ e b => exprRefs e ++ bodyRefs b
   | .jdecl _ _ v b => bodyRefs v ++ bodyRefs b
@@ -75,9 +65,6 @@ points and alternatives. -/
 
 end
 
-/-- The declarations that the IR the build stored for `n`, as Lean finds it (`IR.findEnvDecl`),
-calls or makes a closure of: none where Lean finds no IR for `n`, or where its IR declares it
-implemented in another language (`extern`). -/
 @[expose] def irRefs (s : Stored) (n : Name) : List Name :=
   match s.irDecl? n with
   | some (.fdecl _ _ _ body _) => bodyRefs body
