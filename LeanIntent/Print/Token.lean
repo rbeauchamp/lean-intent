@@ -2,56 +2,21 @@ module
 
 import all Init.Meta.Defs
 
-/-!
-# The tokens of the printed form, their text, and a lexer that reads the text back
-
-The printer of `LeanIntent.Print.Term` writes a Lean term as a list of tokens (`Tok`), and this
-module writes the tokens as text (`render`) and reads the text back (`lex`). The text is Lean's
-own surface syntax for terms, restricted to a closed set of forms:
-
-* identifiers, written as Lean writes them: each component as it is when it is a valid identifier
-  that is no keyword of the grammar, and otherwise between `«` and `»`;
-* decimal numerals, and string literals with `\\`, `\"` and `\n` as their only escapes;
-* the keywords `fun`, `let`, `have`, `Sort`, `Type`, `Prop`, `nat_lit`, `max` and `imax`;
-* the symbols `( ) { } [ ] ⦃ ⦄ @ : := ; , => → ∀ .{ +`.
-
-Tokens are separated by one space, except after an opening bracket, `@` or `.{`, and before a
-closing bracket, `,`, `;` or `.{`, where they are written together, as Lean requires for `.{`.
-
-`lex_render` proves that `lex` reads back every list of well-formed tokens (`Tok.WF`) that
-`render` writes, for every predicate `esc` that chooses further components to write escaped. So
-two lists of well-formed tokens that `render` writes the same are equal. The lexer reads an
-identifier as Lean's own lexer does (`Lean.Parser.identFnAux` at the pinned release, with the
-character classes `Lean.isIdFirst` and `Lean.isIdRest` that this module uses): a component is an
-identifier character followed by a run of them, or an escaped run, and a `.` continues the
-identifier only when an identifier character or `«` follows it. Lean's lexer also reads as a
-keyword an identifier that its token table holds; the printer avoids that by writing escaped the
-components `esc` chooses, such as the tokens of the reader's grammar.
-
-The module imports `Init.Meta.Defs` with `import all`: its theorems about the lexer reduce Lean's
-`isIdFirst` and `isIdRest`, whose bodies that module does not expose to a `module` file.
--/
-
 public section
 
 namespace LeanIntent.Print
 
 open Lean (Name isIdFirst isIdRest)
 
-/-- The tokens of the printed form. -/
 inductive Tok where
   | lparen | rparen | lbrace | rbrace | lbrack | rbrack | lstrict | rstrict
   | atSign | colon | colonEq | semicolon | comma | darrow | arrow | pi | dotBrace | plus
   | kwFun | kwLet | kwHave | kwSort | kwType | kwProp | kwNatLit | kwMax | kwImax
-  /-- An identifier, given as the name it denotes. -/
   | ident (n : Name)
-  /-- A decimal numeral. -/
   | num (n : Nat)
-  /-- A string literal. -/
   | str (s : String)
   deriving @[expose] DecidableEq, @[expose] Inhabited
 
-/-- The keyword a run of characters is, if it is one. -/
 @[expose] def keyword : List Char → Option Tok
   | ['f', 'u', 'n'] => some .kwFun
   | ['l', 'e', 't'] => some .kwLet
@@ -64,52 +29,41 @@ inductive Tok where
   | ['i', 'm', 'a', 'x'] => some .kwImax
   | _ => none
 
-/-- A component written as it is: a valid identifier, by Lean's character classes, that is no
-keyword. -/
 @[expose] def rawable (s : String) : Bool :=
   match s.toList with
   | c :: cs => isIdFirst c && cs.all isIdRest && (keyword (c :: cs)).isNone
   | [] => false
 
-/-- A component's text: as it is when `rawable` and not chosen by `esc`, and otherwise escaped. -/
 @[expose] def compText (esc : String → Bool) (s : String) : List Char :=
   if rawable s && !esc s then s.toList else '«' :: s.toList ++ ['»']
 
-/-- An identifier's text, from its components, leftmost first. -/
 @[expose] def identText (esc : String → Bool) : List String → List Char
   | [] => []
   | [s] => compText esc s
   | s :: ss => compText esc s ++ '.' :: identText esc ss
 
-/-- The components of a name, leftmost first, when every one is a string. -/
 @[expose] def comps : Name → Option (List String)
   | .anonymous => some []
   | .str p s => (comps p).map (· ++ [s])
   | .num _ _ => none
 
-/-- The name with the given components, leftmost first. -/
 @[expose] def ofComps (ss : List String) : Name := ss.foldl .str .anonymous
 
-/-- The decimal digit for `d < 10`. -/
 @[expose] def digit (d : Nat) : Char := Char.ofNat (48 + d)
 
-/-- The decimal numeral of `n`. -/
 @[expose] def decimal (n : Nat) : List Char :=
   if _h : n < 10 then [digit n] else decimal (n / 10) ++ [digit (n % 10)]
 termination_by n
 decreasing_by omega
 
-/-- The number a run of decimal digits denotes. -/
 @[expose] def ofDecimal (cs : List Char) : Nat := cs.foldl (fun acc c => acc * 10 + (c.toNat - 48)) 0
 
-/-- A string literal's contents with `\`, `"` and the newline escaped. -/
 @[expose] def escStr : List Char → List Char
   | [] => []
   | c :: cs =>
     (if c = '\\' then ['\\', '\\'] else if c = '"' then ['\\', '"']
       else if c = '\n' then ['\\', 'n'] else [c]) ++ escStr cs
 
-/-- A token's text. -/
 @[expose] def Tok.text (esc : String → Bool) : Tok → List Char
   | .lparen => ['('] | .rparen => [')'] | .lbrace => ['{'] | .rbrace => ['}']
   | .lbrack => ['['] | .rbrack => [']'] | .lstrict => ['⦃'] | .rstrict => ['⦄']
@@ -125,38 +79,29 @@ decreasing_by omega
   | .num n => decimal n
   | .str s => '"' :: escStr s.toList ++ ['"']
 
-/-- A token can be written and read back: an identifier names a name whose components are all
-strings, at least one, and each is `rawable` or holds no `»`. -/
 @[expose] def Tok.WF : Tok → Prop
   | .ident n => ∃ ss, comps n = some ss ∧ ss ≠ [] ∧ ∀ s ∈ ss, rawable s ∨ '»' ∉ s.toList
   | _ => True
 
-/-- Whether two consecutive tokens are written together, with no space between them. -/
 @[expose] def glue : Tok → Tok → Bool
   | .lparen, _ | .lbrace, _ | .lbrack, _ | .lstrict, _ | .atSign, _ | .dotBrace, _ => true
   | _, .rparen | _, .rbrace | _, .rbrack | _, .rstrict | _, .comma | _, .semicolon
   | _, .dotBrace => true
   | _, _ => false
 
-/-- The text of a list of tokens. -/
 @[expose] def render (esc : String → Bool) : List Tok → List Char
   | [] => []
   | [t] => t.text esc
   | t :: u :: ts => t.text esc ++ (if glue t u then [] else [' ']) ++ render esc (u :: ts)
 
-/-! ## The lexer -/
-
-/-- An escaped component's contents, read up to its closing `»`. -/
 @[expose] def lexEsc : List Char → Option (List Char × List Char)
   | [] => none
   | c :: cs => if c = '»' then some ([], cs) else (lexEsc cs).map fun (a, r) => (c :: a, r)
 
-/-- The longest prefix of characters that satisfy `p`, and the rest. -/
 @[expose] def spanBy (p : Char → Bool) : List Char → List Char × List Char
   | [] => ([], [])
   | c :: cs => if p c then let (a, r) := spanBy p cs; (c :: a, r) else ([], c :: cs)
 
-/-- One component of an identifier, and whether it was written as it is. -/
 @[expose] def lexComp : List Char → Option (String × Bool × List Char)
   | [] => none
   | c :: cs =>
@@ -166,14 +111,10 @@ strings, at least one, and each is `rawable` or holds no `»`. -/
       some (String.ofList (c :: a), true, r)
     else none
 
-/-- Whether a `.` at the start of the text continues an identifier, as in Lean's lexer
-(`Lean.Parser.isIdCont`). -/
 @[expose] def continues : List Char → Bool
   | '.' :: c :: _ => isIdFirst c || c = '«'
   | _ => false
 
-/-- The components of an identifier after those in `acc`, whether it is one component written as
-it is, and the text after it. -/
 @[expose] def lexIdent : Nat → List String → List Char → Option (List String × Bool × List Char)
   | 0, _, _ => none
   | f + 1, acc, cs => do
@@ -181,7 +122,6 @@ it is, and the text after it. -/
     if continues r then lexIdent f (acc ++ [s]) r.tail
     else some (acc ++ [s], raw && acc.isEmpty, r)
 
-/-- A string literal's contents, read up to its closing `"`. -/
 @[expose] def lexStr : List Char → Option (List Char × List Char)
   | '"' :: r => some ([], r)
   | '\\' :: '\\' :: r => (lexStr r).map fun (a, r) => ('\\' :: a, r)
@@ -191,7 +131,6 @@ it is, and the text after it. -/
   | c :: r => (lexStr r).map fun (a, r) => (c :: a, r)
   | [] => none
 
-/-- The single-character symbols and their tokens. -/
 @[expose] def symbol : Char → Option Tok
   | '(' => some .lparen | ')' => some .rparen | '{' => some .lbrace | '}' => some .rbrace
   | '[' => some .lbrack | ']' => some .rbrack | '⦃' => some .lstrict | '⦄' => some .rstrict
@@ -199,7 +138,6 @@ it is, and the text after it. -/
   | '∀' => some .pi | '+' => some .plus
   | _ => none
 
-/-- One token at the start of a text that does not start with a space. -/
 @[expose] def lexOne : List Char → Option (Tok × List Char)
   | [] => none
   | c :: cs =>
@@ -226,7 +164,6 @@ it is, and the text after it. -/
       | _ => some (.colon, cs)
     else (symbol c).map (·, cs)
 
-/-- The tokens of a text, each after the spaces before it. -/
 @[expose] def lexAux : Nat → List Char → Option (List Tok)
   | 0, _ => none
   | f + 1, cs =>
@@ -237,10 +174,7 @@ it is, and the text after it. -/
       let ts ← lexAux f r
       some (t :: ts)
 
-/-- The tokens of a text. -/
 @[expose] def lex (cs : List Char) : Option (List Tok) := lexAux (cs.length + 1) cs
-
-/-! ## Reading back what is written -/
 
 theorem ofComps_append (ss : List String) (s : String) :
     ofComps (ss ++ [s]) = .str (ofComps ss) s := by
@@ -356,8 +290,6 @@ theorem not_endEscape_of_rawable {s : String} (h : rawable s = true) : '»' ∉ 
     · exact absurd (h.1.2 _ he) (by decide)
   · simp at h
 
-/-- What may follow an identifier's text: no identifier character, and no `.` that continues the
-identifier. -/
 @[expose] def Stop (rest : List Char) : Prop :=
   continues rest = false ∧ ∀ c, rest.head? = some c → isIdRest c = false
 
@@ -400,8 +332,6 @@ theorem lexComp_compText (esc : String → Bool) (s : String) (hs : rawable s �
       lexEsc_append _ _ hm, Option.map_some, String.ofList_toList]
     simp_all
 
-/-- Whether the lexer reads an identifier of the components `ss` read after `acc` as one
-component written as it is. -/
 @[expose] def identFlag (esc : String → Bool) (acc : List String) : List String → Bool
   | [s] => rawable s && !esc s && acc.isEmpty
   | _ => false
@@ -454,7 +384,6 @@ theorem length_le_identText (esc : String → Bool) :
     simp only [identText, List.length_append, List.length_cons] at this ⊢
     omega
 
-/-- What may follow a token's text so that the lexer reads the token and nothing more. -/
 @[expose] def StopTok : Tok → List Char → Prop
   | .ident _, r | .kwFun, r | .kwLet, r | .kwHave, r | .kwSort, r | .kwType, r | .kwProp, r
   | .kwNatLit, r | .kwMax, r | .kwImax, r => Stop r
@@ -587,7 +516,6 @@ theorem render_cons (esc : String → Bool) (u : Tok) (ts : List Tok) :
   | cons v ts =>
     exact ⟨(if glue u v then [] else [' ']) ++ render esc (v :: ts), by simp only [render, List.append_assoc]⟩
 
-/-- `glue t u` holds when `t` opens or `u` closes. -/
 theorem glue_cases {t u : Tok} (h : glue t u = true) :
     (t = .lparen ∨ t = .lbrace ∨ t = .lbrack ∨ t = .lstrict ∨ t = .atSign ∨ t = .dotBrace) ∨
       (u = .rparen ∨ u = .rbrace ∨ u = .rbrack ∨ u = .rstrict ∨ u = .comma ∨ u = .semicolon ∨
@@ -662,7 +590,6 @@ theorem lexAux_render (esc : String → Bool) :
     simp only [List.cons_append] at h1 ⊢
     simp [h1, hrest]
 
-/-- The lexer reads back every list of well-formed tokens that `render` writes. -/
 theorem lex_render (esc : String → Bool) (ts : List Tok) (hwf : ∀ t ∈ ts, t.WF) :
     lex (render esc ts) = some ts := by
   apply lexAux_render esc ts hwf

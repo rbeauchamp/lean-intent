@@ -12,20 +12,14 @@ namespace LeanIntent.CodeAudit
 
 open Lean Meta LeanIntent.Cone
 
-/-! ## What a declaration depends on -/
-
-/-- A theorem's proof or an opaque constant's value, which `RefersTo` does not follow. -/
 @[expose] def hidden? : ConstantInfo → Option Expr
   | .thmInfo v => some v.value
   | .opaqueInfo v => some v.value
   | _ => none
 
-/-- `DependsOn ci c`: the declaration `ci` refers to `c` (`RefersTo`), or it is a theorem whose
-proof, or an opaque constant whose value, names `c` (`Mentions`). -/
 @[expose] def DependsOn (ci : ConstantInfo) (c : Name) : Prop :=
   RefersTo ci c ∨ ∃ v, hidden? ci = some v ∧ Mentions c v
 
-/-- The names `ci` depends on (`DependsOn`), each as often as it occurs. -/
 @[expose] def depRefs (ci : ConstantInfo) : List Name :=
   declRefs ci ++ match hidden? ci with
     | some v => exprRefs v []
@@ -35,11 +29,9 @@ theorem mem_depRefs (ci : ConstantInfo) (c : Name) : c ∈ depRefs ci ↔ Depend
   unfold depRefs DependsOn
   cases hidden? ci <;> simp [mem_declRefs, mem_exprRefs]
 
-/-- `Follows relevant ci c`: the declaration `ci`, whose name `relevant` admits, depends on `c`. -/
 @[expose] def Follows (relevant : Name → Bool) (ci : ConstantInfo) (c : Name) : Prop :=
   relevant ci.name = true ∧ DependsOn ci c
 
-/-- The names `ci` depends on when `relevant` admits its name, and none otherwise. -/
 @[expose] def follow (relevant : Name → Bool) (ci : ConstantInfo) : List Name :=
   if relevant ci.name then depRefs ci else []
 
@@ -48,14 +40,9 @@ theorem mem_follow (relevant : Name → Bool) (ci : ConstantInfo) (c : Name) :
   unfold follow Follows
   split <;> simp_all [mem_depRefs]
 
-/-! ## The procedure -/
-
-/-- `Applies ctor ci`: the statement of `ci`, or the value of a definition, theorem or opaque
-constant `ci`, names `ctor`. -/
 @[expose] def Applies (ctor : Name) (ci : ConstantInfo) : Prop :=
   Mentions ctor ci.type ∨ ∃ v, ci.value? (allowOpaque := true) = some v ∧ Mentions ctor v
 
-/-- Decides `Applies`. -/
 @[expose] def applies (ctor : Name) (ci : ConstantInfo) : Bool :=
   (exprRefs ci.type []).contains ctor ||
     match ci.value? (allowOpaque := true) with
@@ -80,10 +67,6 @@ structure Attestor where
     | none => false
   else (axiomsOf c).any fun a => !leanAxioms.contains a
 
-/-- The procedure: cone exclusion's closure from `first :: rest`, a scope that is never empty,
-following `Follows relevant`, refusing an unattested name (`unattested`), a name with no declaration
-and an axiom other than Lean's three (`leanAxioms`), with fuel `2 ^ 64`, more than the declarations
-that fit in a 64-bit address space. `none` when it accepts. -/
 @[expose] def decide (lookup : Name → Option ConstantInfo) (relevant : Name → Bool)
     (kinds : List Attestor) (axiomsOf : Name → Array Name) (first : Name) (rest : List Name) :
     Option Refusal :=
@@ -95,9 +78,6 @@ section Decides
 variable {lookup : Name → Option ConstantInfo} {relevant : Name → Bool} {kinds : List Attestor}
   {axiomsOf : Name → Array Name} {first : Name} {rest : List Name}
 
-/-- **What the procedure decides.** It accepts exactly when every name reached from `first :: rest`
-through `Follows relevant` is not unattested, is declared and is no axiom but Lean's three, and at
-most `2 ^ 64` names are reached. -/
 theorem decide_eq_none_iff :
     decide lookup relevant kinds axiomsOf first rest = none ↔
       (∀ c, Reaches lookup (Follows relevant) (first :: rest) c →
@@ -115,9 +95,6 @@ theorem verified_of_decide_eq_none
   have := hu k hk
   simp_all [(applies_eq_true k.ctor ci).mpr ha]
 
-/-- **An acceptance leaves no axiom but Lean's three behind a declaration it does not follow.**
-Every reached name that `relevant` does not admit rests, by `axiomsOf`, on Lean's three axioms
-alone. -/
 theorem axioms_mem_leanAxioms_of_decide_eq_none
     (h : decide lookup relevant kinds axiomsOf first rest = none) {c : Name}
     (hc : Reaches lookup (Follows relevant) (first :: rest) c) (hr : relevant c = false) :
@@ -128,7 +105,6 @@ theorem axioms_mem_leanAxioms_of_decide_eq_none
   have := Array.any_eq_false'.mp hu a ha
   simpa using this
 
-/-- **An acceptance leaves no axiom but Lean's three.** -/
 theorem mem_leanAxioms_of_decide_eq_none
     (h : decide lookup relevant kinds axiomsOf first rest = none) {c : Name}
     {ci : ConstantInfo} (hc : Reaches lookup (Follows relevant) (first :: rest) c)
@@ -140,10 +116,6 @@ theorem mem_leanAxioms_of_decide_eq_none
 
 end Decides
 
-/-! ## The audit in a Lean environment -/
-
-/-- The indices of the modules of `env` that are the module `m` or import it, directly or through
-other modules, as `env`'s header records each module's imports. -/
 @[expose] def importers (env : Environment) (m : ModuleIdx) : Std.HashSet Nat := Id.run do
   let mut importedBy : Std.HashMap Nat (Array Nat) := {}
   for h : i in [0:env.header.moduleData.size] do
@@ -163,8 +135,6 @@ other modules, as `env`'s header records each module's imports. -/
           work := next :: work
   return found
 
-/-- Whether the declaration `c` of `env` can hold an attestation: its module is one of `mods`, or it
-is a declaration of the module `env` is elaborating, which has no module index. -/
 @[expose] def relevantIn (env : Environment) (mods : Std.HashSet Nat) (c : Name) : Bool :=
   match env.getModuleIdxFor? c with
   | some i => mods.contains i.toNat
@@ -175,15 +145,12 @@ is a declaration of the module `env` is elaborating, which has no module index. 
     (c == .str stands "rec" || c == .str stands "casesOn" || c == .str stands "recOn" ||
       (Name.str stands "below").isPrefixOf c)
 
-/-- A monad holding an environment alone, in which Lean's `collectAxioms` runs without effects. -/
 abbrev EnvM := StateM Environment
 
 instance : MonadEnv EnvM where
   getEnv := get
   modifyEnv := modify
 
-/-- The axioms that Lean's `collectAxioms` reports the declaration `c` of `env` rests on: for an
-imported declaration, those Lean recorded when it exported the declaration's module. -/
 @[expose] def axiomsIn (env : Environment) (_h : Loaded env) (c : Name) : Array Name :=
   (collectAxioms c : EnvM (Array Name)).run' env
 
@@ -257,11 +224,6 @@ theorem isCarrier_eq (ci : ConstantInfo) :
       | none => simp [Bool.beq_eq_decide_eq, ← Bool.decide_or, or_assoc]
       | some k => cases k <;> simp [Bool.beq_eq_decide_eq, ← Bool.decide_or, or_assoc]
 
-/-- `AttestedType ctor e α`: `α` is the first argument of an application of `ctor` in `e`,
-abstracted over the binders enclosing that occurrence. Both `fun` and `∀` binders become `fun`
-binders of the type family; a `let` retains its type and value. Thus `Wrap α` under a binder
-`α : Type` is reported as `fun (α : Type) => Wrap α`, never dropped or left with a loose variable.
-Metadata on the constructor does not change which constant it names. -/
 @[expose] def AttestedType (ctor : Name) : Expr → Expr → Prop
   | .app f a, α =>
     (f.consumeMData.isConstOf ctor = true ∧ α = a) ∨
@@ -274,9 +236,6 @@ Metadata on the constructor does not change which constant it names. -/
   | .mdata _ b, α | .proj _ _ b, α => AttestedType ctor b α
   | .bvar _, _ | .fvar _, _ | .mvar _, _ | .sort _, _ | .const .., _ | .lit _, _ => False
 
-/-- Every type attested in `e`, with its enclosing binders (`AttestedType`). Rebuilding the
-binders preserves de Bruijn indices, including dependencies in binder types and let values.
-The structural recursion visits every constructor of Lean's expression type. -/
 @[expose] def attestedTypes (ctor : Name) : Expr → List Expr
   | .app f a =>
     (if f.consumeMData.isConstOf ctor then [a] else []) ++
@@ -289,8 +248,6 @@ The structural recursion visits every constructor of Lean's expression type. -/
   | .mdata _ b | .proj _ _ b => attestedTypes ctor b
   | .bvar _ | .fvar _ | .mvar _ | .sort _ | .const .. | .lit _ => []
 
-/-- The diagnostic traversal retains exactly the attested types with their binder contexts,
-for every expression, including occurrences under arbitrary nested binders. -/
 theorem mem_attestedTypes {ctor : Name} {α : Expr} :
     (e : Expr) → (α ∈ attestedTypes ctor e ↔ AttestedType ctor e α)
   | .app f a => by
@@ -307,8 +264,6 @@ theorem mem_attestedTypes {ctor : Name} {α : Expr} :
   | .bvar _ | .fvar _ | .mvar _ | .sort _ | .const .. | .lit _ => by
     simp [attestedTypes, AttestedType]
 
-/-- Render a diagnostic type with its binder types, whether it is a type family extracted from
-an attestation or an instance's full quantified declaration type. -/
 def diagnosticType (α : Expr) : MetaM String := asking <| withOptions
     (fun o => ((o.setBool `pp.funBinderTypes true).setBool `pp.piBinderTypes true).setBool
       `pp.letVarTypes true) do
@@ -438,8 +393,6 @@ def audit (first : Name) (rest : List Name) : MetaM Outcome := askingIn fun env 
     | _ => (r, none, [])
   return { first, rest, findings, refusal? }
 
-/-- What the audit reports: a line for each finding, and one for the refusal of `decide` unless it
-names a declaration a finding already names. Empty exactly when the audit accepts. -/
 @[expose] def report (o : Outcome) : Array String :=
   let lines := o.findings.map fun f =>
     let carried := if f.carriers.isEmpty then

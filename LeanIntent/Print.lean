@@ -3,46 +3,20 @@ module
 public import LeanIntent.Print.Printable
 public import LeanIntent.Print.Canon
 
-/-!
-# An audited printer for Lean terms
-
-`print` writes a Lean term as text in Lean's own syntax, and `parse` reads such text back. The
-printer is audited: `parse_print` proves that `parse` reads back from every text `print` writes the
-very term it printed, for every term, so two terms that print the same are equal
-(`print_injective`), and what a reader is shown determines the term. `print_isSome_iff` proves which
-terms it prints: exactly those `Printable` admits; it refuses every other term rather than printing
-it lossily.
-
-The grammar `parse` reads is the one `LeanIntent.Print.Term` describes, a closed subset of Lean's
-syntax for terms, written with the tokens of `LeanIntent.Print.Token`. That Lean's own parser and
-elaborator read the printed text as the same term is not a theorem here, since they are programs
-outside this library; `LeanIntent.Render` checks it for each term it shows, and refuses to show a
-term for which it fails.
-
-`print` takes two choices, neither of which changes what `parse` reads back: `bare`, the constants
-written without `@` when no binder in scope has their name, and `esc`, further name components to
-write escaped between `«` and `»`, such as those that are tokens of the reader's grammar.
--/
-
 public section
 
 namespace LeanIntent.Print
 
 open Lean (Name Level Expr BinderInfo)
 
-/-- `e` printed as text, or `none` when the printer refuses it. -/
 @[expose] def print (bare : Name → Bool) (esc : String → Bool) (e : Expr) : Option String :=
   (pr bare [] e .term).map fun ts => String.ofList (render esc ts)
 
-/-- The term a text is, by the printer's grammar, or `none` when it is not one. -/
 @[expose] def parse (s : String) : Option Expr := do
   let ts ← lex s.toList
   let (e, rest) ← psTerm (4 * ts.length + 3) [] ts
   if rest.isEmpty then some e else none
 
-/-! ## The printer writes only tokens the lexer reads back -/
-
-/-- Every token of a list can be written and read back. -/
 @[expose] def WFs (ts : List Tok) : Prop := ∀ t ∈ ts, t.WF
 
 theorem wfs_nil : WFs [] := fun _ h => nomatch h
@@ -134,7 +108,6 @@ theorem binderToks_wf (bi : BinderInfo) {n : Name} (hn : atomOk n = true) {t : L
   wfs_cons (by cases bi <;> trivial) (wfs_cons (wf_ident_of_atomOk hn)
     (wfs_cons trivial (wfs_append ht (wfs_cons (by cases bi <;> trivial) wfs_nil))))
 
-/-- Every token the printer writes can be written and read back. -/
 theorem pr_wf (bare : Name → Bool) (e : Expr) :
     ∀ (sc : List Name) (p : Prec) {ts : List Tok}, pr bare sc e p = some ts → WFs ts := by
   induction e with
@@ -229,9 +202,6 @@ theorem pr_wf (bare : Name → Bool) (e : Expr) :
     · simp at h
   | fvar | mvar | mdata | proj => intro sc p ts h; simp [pr] at h
 
-/-! ## The round trip -/
-
-/-- `parse` reads back from every text `print` writes the very term it printed. -/
 theorem parse_print {bare : Name → Bool} {esc : String → Bool} {e : Expr} {s : String}
     (h : print bare esc e = some s) : parse s = some e := by
   simp only [print, Option.map_eq_some_iff] at h
@@ -240,15 +210,12 @@ theorem parse_print {bare : Name → Bool} {esc : String → Bool} {e : Expr} {s
   rw [List.append_nil] at hT
   simp [parse, String.toList_ofList, lex_render esc ts (pr_wf bare e [] .term hts), hT]
 
-/-- Two terms that print as the same text are the same term, whatever the choices of either
-print. -/
 theorem print_injective {bare bare' : Name → Bool} {esc esc' : String → Bool} {e₁ e₂ : Expr}
     {s : String} (h₁ : print bare esc e₁ = some s) (h₂ : print bare' esc' e₂ = some s) :
     e₁ = e₂ := by
   have := (parse_print h₁).symm.trans (parse_print h₂)
   simpa using this
 
-/-- The printer prints exactly the closed terms `Printable` admits. -/
 theorem print_isSome_iff (bare : Name → Bool) (esc : String → Bool) (e : Expr) :
     (print bare esc e).isSome ↔ Printable [] e := by
   rw [print, Option.isSome_map]
