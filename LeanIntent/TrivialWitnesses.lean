@@ -3,104 +3,6 @@ module
 public import LeanIntent.Pairs
 public import LeanIntent.Clocks
 
-/-!
-# The trivial witnesses of a precondition-postcondition pair
-
-The pair obligation (`LeanIntent.OPair`) asks that each input a pair's precondition admits be served
-by some implementation, and it lets the implementation depend on the input. So a pair can meet it
-through witnesses that do none of the work the pair is meant to ask for: an implementation fixed to
-each input in advance, a table or a script of timed actions; one that ignores the input; and one
-that meets the postcondition only because the precondition admits nothing or the postcondition holds
-of every subject. This module gives each pair about a covered subject type a closed class of such
-*trivial witnesses*, fixed by the pair's subject type and never chosen per pair, and a statement of
-whether each meets the pair, so that one that does is reported rather than missed.
-
-## The class
-
-For a pair about subjects of a covered type `W` (`LeanIntent.Covered`), of code `a₁ → … → aₙ → b`,
-the class (`witnesses W`) holds:
-
-* `.vacuous`, any subject at all: it meets the pair exactly when every subject does
-  (`Witness.vacuous_meets_iff`), which is when the precondition admits no input or the postcondition
-  holds of every subject at each input the precondition admits (`Witness.vacuous_meets_iff_post`);
-* `.table`, at each input, the constant function at a value fixed for that input in advance: it
-  meets the pair exactly when some table from the pair's inputs to values of `b` does
-  (`Witness.table_meets_iff`), and so whenever one constant function, at any value of `b`, meets it
-  (`Witness.table_meets_of_met`). For a plain value, with no argument, every subject is a constant,
-  so `.table` meets every pair that some value serves at each input;
-* `.blind i`, for each argument position `i` of a function of at least two arguments, at each input
-  a subject chosen for that input that does not read its argument at `i` (`Sig.Fn.Ignores`), as a
-  script of timed actions reads its clock and not what it sees: it meets the pair exactly when such
-  a strategy does (`Witness.blind_meets_iff`). A function of one argument that does not read it is a
-  constant, which `.table` already holds;
-* `.fixed d`, for each member `d` of the degenerate class of `W` (`LeanIntent.degenerate`), one
-  subject `d` stands for at every input, so the same whatever the input: it meets the pair exactly
-  when a subject of `d` meets it (`Witness.fixed_meets_iff`);
-* `.timed k`, for each clock part `k` of the arguments the class reads as a clock (`Sig.clocks`,
-  `LeanIntent.Clocks`), at each input a script of timed actions on `k` chosen for that input: a
-  subject that reads only `k` (`Sig.Fn.ReadsOnly`), which is a function of `k`'s reading
-  (`ArgClock.readsOnly_iff_script`). It meets the pair exactly when such a strategy does
-  (`Witness.timed_meets_iff`), which is when a table of scripts, one fixed for each input in
-  advance, does (`Witness.timed_meets_iff_script`). A clock part is a component of an argument of
-  any covered type reached through its data: the argument itself, or a component of a side of a
-  pair or of a field of a value of a type whose values all have one shape, taken at the place the
-  value's denotation has (`Place.view`), so the same whether it is presented as a declared type, a
-  bare recursive code or a tree of its group: a structure, a recursive type whose values are all base
-  values, or a type of a recursive group that is not its root and has one constructor, whose fields
-  are its data and its children of the group, such as a rose tree's label and children; read as its
-  value or, as a number, as the length of a list, the size of an array or the length of a tree of a
-  type of the group shaped as a list, such as a history a project declares with `nil` and
-  `cons`. The class reads as a clock each clock part whose reading does not determine the
-  arguments, such as the length of an agent's history, the time field, of any type, of a structure
-  that also holds what it sees, or a rose tree's label; and, by the project's declaration, each that
-  is a value of type `LeanIntent.Clock α`, such as the only argument of a policy of type
-  `Clock Nat → Act`, every subject of which is a script.
-
-`Sig.mem_witnesses_iff` states the class apart from the list that computes it. `Pair.MetTrivially`
-states, over strategies from the pair's inputs to subjects and apart from the class, that some
-trivial witness meets the pair, and `metTrivially_iff` equates it with some member of the class
-meeting it.
-
-The class takes no pair and no other parameter, only `W` through its code, so it is the same for
-every pair about `W` whatever the pair's input type, and the verdicts on every pair about `W` are
-stated over that one class. The input type needs no code: the members chosen at each input quantify
-over it, and no member is built from it. A subject type that is not covered has no `Covered`
-instance, so Lean reports that it cannot synthesize one and no verdict about a pair of that type can
-be stated.
-
-## Verdicts
-
-`WitnessVerdicts q bs` states, for each member in order, whether it meets the pair `q`: `true` that
-it does, `false` that it does not, as goals the agent proves (`witnessVerdicts`), so each verdict is
-a theorem Lean's kernel checks. A list of the wrong length is refused (`witnessVerdicts_correct`),
-and a verdict of `false` on a member that meets the pair cannot be proved, so a meeting member is
-never passed. A type an argument of which holds a `LeanIntent.Clock` where no clock part reaches
-it, a declaration the class cannot read, has the one goal `False`, so no verdict about it can be
-proved (`not_witnessVerdicts_of_strayClock`). `reported W bs` lists the members the verdicts say meet
-the pair, which under proved verdicts are exactly those that do (`mem_reported`), and it is empty
-exactly when no trivial witness meets the pair (`reported_eq_nil_iff`).
-
-## What the class does not hold
-
-* A script of timed actions whose clock is a part whose reading determines the arguments, such as
-  the only argument of a policy of type `Nat → Act`, unless the part is a `LeanIntent.Clock α`: the
-  type alone cannot tell such a part from what the subject sees, and reads it as what it sees.
-* A script whose clock the clock parts do not reach: inside a list's elements, an option, a sum, a
-  declared type with several constructors, a type of a recursive group with several shapes of value
-  (base values and nodes, or nodes of several constructors), or what a function returns, a
-  recursive field that holds a function included; or a reading of a component other than its value,
-  a list's length, an array's size and the length of a tree shaped as a list. Such a clock is brought
-  into the class by stating the pair over a type that holds it where the clock parts reach.
-* A witness that does not read one part of an argument and reads the rest, such as one field of a
-  structure or one side of a pair, other than a whole argument (`.blind i`) or a script of timed
-  actions, which reads only its clock.
-* A strategy that offers different kinds of degenerate subject at different inputs, such as the
-  projection onto one argument at some inputs and onto another at others, unless every subject it
-  offers is a constant, does not read one same argument, or reads only one same clock.
-* A member of its own for a constant the degenerate class does not list, offered at every input:
-  `.table` reports such a constant (`Witness.table_meets_of_met`).
--/
-
 public section
 
 namespace LeanIntent
@@ -580,10 +482,6 @@ is `true`, and that it does not when `b` is `false`. -/
   | t :: ts, b :: bs => witnessGoal q t b :: witnessGoals q ts bs
   | _, _ => [False]
 
-/-- The trivial-witness check's goals: that `bs` are, in order, the verdicts on the trivial
-witnesses of `W` for the pair `q`; and the goal `False` when an argument of `W` holds a
-`LeanIntent.Clock` where no clock part reaches it (`Sig.strayClock`), a declaration of a clock the
-class cannot read, so that no verdict about such a type passes with the declaration ignored. -/
 @[expose] def witnessVerdicts (q : Pair W) (bs : List Bool) : List Prop :=
   if c.sig.strayClock then [False] else witnessGoals q (witnesses W) bs
 
@@ -627,15 +525,21 @@ theorem witnessVerdicts_correct (q : Pair W) (bs : List Bool) :
     exact goals_witnessGoals q _ bs
   · simp [Goals]
 
-/-- No verdict about a type an argument of which holds a `LeanIntent.Clock` where no clock part
-reaches it can be proved: the declaration of a clock that the class cannot read is refused, not
-ignored. -/
 theorem not_witnessVerdicts_of_strayClock (h : c.sig.strayClock = true) (q : Pair W)
     (bs : List Bool) : ¬ WitnessVerdicts q bs := by
   rw [witnessVerdicts_correct]
   rintro ⟨hs, _⟩
   rw [h] at hs
   exact Bool.noConfusion hs
+
+theorem timed_mem_of_namedClock {q : Pair W} {bs : List Bool} (h : WitnessVerdicts q bs)
+    (i : Nat) (hi : i < c.sig.args.length) (o : Ty.NamedClock c.sig.args[i]) :
+    ∃ (p : Σ p, Place.Path (.code c.sig.args[i]) p) (r : Place.ArgPath p.1 c.sig.args),
+      o.path? = some p ∧ r.From p.2 i ∧ ArgClock.InClock ⟨p.1, r, .value⟩ ∧
+        Witness.timed ⟨p.1, r, .value⟩ ∈ witnesses W := by
+  obtain ⟨p, r, hp, hr, hk⟩ :=
+    Sig.read_of_strayClock_eq_false ((witnessVerdicts_correct q bs).mp h).1 i hi o
+  exact ⟨p, r, hp, hr, hk, Witness.timed_mem (.inr hk)⟩
 
 /-- Proved verdicts are the verdicts, in order, on the members of the class. -/
 theorem goals_of_witnessVerdicts {q : Pair W} {bs : List Bool} (h : WitnessVerdicts q bs) :
