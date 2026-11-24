@@ -23,8 +23,10 @@ def standsDecl : MetaM Name := asking do
     | throwError "LeanIntent.CoveredMachine: `Machine.Stands` has no constructor `decl`"
   return c
 
-@[expose] def refusal? (indVal : InductiveVal) : Option String :=
-  if indVal.isUnsafe then some "it is unsafe"
+@[expose] def refusal? (env : Environment) (_h : Loaded env) (indVal : InductiveVal) :
+    Option String :=
+  if !isStructure (env.setExporting false) indVal.name then some "it is not a structure"
+  else if indVal.isUnsafe then some "it is unsafe"
   else if indVal.numIndices != 0 then some "it is an inductive family with indices"
   else if indVal.ctors.length != 1 then some "it does not have exactly one constructor"
   else if indVal.isRec || indVal.numNested != 0 then some "it is recursive"
@@ -98,7 +100,8 @@ def mkIso (indVal : InductiveVal) (us : List Level) (as : Array Expr) (r : Roles
   let toInv ← withLocalDeclD `x machine fun x => do mkLambdaFVars #[x] (← mkEqRefl x)
   return mkAppN (mkConst ``MachineIso.mk) #[W, I, O, toFn, invFn, invTo, toInv]
 
-def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String × Option String) := asking do
+def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String × Option String) :=
+    askingIn fun env loaded => do
   let .thmInfo v := ci | return (none, some "it is not a theorem")
   if (Cone.exprRefs v.type []).contains ctor then
     return (none, some "its statement names the constructor")
@@ -113,9 +116,9 @@ def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String ×
     let fail (why : String) : MetaM (Option String × Option String) := return (some ty, some why)
     let α' ← whnf α
     let .const T us := α'.getAppFn | fail "the type is not a structure applied to its parameters"
-    let some (.inductInfo indVal) := (← getEnv).find? T
+    let some (.inductInfo indVal) := env.find? T
       | fail "the type is not a structure applied to its parameters"
-    if let some why := refusal? indVal then
+    if let some why := refusal? env loaded indVal then
       return ← fail s!"the handler does not cover `{T}`: {why}"
     unless us.all (·.normalize == Level.zero) do
       return ← fail "the type is not taken at universe level zero"
@@ -150,9 +153,9 @@ def checkAttestation (ctor : Name) (ci : ConstantInfo) : MetaM (Option String ×
       return ← fail s!"its isomorphism does not take `{ctorName}` applied to its fields to the machine of their roles"
     return (some ty, none)
 
-def mkCoveredMachine (declName : Name) : CommandElabM Unit := asking do
+def mkCoveredMachine (declName : Name) : CommandElabM Unit := askingIn fun env loaded => do
   let indVal ← getConstInfoInduct declName
-  if let some why := refusal? indVal then
+  if let some why := refusal? env loaded indVal then
     throwError "LeanIntent.CoveredMachine: `{.ofConstName declName}` is not covered: {why}"
   let instName := (← getCurrNamespace) ++
     (← liftTermElabM <| Deriving.mkInstName ``CoveredMachine declName)
@@ -174,17 +177,17 @@ def mkCoveredMachine (declName : Name) : CommandElabM Unit := asking do
           throwError "LeanIntent.CoveredMachine: `{.ofConstName declName}` is not covered: it does not live in `Type 1`"
         let roles ← readRoles indVal us xs
         let W := mkAppN (mkConst declName us) xs
-        if (← synthInstance? (mkApp (mkConst ``CoveredMachine) W)).isSome then
-          throwError "LeanIntent.CoveredMachine: `{.ofConstName declName}` is already covered as a machine"
         let I := roles.input
         let O := roles.output
-        Declared.addFun isoName xs (mkApp3 (mkConst ``MachineIso) W I O)
-          (← mkIso indVal us xs roles) false
-        let isoApp := mkAppN (mkConst isoName) xs
-        Declared.addFun standsName xs (mkApp4 (mkConst ``Machine.Stands) W I O isoApp)
-          (mkApp4 (mkConst ctor) W I O isoApp) true
         withLocalDecl `instIn .instImplicit (mkApp (mkConst ``HasCode) I) fun iI =>
           withLocalDecl `instOut .instImplicit (mkApp (mkConst ``HasCode) O) fun iO => do
+            if (← synthInstance? (mkApp (mkConst ``CoveredMachine) W)).isSome then
+              throwError "LeanIntent.CoveredMachine: `{.ofConstName declName}` is already covered as a machine"
+            Declared.addFun isoName xs (mkApp3 (mkConst ``MachineIso) W I O)
+              (← mkIso indVal us xs roles) false
+            let isoApp := mkAppN (mkConst isoName) xs
+            Declared.addFun standsName xs (mkApp4 (mkConst ``Machine.Stands) W I O isoApp)
+              (mkApp4 (mkConst ctor) W I O isoApp) true
             Declared.addFun instName (xs ++ #[iI, iO]) (mkApp (mkConst ``CoveredMachine) W)
               (mkAppN (mkConst ``CoveredMachine.mk)
                 #[W, I, O, iI, iO, isoApp, mkAppN (mkConst standsName) xs]) false

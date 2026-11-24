@@ -272,6 +272,46 @@ theorem mem_truthsTrue {α : Type _} (P : α → Prop) (y : α) : (xs : List α)
         · exact absurd hp hv
         · exact ⟨hy, hp⟩
 
+theorem truthsTrue_sublist {α : Type _} : (xs : List α) → (bs : List Bool) →
+    List.Sublist (truthsTrue xs bs) xs
+  | [], _ => by simp [truthsTrue]
+  | _ :: _, [] => by simp [truthsTrue]
+  | x :: xs, true :: bs => List.Sublist.cons_cons x (truthsTrue_sublist xs bs)
+  | x :: xs, false :: bs => List.Sublist.cons x (truthsTrue_sublist xs bs)
+
+theorem truthsTrue_map {α β : Type _} (f : α → β) : (xs : List α) → (bs : List Bool) →
+    (truthsTrue xs bs).map f = truthsTrue (xs.map f) bs
+  | [], _ => by simp [truthsTrue]
+  | _ :: _, [] => by simp [truthsTrue]
+  | x :: xs, true :: bs => by simp [truthsTrue, truthsTrue_map f xs bs]
+  | _ :: xs, false :: bs => by simp [truthsTrue, truthsTrue_map f xs bs]
+
+theorem map_getElem_finRange {α : Type _} (xs : List α) :
+    (List.finRange xs.length).map (fun i => xs[i]) = xs := by
+  apply List.ext_getElem
+  · simp
+  · intro i h1 h2
+    simp
+
+theorem map_getElem_truthsTrue_finRange {α : Type _} (xs : List α) (bs : List Bool) :
+    (truthsTrue (List.finRange xs.length) bs).map (fun i => xs[i]) = truthsTrue xs bs := by
+  rw [truthsTrue_map, map_getElem_finRange]
+
+theorem find?_eq_some_of_nodup_map {α β : Type _} [BEq β] [LawfulBEq β]
+    {l : List α} {key : α → β} (hn : (l.map key).Nodup) {x : α} (hx : x ∈ l) :
+    l.find? (fun y => key y == key x) = some x := by
+  induction l with
+  | nil => cases hx
+  | cons a l ih =>
+    simp only [List.map_cons, List.nodup_cons, List.mem_map] at hn
+    rcases List.mem_cons.mp hx with rfl | hx
+    · simp
+    · have hne : (key a == key x) = false := by
+        apply beq_false_of_ne
+        intro e
+        exact hn.1 ⟨x, hx, e.symm⟩
+      simp [hne, ih hn.2 hx]
+
 @[expose] def machineDegenerate (W : Type 1) [CoveredMachine W] : List (Degenerate (sig W)) :=
   degenerate (Behaviour W)
 
@@ -331,38 +371,115 @@ theorem not_meets_of_machineMetBy_eq_nil {r : IntentRecord W} {bs : List Bool}
     (hd : d ∈ machineDegenerate W) {w : W} (hw : d.IsMachine w) : ¬ r.Meets w :=
   fun hm => (machineMetBy_eq_nil_iff h).mp he d hd ⟨w, hw, hm⟩
 
-@[expose] def Degenerate.machineName {σ : Sig} : Degenerate σ → String
+@[expose] def Degenerate.machineLabel {σ : Sig} : Degenerate σ → String
   | .const _ => "the record allows a machine that gives one output whatever its inputs"
   | .proj _ => "the record allows a machine that gives as its output what it was given: its current \
-      input, its history of earlier inputs or a part of either, or, where its output is a function, \
-      that function's argument"
+      input, its history of earlier inputs, or, where its output is a function, that function's \
+      argument; what a function among them returns; or a part of any of these"
   | .others => "the record allows a machine that gives one output whatever its inputs, at some \
       output other than the empty one"
 
-@[expose] def Degenerate.machineConsequence (d : Degenerate (sig W)) : Consequence W :=
-  ⟨d.machineName, .possibility, d.IsMachine⟩
+@[expose] def Degenerate.machineNameAt {σ : Sig} (i : Nat) (d : Degenerate σ) : String :=
+  String.ofList
+    ('#' :: ((Codec.nat 0 ':' (by decide)).print (i + 1) ++ (' ' :: d.machineLabel.toList)))
 
-theorem Degenerate.machineDeclined_keptBy_iff (d : Degenerate (sig W)) (r : IntentRecord W) :
-    (Answer.mk d.machineConsequence .declined).KeptBy r ↔ ¬ d.MeetsMachine r := by
-  simp only [Answer.KeptBy, Degenerate.machineConsequence, Degenerate.MeetsMachine]
+theorem Degenerate.machineNameAt_inj {σ : Sig} {i j : Nat} {d₁ d₂ : Degenerate σ}
+    (h : d₁.machineNameAt i = d₂.machineNameAt j) : i = j := by
+  have hl := congrArg String.toList h
+  simp only [machineNameAt, String.toList_ofList, List.cons.injEq, true_and] at hl
+  have hp := congrArg (Codec.nat 0 ':' (by decide)).parse hl
+  rw [(Codec.nat 0 ':' (by decide)).parse_print, (Codec.nat 0 ':' (by decide)).parse_print] at hp
+  exact Nat.succ.inj (congrArg Prod.fst (Option.some.inj hp))
+
+@[expose] def machineConsequence (W : Type 1) [CoveredMachine W]
+    (i : Fin (machineDegenerate W).length) : Consequence W :=
+  ⟨(machineDegenerate W)[i].machineNameAt i.val, .possibility, (machineDegenerate W)[i].IsMachine⟩
+
+theorem machineConsequence_name_inj {i j : Fin (machineDegenerate W).length}
+    (h : (machineConsequence W i).name = (machineConsequence W j).name) : i = j :=
+  Fin.ext (Degenerate.machineNameAt_inj h)
+
+theorem machineConsequence_eq_of_name_eq {i j : Fin (machineDegenerate W).length}
+    (h : (machineConsequence W i).name = (machineConsequence W j).name) :
+    machineConsequence W i = machineConsequence W j :=
+  congrArg (machineConsequence W) (machineConsequence_name_inj h)
+
+theorem machineConsequence_name_ne_restatement (i : Fin (machineDegenerate W).length) :
+    (machineConsequence W i).name ≠ "the record's plain restatement" := by
+  intro h
+  have hl := congrArg (fun s => s.toList.head?) h
+  have hr : ("the record's plain restatement").toList.head? = some 't' := by decide
+  rw [hr] at hl
+  simp only [machineConsequence, Degenerate.machineNameAt, String.toList_ofList,
+    List.head?_cons] at hl
+  exact absurd (Option.some.inj hl) (by decide)
+
+theorem machineDeclined_keptBy_iff (i : Fin (machineDegenerate W).length) (r : IntentRecord W) :
+    (Answer.mk (machineConsequence W i) .declined).KeptBy r ↔
+      ¬ (machineDegenerate W)[i].MeetsMachine r := by
+  simp only [Answer.KeptBy, machineConsequence, Degenerate.MeetsMachine]
   exact ⟨fun h ⟨w, hi, hm⟩ => h w hm hi, fun h w hm hi => h ⟨w, hi, hm⟩⟩
 
 @[expose] def machinePossibilities {r : IntentRecord W} {bs : List Bool} (_ : MachineVerdicts r bs) :
     List (Consequence W) :=
-  (machineMetBy W bs).map Degenerate.machineConsequence
+  (truthsTrue (List.finRange (machineDegenerate W).length) bs).map (machineConsequence W)
 
 theorem mem_machinePossibilities {r : IntentRecord W} {bs : List Bool} (h : MachineVerdicts r bs)
     (x : Consequence W) :
     x ∈ machinePossibilities h ↔
-      ∃ d ∈ machineDegenerate W, d.MeetsMachine r ∧ x = d.machineConsequence := by
-  simp only [machinePossibilities, List.mem_map, mem_machineMetBy h]
-  exact ⟨fun ⟨d, ⟨hd, hm⟩, e⟩ => ⟨d, hd, hm, e.symm⟩, fun ⟨d, hd, hm, e⟩ => ⟨d, ⟨hd, hm⟩, e.symm⟩⟩
+      ∃ i : Fin (machineDegenerate W).length,
+        (machineDegenerate W)[i].MeetsMachine r ∧ x = machineConsequence W i := by
+  have hg : Goals (truthGoals (fun i : Fin (machineDegenerate W).length =>
+      (machineDegenerate W)[i].MeetsMachine r) (List.finRange (machineDegenerate W).length) bs) := by
+    rw [goals_truthGoals]
+    have hm := (goals_truthGoals (fun d : Degenerate (sig W) => d.MeetsMachine r)
+      (machineDegenerate W) bs).mp h
+    refine ⟨by simpa using hm.1, fun k hb hk => ?_⟩
+    have hk' : k < (machineDegenerate W).length := by simpa using hk
+    simpa [List.getElem_finRange] using hm.2 k hb hk'
+  simp only [machinePossibilities, List.mem_map, mem_truthsTrue _ _ _ bs hg, List.mem_finRange,
+    true_and]
+  exact ⟨fun ⟨i, hm, e⟩ => ⟨i, hm, e.symm⟩, fun ⟨i, hm, e⟩ => ⟨i, hm, e.symm⟩⟩
 
 theorem machinePossibilities_holdsOf {r : IntentRecord W} {bs : List Bool}
     (h : MachineVerdicts r bs) (x : Consequence W) (hx : x ∈ machinePossibilities h) :
     x.kind = .possibility ∧ x.HoldsOf r := by
-  obtain ⟨d, _, ⟨w, hi, hm⟩, rfl⟩ := (mem_machinePossibilities h x).mp hx
+  obtain ⟨i, ⟨w, hi, hm⟩, rfl⟩ := (mem_machinePossibilities h x).mp hx
   exact ⟨rfl, w, hm, hi⟩
+
+theorem map_holds_machinePossibilities {r : IntentRecord W} {bs : List Bool}
+    (h : MachineVerdicts r bs) :
+    (machinePossibilities h).map Consequence.holds =
+      (machineMetBy W bs).map Degenerate.IsMachine := by
+  simp only [machinePossibilities, machineMetBy, List.map_map]
+  have e : Consequence.holds ∘ machineConsequence W =
+      Degenerate.IsMachine ∘ fun i : Fin (machineDegenerate W).length => (machineDegenerate W)[i] := rfl
+  rw [e, ← List.map_map, map_getElem_truthsTrue_finRange]
+
+theorem machinePossibilities_names_nodup {r : IntentRecord W} {bs : List Bool}
+    (h : MachineVerdicts r bs) :
+    ((machinePossibilities h).map Consequence.name).Nodup := by
+  simp only [machinePossibilities, List.map_map]
+  exact List.Pairwise.map (Consequence.name ∘ machineConsequence W)
+    (fun _ _ hne heq => hne (machineConsequence_name_inj heq))
+    (List.Pairwise.sublist (truthsTrue_sublist _ bs) (List.nodup_finRange _))
+
+theorem find?_machinePossibilities {r : IntentRecord W} {bs : List Bool}
+    (h : MachineVerdicts r bs) {x : Consequence W} (hx : x ∈ machinePossibilities h) :
+    (machinePossibilities h).find? (·.name == x.name) = some x :=
+  find?_eq_some_of_nodup_map (machinePossibilities_names_nodup h) hx
+
+theorem find?_map_machinePossibilities {α : Type _} {r : IntentRecord W} {bs : List Bool}
+    (h : MachineVerdicts r bs) (f : Consequence W → α) (name : α → String)
+    (hn : ∀ c, name (f c) = c.name) {x : Consequence W} (hx : x ∈ machinePossibilities h) :
+    ((machinePossibilities h).map f).find? (fun a => name a == x.name) = some (f x) := by
+  have hnd : (((machinePossibilities h).map f).map name).Nodup := by
+    rw [List.map_map]
+    have e : name ∘ f = Consequence.name := funext hn
+    rw [e]
+    exact machinePossibilities_names_nodup h
+  have hx' : f x ∈ (machinePossibilities h).map f := List.mem_map.mpr ⟨x, hx, rfl⟩
+  simpa [hn] using find?_eq_some_of_nodup_map hnd hx'
 
 end MachineVerdicts
 

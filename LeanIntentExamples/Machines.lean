@@ -254,7 +254,7 @@ theorem stayHome_verdicts : MachineVerdicts stayHome [true, false] :=
 
 theorem stayHome_possibilities :
     machinePossibilities stayHome_verdicts =
-      [Degenerate.machineConsequence (Degenerate.const false : Degenerate (sig Agent))] :=
+      [machineConsequence Agent ⟨0, by decide⟩] :=
   rfl
 
 theorem machineOf_machine (x : Machine Position Bool) : machineOf x = x := rfl
