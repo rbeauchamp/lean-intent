@@ -75,32 +75,16 @@ def readRoles (indVal : InductiveVal) (us : List Level) (as : Array Expr) : Meta
       return { memory := 0, initial := 2, step := 1, input := i, output := o }
     fail "neither of its last two fields has the memory's type, the initial memory"
 
-def mkIso (indVal : InductiveVal) (us : List Level) (as : Array Expr) (r : Roles) :
-    MetaM Expr := asking do
+def mkIso (indVal : InductiveVal) (us : List Level) (as : Array Expr) (r : Roles)
+    (memProj initProj stepProj : Name) : MetaM Expr := asking do
   let some ctorName := indVal.ctors.head?
     | throwError "LeanIntent.CoveredMachine: `{.ofConstName indVal.name}` has no constructor"
-  let env := (← getEnv).setExporting false
-  let some sinfo := getStructureInfo? env indVal.name
-    | throwError "LeanIntent.CoveredMachine: `{.ofConstName indVal.name}` has no structure info"
-  let projOf (k : Nat) : MetaM Name := do
-    let some fieldName := sinfo.fieldNames[k]?
-      | throwError "LeanIntent.CoveredMachine: `{.ofConstName indVal.name}` has no field at index {k}"
-    let some fi := getFieldInfo? env indVal.name fieldName
-      | throwError "LeanIntent.CoveredMachine: `{.ofConstName indVal.name}` has no field info for `{fieldName}`"
-    let some pinfo := env.getProjectionFnInfo? fi.projFn
-      | throwError "LeanIntent.CoveredMachine: `{.ofConstName fi.projFn}` is not a registered projection function for `{.ofConstName indVal.name}`"
-    unless pinfo.ctorName == ctorName && pinfo.numParams == indVal.numParams && pinfo.i == k do
-      throwError "LeanIntent.CoveredMachine: `{.ofConstName fi.projFn}` does not project field {k} of `{.ofConstName ctorName}`"
-    return fi.projFn
-  let memProj ← projOf r.memory
-  let initProj ← projOf r.initial
-  let stepProj ← projOf r.step
   let W := mkAppN (mkConst indVal.name us) as
   let I := r.input
   let O := r.output
   let machine := mkApp2 (mkConst ``Machine) I O
   let toFn ← withLocalDeclD `w W fun w => do
-    let get (projFn : Name) := mkAppN (mkConst projFn us) (as.push w)
+    let get (projFn : Name) := mkAppN (mkConst projFn) (as.push w)
     mkLambdaFVars #[w] (mkApp5 (mkConst ``Machine.mk) I O (get memProj) (get initProj)
       (get stepProj))
   let invFn ← withLocalDeclD `x machine fun x => do
@@ -176,6 +160,9 @@ def mkCoveredMachine (declName : Name) : CommandElabM Unit := askingIn fun env l
   let instName := (← getCurrNamespace) ++
     (← liftTermElabM <| Deriving.mkInstName ``CoveredMachine declName)
   let act ← Declared.writtenName
+  let memName := act (instName ++ `memory)
+  let initName := act (instName ++ `initial)
+  let stepName := act (instName ++ `step)
   let isoName := act (instName ++ `iso)
   let standsName := act (instName ++ `stands)
   let instName := act instName
@@ -199,8 +186,19 @@ def mkCoveredMachine (declName : Name) : CommandElabM Unit := askingIn fun env l
           withLocalDecl `instOut .instImplicit (mkApp (mkConst ``HasCode) O) fun iO => do
             if (← synthInstance? (mkApp (mkConst ``CoveredMachine) W)).isSome then
               throwError "LeanIntent.CoveredMachine: `{.ofConstName declName}` is already covered as a machine"
+            withLocalDeclD `w W fun w => do
+              let memApp := mkAppN (mkConst memName) (xs.push w)
+              Declared.addFun memName (xs.push w) (mkSort Level.one)
+                (Expr.proj declName roles.memory w) false
+              Declared.addFun initName (xs.push w) memApp
+                (Expr.proj declName roles.initial w) false
+              let stepTy := Expr.forallE .anonymous memApp
+                (Expr.forallE .anonymous I
+                  (mkApp2 (mkConst ``Prod [Level.zero, Level.zero]) O memApp) .default) .default
+              Declared.addFun stepName (xs.push w) stepTy
+                (Expr.proj declName roles.step w) false
             Declared.addFun isoName xs (mkApp3 (mkConst ``MachineIso) W I O)
-              (← mkIso indVal us xs roles) false
+              (← mkIso indVal us xs roles memName initName stepName) false
             let isoApp := mkAppN (mkConst isoName) xs
             Declared.addFun standsName xs (mkApp4 (mkConst ``Machine.Stands) W I O isoApp)
               (mkApp4 (mkConst ctor) W I O isoApp) true
