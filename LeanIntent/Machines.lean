@@ -404,16 +404,6 @@ theorem machineConsequence_eq_of_name_eq {i j : Fin (machineDegenerate W).length
     machineConsequence W i = machineConsequence W j :=
   congrArg (machineConsequence W) (machineConsequence_name_inj h)
 
-theorem machineConsequence_name_ne_restatement (i : Fin (machineDegenerate W).length) :
-    (machineConsequence W i).name ≠ "the record's plain restatement" := by
-  intro h
-  have hl := congrArg (fun s => s.toList.head?) h
-  have hr : ("the record's plain restatement").toList.head? = some 't' := by decide
-  rw [hr] at hl
-  simp only [machineConsequence, Degenerate.machineNameAt, String.toList_ofList,
-    List.head?_cons] at hl
-  exact absurd (Option.some.inj hl) (by decide)
-
 theorem machineDeclined_keptBy_iff (i : Fin (machineDegenerate W).length) (r : IntentRecord W) :
     (Answer.mk (machineConsequence W i) .declined).KeptBy r ↔
       ¬ (machineDegenerate W)[i].MeetsMachine r := by
