@@ -90,54 +90,65 @@
 # enclosing share, and acquire their own share when invoked outside `heavy_steps.test` (by hand, in
 # `build_outputs.command`, or during a post-Test listing check in Push/CI).
 #
-# Time. Each check also runs under no-mistakes' own declared wall-clock limits (replacing
-# `gtimeout`, issue #111), so that a check that stalls fails and releases its share of the memory
-# budget instead of holding the share and the run until someone stops it, as the code audit did for
-# more than an hour on a larger module on 2026-11-05 (issue 59). Every invocation of
-# `lean --run tools/check.lean` runs through `no-mistakes admit --timeout 20m` (1200 seconds), and
-# every invocation of `lean --run tools/check.lean --tests` runs through
-# `no-mistakes admit --timeout 13m` (780 seconds). Waiting in the heavy-work admission queue never
-# counts against `admit --timeout` or a declared `heavy_steps` timeout: the clock starts only once
-# the budget admits the work. Once admitted, `no-mistakes admit` runs the command in its own
-# isolated process group (`Setpgid`). When `--timeout` expires, `admit` terminates that whole
-# process group (`SIGTERM`, then `SIGKILL` after a 3-second cleanup grace window if any member
-# remains), drains the group, closes its share descriptors, prints
-# `admit: command exceeded wall-clock limit <limit>` on stderr, and always exits `124` (even when
-# `SIGKILL` was required or when the command caught `SIGTERM` and exited `0`). `tools/check.lean`
-# itself exits only with `0`, `1`, or by a signal (and `admit` exits `125` on usage or admission
-# refusal, `126` if unexecutable, `127` if not found, and `130` or `128+signal` on interruption),
-# so exit status `124` comes from the wall-clock limit alone. When `admit` itself receives a
-# termination signal (such as run cancellation), it forwards `SIGTERM` to the child process group
-# with a 1.5-second grace before `SIGKILL` so the group is reaped cleanly; a process that detaches
-# into a new session (for example via `setsid`) while keeping the inherited share descriptors keeps
-# the share until it ends.
+# Time. Each check configured in this file also runs under no-mistakes' own declared wall-clock
+# limits (replacing `gtimeout`, issue #111), so that a check that stalls fails and releases its
+# share of the memory budget instead of holding the share and the run until someone stops it, as
+# the code audit did for more than an hour on a larger module on 2026-11-05 (issue 59). In the
+# commands configured in this file, every invocation of `lean --run tools/check.lean` runs through
+# `no-mistakes admit --timeout 20m` (1200 seconds), and every invocation of
+# `lean --run tools/check.lean --tests` runs through `no-mistakes admit --timeout 13m` (780
+# seconds); GitHub Actions (`.github/workflows/check.yml`) still runs `lean --run tools/check.lean`
+# and `lean --run tools/check.lean --tests` directly without `no-mistakes admit`. Waiting in the
+# heavy-work admission queue never counts against `admit --timeout` or a declared `heavy_steps`
+# timeout: the clock starts only once the budget admits the work. Once admitted,
+# `no-mistakes admit` runs the command in its own isolated process group (`Setpgid`). When
+# `--timeout` expires, `admit` terminates that whole process group (`SIGTERM`, then `SIGKILL` after
+# a 3-second cleanup grace window if any member remains), drains the group, closes its share
+# descriptors, prints `admit: command exceeded wall-clock limit <limit>` on stderr, and always
+# exits `124` (even when `SIGKILL` was required or when the command caught `SIGTERM` and exited
+# `0`). `tools/check.lean` itself exits only with `0`, `1`, or by a signal (and `admit` exits `125`
+# on usage or admission refusal, `126` if unexecutable, `127` if not found, and `130` or
+# `128+signal` on interruption), so exit status `124` comes from the wall-clock limit alone. When
+# `admit` itself receives a termination signal (such as run cancellation), it forwards `SIGTERM` to
+# the child process group with a 1.5-second grace before `SIGKILL` so the group is reaped cleanly;
+# a process that detaches into a new session (for example via `setsid`) while keeping the inherited
+# share descriptors keeps the share until it ends.
 #
 # At the pipeline step level, `heavy_steps.test` declares `timeout: 34m` (covering `commands.test`'s
 # sequential `20m` check + `13m` listing plus `1m` for shell overhead between them, above the 30m
 # `heavy_work.default_timeout`), so the daemon acquires the `11GiB` share before starting the
 # `commands.test` timer (excluding admission queue wait) while each inner `admit --timeout` bounds
 # its own check to the tighter of `20m` or `13m` and the enclosing share's remaining wall-clock
-# time. Likewise, `test.tests_as_evidence.list_timeout: 27m` bounds the shared two-sided
-# test-listing comparison (`2 * 13m` plus `1m` for candidate-tree staging and the two Git
-# clones/checkouts), acquiring `heavy_steps.test`'s share before the clock starts during the Test
-# step while each side's `admit --timeout 13m` bounds that side to the tighter of `13m` and the
-# remaining `27m` budget; outside `heavy_steps.test` (such as a Push or CI repair re-listing a
-# changed tree), the `27m` comparison clock starts before the two standalone `admit` calls, so both
-# sides' `6GiB` admission queue waits count against the `27m` outer budget. Finally,
+# time. Likewise, `test.tests_as_evidence.list_timeout: 27m` sets the shared command deadline
+# checked across the two-sided test-listing comparison (`2 * 13m` plus `1m` headroom), covering
+# different work by route: during Verify (the Test step), the daemon acquires `heavy_steps.test`'s
+# `11GiB` share before starting the `27m` clock (overriding `heavy_steps.test`'s `34m` timeout for
+# that comparison and excluding admission queue wait), so the `27m` clock covers staging the
+# candidate tree, the base and head scratch checkouts, and both `list_command` runs while each
+# side's nested `admit --timeout 13m` bounds that side to the tighter of `13m` and the remaining
+# `27m` budget; during Push or CI repair (outside `heavy_steps.test`), no-mistakes compares an
+# existing commit against its base and does not stage a candidate tree, and the `27m` comparison
+# clock starts before the two standalone `admit` calls, so both sides' `6GiB` admission queue
+# waits, the base and head scratch checkouts, and both `list_command` runs count against the `27m`
+# outer budget. That `27m` command deadline is not a hard bound on the comparison's return time:
+# after the final listing's deadline check, no-mistakes parses the output, removes the scratch
+# checkout, and compares identifiers without another deadline check. Finally,
 # `build_outputs.timeout: 30m` bounds the unadmitted seed build (`20m` for `check.lean` inside
 # `admit --timeout 20m` plus `10m` headroom for checkout, admission queue wait, and copying
 # `.lake/cache` into the store, excluding detached post-expiry cleanup) independently of
-# `heavy_work.default_timeout`. When a step-level wall-clock limit (`heavy_steps.test.timeout` or
-# `test.tests_as_evidence.list_timeout`) fires, no-mistakes terminates the command's process group
-# (`SIGTERM`, then `SIGKILL` after 3 seconds), releases any held share, and fails the step directly
-# with a message naming the limit (`command exceeded wall-clock limit <limit>`, or refuses
-# publication at Push / revalidates a CI repair). When `build_outputs.timeout` expires, any running
-# seed command's process group is terminated; if expiry is observed before the publish rename,
-# no-mistakes abandons publication (refusing to publish timed-out output) without failing any run
-# and then attempts detached cleanup outside the `30m` timed context. Refusing to publish timed-out
-# output is distinct from successfully deleting its staging: the store retains staging when process
-# absence cannot be established or removal fails, and retained staging blocks subsequent builds and
-# publication until reaped.
+# `heavy_work.default_timeout`. When `heavy_steps.test.timeout` expires during `commands.test`, or
+# when a deadline check during a `test.tests_as_evidence` comparison observes `list_timeout`
+# expiry, no-mistakes terminates any running command's process group (`SIGTERM`, then `SIGKILL`
+# after 3 seconds), releases any held share, and returns the timeout failure directly (reporting
+# `command exceeded wall-clock limit <limit>` when a command times out—failing the Test step
+# directly, refusing publication at Push, or sending a timed-out CI repair back to Review for
+# revalidation). When `build_outputs.timeout` expires, any running seed command's process group is
+# terminated; if expiry is observed before the publish rename, no-mistakes abandons publication
+# (refusing to publish timed-out output) without failing any run and then attempts detached cleanup
+# outside the `30m` timed context. Refusing to publish timed-out output is distinct from
+# successfully deleting its staging: the store retains staging when process absence cannot be
+# established or removal fails, and retained staging blocks subsequent builds and publication until
+# reaped.
 #
 # Each inner `admit --timeout` (`20m` for `check.lean`, `13m` for `--tests`) is at least three
 # times the longest duration measured for its check, rounded up to a whole minute, giving an
@@ -145,19 +156,20 @@
 # and the library's growth until the next measurement. That three-times margin applies only to the
 # inner `admit` clock and can still be cut short by an enclosing outer deadline whenever work
 # outside the inner command exhausts the outer headroom: in Push or CI repair test-listing
-# comparisons (outside `heavy_steps.test`), the shared `27m` (`1620s`) `list_timeout` clock starts
-# before the two standalone `admit` calls, so both sides' admission waits plus candidate-tree
-# staging and Git/shell overhead count against it (two listings at `3 * 250.56 = 751.68` seconds
-# each take `1503.36` seconds, leaving `116.64` seconds—under two minutes—for both queue waits and
-# Git/shell overhead); in `build_outputs` seed builds, `build_outputs.timeout` (`30m`) starts before
-# `admit --timeout 20m`, so checkout, admission queue wait, and storing `.lake/cache` count against
-# `30m` and can cut the seed short if they exceed the remaining headroom (`10m` when `check.lean`
-# uses its full `20m` allowance); and inside `heavy_steps.test` (where admission queue wait is
-# excluded from both the `34m` `commands.test` timer and the `27m` `list_timeout` timer), each
-# nested `admit` is bounded by the tighter of its own `--timeout` and the enclosing deadline's
-# remaining time, so overhead exceeding the remaining headroom (`1m` when the inner checks use
-# their full allowances: shell overhead in `commands.test`, or candidate-tree staging and Git
-# checkouts in a Test-step listing comparison) can also cut the inner allowance short. Measured on
+# comparisons (outside `heavy_steps.test`, comparing an existing commit without staging a candidate
+# tree), the shared `27m` (`1620s`) `list_timeout` clock starts before the two standalone `admit`
+# calls, so both sides' admission waits and scratch-checkout/Git/shell overhead count against it
+# (two listings at `3 * 250.56 = 751.68` seconds each take `1503.36` seconds, leaving `116.64`
+# seconds—under two minutes—for both queue waits and checkout/Git/shell overhead); in
+# `build_outputs` seed builds, `build_outputs.timeout` (`30m`) starts before `admit --timeout 20m`,
+# so checkout, admission queue wait, and storing `.lake/cache` count against `30m` and can cut the
+# seed short if they exceed the remaining headroom (`10m` when `check.lean` uses its full `20m`
+# allowance); and inside `heavy_steps.test` (where admission queue wait is excluded from both the
+# `34m` `commands.test` timer and the `27m` `list_timeout` timer), each nested `admit` is bounded
+# by the tighter of its own `--timeout` and the enclosing deadline's remaining time, so overhead
+# exceeding the remaining headroom (`1m` when the inner checks use their full allowances: shell
+# overhead in `commands.test`, or candidate-tree staging and scratch checkouts in a Verify-step
+# listing comparison) can also cut the inner allowance short. Measured on
 # 2026-11-20 under Lean v4.36.0 on an Apple M5 Max (18 cores, 128 GiB), through `no-mistakes admit`,
 # beside other admitted work at a load average of 3.4
 # to 7.5, each in a clean tree with an empty artifact cache: the check took 289 seconds as the seed
