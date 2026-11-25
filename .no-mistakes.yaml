@@ -127,12 +127,15 @@
 # candidate tree, the base and head scratch checkouts, and both `list_command` runs while each
 # side's nested `admit --timeout 13m` bounds that side to the tighter of `13m` and the remaining
 # `27m` budget; during Push or CI repair (outside `heavy_steps.test`), no-mistakes compares an
-# existing commit against its base and does not stage a candidate tree, and the `27m` comparison
-# clock starts before the two standalone `admit` calls, so both sides' `6GiB` admission queue
-# waits, the base and head scratch checkouts, and both `list_command` runs count against the `27m`
-# outer budget. That `27m` command deadline is not a hard bound on the comparison's return time:
-# after the final listing's deadline check, no-mistakes parses the output, removes the scratch
-# checkout, and compares identifiers without another deadline check. Finally,
+# existing commit without staging a candidate tree—when Push needs a two-sided listing, it compares
+# against the tree last checked by Verify if a usable receipt exists and otherwise resolves the
+# branch base, while CI repair compares against the previously published head (which need not be
+# the repair's branch base)—and the `27m` comparison clock starts before the two standalone `admit`
+# calls, so both sides' `6GiB` admission queue waits, both sides' scratch checkouts, and both
+# `list_command` runs count against the `27m` outer budget. That `27m` command deadline is not a
+# hard bound on the comparison's return time: after the final listing's deadline check,
+# no-mistakes parses the output, removes the scratch checkout, and compares identifiers without
+# another deadline check. Finally,
 # `build_outputs.timeout: 30m` bounds the unadmitted seed build (`20m` for `check.lean` inside
 # `admit --timeout 20m` plus `10m` headroom for checkout, admission queue wait, and copying
 # `.lake/cache` into the store, excluding detached post-expiry cleanup) independently of
