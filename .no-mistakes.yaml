@@ -84,20 +84,53 @@
 # (3,402,288 KiB) after the build. The check's 11 GiB bound is kept (leaving > 41% headroom above
 # 6.414 GiB physical footprint and > 25% above 8.230 GiB summed RSS), and `--tests` stays at 6 GiB
 # (leaving > 60% headroom above 2.378 GiB physical footprint and > 45% above 3.245 GiB summed RSS).
+# `heavy_steps.test` below declares the 11 GiB bound for the Test step so the daemon admits its
+# commands (`commands.test` and its `test.tests_as_evidence` listing comparison) before starting
+# their wall-clock timers; nested `no-mistakes admit` calls inside those commands run within that
+# enclosing share, and acquire their own share when invoked outside `heavy_steps.test` (by hand, in
+# `build_outputs.command`, or during a post-Test listing check in Push/CI).
 #
-# Time. Each check also runs under a wall-clock limit, so that a check that stalls fails and gives
-# back its share of the memory budget instead of holding the share and the run until someone stops
-# it, as the code audit did for more than an hour on a larger module on 2026-11-05 (issue 59). GNU
-# coreutils' timeout runs the check, under Homebrew's name gtimeout (macOS's own /usr/bin/timeout,
-# from Apple's shell_cmds, is another program, which this paragraph does not describe), inside
-# `no-mistakes admit`, so its clock starts only once the budget admits the check. At the limit it
-# sends TERM to the Lean process it started, and KILL 30 seconds later if that process still runs;
-# the command then prints the limit and exits with timeout's status, 124, or 137 after a KILL. The
-# checks themselves exit only with 0 or 1 or by a signal, so 124 comes from the limit alone.
-# `--foreground` keeps timeout in the process group no-mistakes runs the command in, so cancelling
-# a run still reaches the check; timeout then signals only the check's own process, and
-# no-mistakes ends what is left of the group, the processes the check started, once the command
-# exits. The share is released when the last process holding it ends.
+# Time. Each check also runs under no-mistakes' own declared wall-clock limits (replacing
+# `gtimeout`, issue #111), so that a check that stalls fails and releases its share of the memory
+# budget instead of holding the share and the run until someone stops it, as the code audit did for
+# more than an hour on a larger module on 2026-11-05 (issue 59). Every invocation of
+# `lean --run tools/check.lean` runs through `no-mistakes admit --timeout 20m` (1200 seconds), and
+# every invocation of `lean --run tools/check.lean --tests` runs through
+# `no-mistakes admit --timeout 13m` (780 seconds). Waiting in the heavy-work admission queue never
+# counts against `admit --timeout` or a declared `heavy_steps` timeout: the clock starts only once
+# the budget admits the work. Once admitted, `no-mistakes admit` runs the command in its own
+# isolated process group (`Setpgid`). When `--timeout` expires, `admit` terminates that whole
+# process group (`SIGTERM`, then `SIGKILL` after a 3-second cleanup grace window if any member
+# remains), drains the group, closes its share descriptors, prints
+# `admit: command exceeded wall-clock limit <limit>` on stderr, and always exits `124` (even when
+# `SIGKILL` was required or when the command caught `SIGTERM` and exited `0`). `tools/check.lean`
+# itself exits only with `0`, `1`, or by a signal (and `admit` exits `125` on usage or admission
+# refusal, `126` if unexecutable, `127` if not found, and `130` or `128+signal` on interruption),
+# so exit status `124` comes from the wall-clock limit alone. When `admit` itself receives a
+# termination signal (such as run cancellation), it forwards `SIGTERM` to the child process group
+# with a 1.5-second grace before `SIGKILL` so the group is reaped cleanly; a process that detaches
+# into a new session (for example via `setsid`) while keeping the inherited share descriptors keeps
+# the share until it ends.
+#
+# At the pipeline step level, `heavy_steps.test` declares `timeout: 34m` (covering `commands.test`'s
+# sequential `20m` check + `13m` listing plus `1m` for shell overhead between them, above the 30m
+# `heavy_work.default_timeout`), so the daemon acquires the `11GiB` share before starting the
+# `commands.test` timer (excluding admission queue wait) while each inner `admit --timeout` bounds
+# its own check to `20m` or `13m` inside that enclosing share. Likewise,
+# `test.tests_as_evidence.list_timeout: 27m` bounds the shared two-sided test-listing comparison
+# (`2 * 13m` plus `1m` for candidate-tree staging and the two Git clones/checkouts), acquiring
+# `heavy_steps.test`'s share before the clock starts during the Test step while each side's
+# `admit --timeout 13m` bounds that side directly (outside `heavy_steps.test`, such as a Push or CI
+# repair re-listing a changed tree, each side's `admit` claims its own `6GiB` share inside the `27m`
+# outer budget). Finally, `build_outputs.timeout: 30m` bounds the unadmitted seed build (`20m` for
+# `check.lean` inside `admit --timeout 20m` plus `10m` headroom for checkout, admission queue wait,
+# and copying `.lake/cache` into the store) independently of `heavy_work.default_timeout`. When a
+# step-level wall-clock limit (`heavy_steps.test.timeout` or `test.tests_as_evidence.list_timeout`)
+# fires, no-mistakes terminates the command's process group (`SIGTERM`, then `SIGKILL` after 3
+# seconds), releases its share, and fails the step directly with a message naming the limit
+# (`command exceeded wall-clock limit <limit>`, or refuses publication at Push / revalidates a CI
+# repair); when `build_outputs.timeout` fires, the seed build's process group is terminated and its
+# staging discarded without failing any run.
 #
 # Each limit is at least three times the longest duration measured for its check, rounded up to a
 # whole minute, so a run up to three times as slow as the slowest measured is never cut off; the
@@ -183,32 +216,29 @@ test:
   # which runs tools/check.lean first.
   tests_as_evidence:
     policy: forbid
+    list_timeout: 27m
     list_command: |
       set -e
       lean_files=$(git ls-files -- '*.lean')
       if [ -n "$lean_files" ]; then
-        status=0
-        no-mistakes admit --memory 6GiB --limit "none; measured peak 2.378 GiB phys (3.245 GiB RSS)" -- gtimeout --foreground --verbose --kill-after=30 780 lean --run tools/check.lean --tests || status=$?
-        case $status in
-          124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 780 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
-          137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 780 seconds and did not stop within 30 seconds of TERM" >&2 ;;
-        esac
-        exit "$status"
+        no-mistakes admit --memory 6GiB --limit "none; measured peak 2.378 GiB phys (3.245 GiB RSS)" --timeout 13m -- lean --run tools/check.lean --tests
       fi
 
 # The merge gate. On 2026-10-28 the owner temporarily set `no_ci: true` so local no-mistakes
 # validation acted as the sole merge gate without PR-triggered CI. On 2026-11-21 the owner enabled
 # PR-triggered GitHub Actions CI in `.github/workflows/check.yml` (`pull_request` and `push` to
 # `main`) and superseded `no_ci: true`; `no_ci: true` is therefore removed so pull requests wait for
-# CI alongside local `commands.test` validation. no-mistakes honours `commands`, `no_ci` and
-# `build_outputs` only from the copy of this file on the default branch.
+# CI alongside local `commands.test` validation. no-mistakes honours `commands`, `no_ci`,
+# `heavy_steps` and `build_outputs` only from the copy of this file on the default branch.
 
 # The Test step runs this command first, in the run's own checkout of the change it validates, and
 # parks when it exits with any status but 0. It runs every check the repository has, never a part
 # chosen by what a change seems to touch: tools/check.lean, and then its listing of tests, which
 # must print nothing. The command ends with the status of the first of the two that fails, cannot
-# start (`admit` exits 126 or 127), is killed or reaches its wall-clock limit (124, from the
-# paragraph on time above), a status other than 0 in every case. Each also fails rather than
+# start (`admit` exits 125 on usage or admission refusal, 126 when unexecutable, or 127 when not
+# found), is killed or reaches its wall-clock limit (124 from `admit --timeout`, or a direct step
+# timeout failure if `heavy_steps.test.timeout` expires, from the paragraph on time above), a status
+# other than 0 in every case. Each also fails rather than
 # passing when it finds nothing to check: the checks refuse a library with no Lean file or no
 # declaration, and the listing a project with no Lean file. The two run one after the other, so
 # the command's peak is the larger of the two peaks the paragraph on memory above gives, the
@@ -231,25 +261,24 @@ commands:
     set -eu
     export LAKE_CACHE_DIR="$PWD/.lake/cache"
     unset LAKE_ARTIFACT_CACHE
-    status=0
-    no-mistakes admit --memory 11GiB --limit "none; measured peak 6.414 GiB phys (8.230 GiB RSS)" -- gtimeout --foreground --verbose --kill-after=30 1200 lean --run tools/check.lean || status=$?
-    case $status in
-      124) echo "lean --run tools/check.lean reached its wall-clock limit of 1200 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
-      137) echo "lean --run tools/check.lean was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 1200 seconds and did not stop within 30 seconds of TERM" >&2 ;;
-    esac
-    [ "$status" -eq 0 ] || exit "$status"
+    no-mistakes admit --memory 11GiB --limit "none; measured peak 6.414 GiB phys (8.230 GiB RSS)" --timeout 20m -- lean --run tools/check.lean
     mkdir -p .lake
-    no-mistakes admit --memory 6GiB --limit "none; measured peak 2.378 GiB phys (3.245 GiB RSS)" -- gtimeout --foreground --verbose --kill-after=30 780 lean --run tools/check.lean --tests > .lake/tests-listing || status=$?
-    case $status in
-      124) echo "lean --run tools/check.lean --tests reached its wall-clock limit of 780 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
-      137) echo "lean --run tools/check.lean --tests was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 780 seconds and did not stop within 30 seconds of TERM" >&2 ;;
-    esac
-    [ "$status" -eq 0 ] || exit "$status"
+    no-mistakes admit --memory 6GiB --limit "none; measured peak 2.378 GiB phys (3.245 GiB RSS)" --timeout 13m -- lean --run tools/check.lean --tests > .lake/tests-listing
     if [ -s .lake/tests-listing ]; then
       echo "The listing of tests is not empty; lean-intent establishes its claims by proof:"
       cat .lake/tests-listing
       exit 1
     fi
+
+# Heavy-work admission for the Test step (and Push/CI stale-check re-runs of `commands.test`).
+# Acquires the 11 GiB share before starting the 34m step wall-clock timer (20m check + 13m listing +
+# 1m shell overhead), so admission queue wait never counts against the timer and nested `admit`
+# invocations run within this share under their tighter 20m and 13m limits.
+heavy_steps:
+  test:
+    memory: 11GiB
+    limit: none; measured peak 6.414 GiB phys (8.230 GiB RSS)
+    timeout: 34m
 
 # The outputs a run starts from: Lake's artifact cache (together with the SHA-256-keyed
 # `no-comments` binary staged under `.lake/cache/no-comments/<sha256>/no-comments`, which misses
@@ -263,24 +292,20 @@ commands:
 # no warning. Each run gets a private copy, used only while lean-toolchain is unchanged, and Lake
 # takes an output from it only for a module whose input hash (its source, its imports' outputs,
 # its options and the toolchain) is the one that output was built from. no-mistakes does not admit
-# this build against the machine's heavy-work budget, so the command admits itself, and it runs
-# the checks under the limit the paragraph on time above derives. LAKE_RESTORE_ARTIFACTS has Lake
+# this build against the machine's heavy-work budget, so the command admits itself with
+# `--timeout 20m` (1200 seconds, starting once admitted), and `timeout: 30m` below bounds the full
+# seed operation (checkout, admission queue wait, check, and storing `.lake/cache`) independently of
+# `heavy_work.default_timeout`. LAKE_RESTORE_ARTIFACTS has Lake
 # put any output it takes from the cache in .lake/build too, where the axiom audit reads it; the
 # Test command needs no such setting, because Lake restores every output it takes from a cache it
 # only reads.
 build_outputs:
-  command: |
-    status=0
-    no-mistakes admit --memory 11GiB --limit "none; measured peak 6.414 GiB phys (8.230 GiB RSS)" -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true gtimeout --foreground --verbose --kill-after=30 1200 lean --run tools/check.lean || status=$?
-    case $status in
-      124) echo "lean --run tools/check.lean reached its wall-clock limit of 1200 seconds and was stopped (.no-mistakes.yaml says how the limit was derived)" >&2 ;;
-      137) echo "lean --run tools/check.lean was killed; if timeout reports above that it sent KILL, it reached its wall-clock limit of 1200 seconds and did not stop within 30 seconds of TERM" >&2 ;;
-    esac
-    exit "$status"
+  command: no-mistakes admit --memory 11GiB --limit "none; measured peak 6.414 GiB phys (8.230 GiB RSS)" --timeout 20m -- env LAKE_CACHE_DIR="$PWD/.lake/cache" LAKE_ARTIFACT_CACHE=true LAKE_RESTORE_ARTIFACTS=true lean --run tools/check.lean
   directories:
     - .lake/cache
   toolchain_files:
     - lean-toolchain
+  timeout: 30m
 
 # Pull request descriptions. A change's reasons live in its pull request description, which
 # becomes its squash commit: its Mission accounting, its decisions, its accepted risks and, for a

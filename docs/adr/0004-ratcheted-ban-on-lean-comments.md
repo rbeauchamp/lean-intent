@@ -23,7 +23,7 @@ Warm thanks to [Matt Pocock](https://github.com/mattpocock) for the excellent or
   - plain block comments (`/- ... -/`),
   - declaration docstrings (`/-- ... -/`), and
   - module docstrings (`/-! ... -/`).
-- Non-Lean configuration and workflow files (`.no-mistakes.yaml`, `.github/workflows/check.yml`, `.github/workflows/release.yml`, `lakefile.toml`, `tools/no-comments.pin`, `.no-comments.json`) and Markdown documentation (`README.md`, `docs/`, `.github/pull_request_template.md`) lie outside `*.lean` scope (`.no-comments.json` sets `"exclude": []` so zero tracked `.lean` files are excluded): `.no-mistakes.yaml`'s timeout messages and `AGENTS.md` cite its config comments, and `check.yml` and `release.yml` document commit-pinned GitHub Action versions.
+- Non-Lean configuration and workflow files (`.no-mistakes.yaml`, `.github/workflows/check.yml`, `.github/workflows/release.yml`, `lakefile.toml`, `tools/no-comments.pin`, `.no-comments.json`) and Markdown documentation (`README.md`, `docs/`, `.github/pull_request_template.md`) lie outside `*.lean` scope (`.no-comments.json` sets `"exclude": []` so zero tracked `.lean` files are excluded): `AGENTS.md`, `CONTRIBUTING.md`, and ADRs cite `.no-mistakes.yaml`'s config comments, and `check.yml` and `release.yml` document commit-pinned GitHub Action versions.
 
 ### Owning-system enforcement (`NO-COMMENTS` via `rbeauchamp/lean-no-comments` `v0.3.1`)
 
