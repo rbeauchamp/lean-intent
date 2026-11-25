@@ -116,27 +116,50 @@
 # sequential `20m` check + `13m` listing plus `1m` for shell overhead between them, above the 30m
 # `heavy_work.default_timeout`), so the daemon acquires the `11GiB` share before starting the
 # `commands.test` timer (excluding admission queue wait) while each inner `admit --timeout` bounds
-# its own check to `20m` or `13m` inside that enclosing share. Likewise,
-# `test.tests_as_evidence.list_timeout: 27m` bounds the shared two-sided test-listing comparison
-# (`2 * 13m` plus `1m` for candidate-tree staging and the two Git clones/checkouts), acquiring
-# `heavy_steps.test`'s share before the clock starts during the Test step while each side's
-# `admit --timeout 13m` bounds that side directly (outside `heavy_steps.test`, such as a Push or CI
-# repair re-listing a changed tree, each side's `admit` claims its own `6GiB` share inside the `27m`
-# outer budget). Finally, `build_outputs.timeout: 30m` bounds the unadmitted seed build (`20m` for
-# `check.lean` inside `admit --timeout 20m` plus `10m` headroom for checkout, admission queue wait,
-# and copying `.lake/cache` into the store) independently of `heavy_work.default_timeout`. When a
-# step-level wall-clock limit (`heavy_steps.test.timeout` or `test.tests_as_evidence.list_timeout`)
-# fires, no-mistakes terminates the command's process group (`SIGTERM`, then `SIGKILL` after 3
-# seconds), releases its share, and fails the step directly with a message naming the limit
-# (`command exceeded wall-clock limit <limit>`, or refuses publication at Push / revalidates a CI
-# repair); when `build_outputs.timeout` fires, the seed build's process group is terminated and its
-# staging discarded without failing any run.
+# its own check to the tighter of `20m` or `13m` and the enclosing share's remaining wall-clock
+# time. Likewise, `test.tests_as_evidence.list_timeout: 27m` bounds the shared two-sided
+# test-listing comparison (`2 * 13m` plus `1m` for candidate-tree staging and the two Git
+# clones/checkouts), acquiring `heavy_steps.test`'s share before the clock starts during the Test
+# step while each side's `admit --timeout 13m` bounds that side to the tighter of `13m` and the
+# remaining `27m` budget; outside `heavy_steps.test` (such as a Push or CI repair re-listing a
+# changed tree), the `27m` comparison clock starts before the two standalone `admit` calls, so both
+# sides' `6GiB` admission queue waits count against the `27m` outer budget. Finally,
+# `build_outputs.timeout: 30m` bounds the unadmitted seed build (`20m` for `check.lean` inside
+# `admit --timeout 20m` plus `10m` headroom for checkout, admission queue wait, and copying
+# `.lake/cache` into the store, excluding detached post-expiry cleanup) independently of
+# `heavy_work.default_timeout`. When a step-level wall-clock limit (`heavy_steps.test.timeout` or
+# `test.tests_as_evidence.list_timeout`) fires, no-mistakes terminates the command's process group
+# (`SIGTERM`, then `SIGKILL` after 3 seconds), releases any held share, and fails the step directly
+# with a message naming the limit (`command exceeded wall-clock limit <limit>`, or refuses
+# publication at Push / revalidates a CI repair). When `build_outputs.timeout` expires, any running
+# seed command's process group is terminated; if expiry is observed before the publish rename,
+# no-mistakes abandons publication (refusing to publish timed-out output) without failing any run
+# and then attempts detached cleanup outside the `30m` timed context. Refusing to publish timed-out
+# output is distinct from successfully deleting its staging: the store retains staging when process
+# absence cannot be established or removal fails, and retained staging blocks subsequent builds and
+# publication until reaped.
 #
-# Each limit is at least three times the longest duration measured for its check, rounded up to a
-# whole minute, so a run up to three times as slow as the slowest measured is never cut off; the
-# margin covers runs slowed by heavier load than the measurements saw and the library's growth
-# until the next measurement. Measured on 2026-11-20 under Lean v4.36.0 on an Apple M5 Max (18
-# cores, 128 GiB), through `no-mistakes admit`, beside other admitted work at a load average of 3.4
+# Each inner `admit --timeout` (`20m` for `check.lean`, `13m` for `--tests`) is at least three
+# times the longest duration measured for its check, rounded up to a whole minute, giving an
+# inner-command allowance once admitted for runs slowed by heavier load than the measurements saw
+# and the library's growth until the next measurement. That three-times margin applies only to the
+# inner `admit` clock and can still be cut short by an enclosing outer deadline whenever work
+# outside the inner command exhausts the outer headroom: in Push or CI repair test-listing
+# comparisons (outside `heavy_steps.test`), the shared `27m` (`1620s`) `list_timeout` clock starts
+# before the two standalone `admit` calls, so both sides' admission waits plus candidate-tree
+# staging and Git/shell overhead count against it (two listings at `3 * 250.56 = 751.68` seconds
+# each take `1503.36` seconds, leaving `116.64` seconds—under two minutes—for both queue waits and
+# Git/shell overhead); in `build_outputs` seed builds, `build_outputs.timeout` (`30m`) starts before
+# `admit --timeout 20m`, so checkout, admission queue wait, and storing `.lake/cache` count against
+# `30m` and can cut the seed short if they exceed the remaining headroom (`10m` when `check.lean`
+# uses its full `20m` allowance); and inside `heavy_steps.test` (where admission queue wait is
+# excluded from both the `34m` `commands.test` timer and the `27m` `list_timeout` timer), each
+# nested `admit` is bounded by the tighter of its own `--timeout` and the enclosing deadline's
+# remaining time, so overhead exceeding the remaining headroom (`1m` when the inner checks use
+# their full allowances: shell overhead in `commands.test`, or candidate-tree staging and Git
+# checkouts in a Test-step listing comparison) can also cut the inner allowance short. Measured on
+# 2026-11-20 under Lean v4.36.0 on an Apple M5 Max (18 cores, 128 GiB), through `no-mistakes admit`,
+# beside other admitted work at a load average of 3.4
 # to 7.5, each in a clean tree with an empty artifact cache: the check took 289 seconds as the seed
 # build runs it, 294 seconds as the Test command runs it, and 286 seconds when run again in a built
 # tree (so most of it is still the audits rather than the build; 3 * 294 = 882 seconds, below the
@@ -273,7 +296,8 @@ commands:
 # Heavy-work admission for the Test step (and Push/CI stale-check re-runs of `commands.test`).
 # Acquires the 11 GiB share before starting the 34m step wall-clock timer (20m check + 13m listing +
 # 1m shell overhead), so admission queue wait never counts against the timer and nested `admit`
-# invocations run within this share under their tighter 20m and 13m limits.
+# invocations run within this share under the tighter of their own 20m/13m limits and the share's
+# remaining wall-clock time.
 heavy_steps:
   test:
     memory: 11GiB
@@ -293,9 +317,10 @@ heavy_steps:
 # takes an output from it only for a module whose input hash (its source, its imports' outputs,
 # its options and the toolchain) is the one that output was built from. no-mistakes does not admit
 # this build against the machine's heavy-work budget, so the command admits itself with
-# `--timeout 20m` (1200 seconds, starting once admitted), and `timeout: 30m` below bounds the full
-# seed operation (checkout, admission queue wait, check, and storing `.lake/cache`) independently of
-# `heavy_work.default_timeout`. LAKE_RESTORE_ARTIFACTS has Lake
+# `--timeout 20m` (1200 seconds, starting once admitted), and `timeout: 30m` below bounds the timed
+# seed operation (checkout, admission queue wait, check, and storing `.lake/cache`, excluding
+# detached post-expiry cleanup) independently of `heavy_work.default_timeout`.
+# LAKE_RESTORE_ARTIFACTS has Lake
 # put any output it takes from the cache in .lake/build too, where the axiom audit reads it; the
 # Test command needs no such setting, because Lake restores every output it takes from a cache it
 # only reads.
