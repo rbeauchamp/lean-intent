@@ -1,6 +1,6 @@
 # Instructions for agents
 
-These instructions are for any coding agent that works on lean-intent itself, under any harness; `CLAUDE.md` points here. They are not for an agent working in a project that depends on lean-intent. The method the library serves is in [`skills/`](skills/), and the library is described from [`README.md`](README.md). This file says only how a change to this repository is validated and landed when the session that makes it, or lands it, runs in the cloud, and one rule for every commit on `main`, on co-author lines, under Landing a pull request.
+These instructions are for any coding agent that works on lean-intent itself, under any harness. They are not for an agent working in a project that depends on lean-intent. The method the library serves is in [`skills/`](skills/), and the library is described from [`README.md`](README.md). This file says only how a change to this repository is validated and landed when the session that makes it, or lands it, runs in the cloud, and one rule for every commit on `main`, on co-author lines, under Landing a pull request.
 
 Each part says whose it is: what the owner said, what the repository's own files say, or what the session that wrote this file did and how it reads the owner's words. The owner has confirmed none of the last kind as a rule.
 

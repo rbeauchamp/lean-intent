@@ -23,7 +23,7 @@ open LeanIntent LeanIntentExamples.Sorting
 
 @[expose] def attributed : List (Attributed (List Int → List Int)) :=
   [⟨emptyForEvery, .owner (.of "richard")⟩,
-   ⟨rulesOutShort, .onBehalf (.of "claude") (.of "assistant")
+   ⟨rulesOutShort, .onBehalf (.of "agent") (.of "assistant")
      "A rearrangement of [2, 1, 1] has three elements, which the owner's restatement requires."⟩]
 
 theorem sorting_keeps : Keeps sorting answers := by
