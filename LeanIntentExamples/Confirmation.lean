@@ -13,7 +13,7 @@ open LeanIntent LeanIntent.Confirmation LeanIntentExamples.Sorting
   "The owner confirmed that the output is an ascending rearrangement of the input, which leaves \
     one such function."
 
-@[expose] def assistantAnswerer : Answerer := .onBehalf (.of "claude") (.of "assistant") reason
+@[expose] def assistantAnswerer : Answerer := .onBehalf (.of "agent") (.of "assistant") reason
 
 @[expose] def sortingAnswers : List (Attributed (List Int → List Int)) :=
   [⟨⟨⟨"is Lean's merge sort", .entailment, fun f => f = sort⟩, .confirmed⟩, assistantAnswerer⟩]
@@ -40,7 +40,7 @@ open LeanIntent LeanIntent.Confirmation LeanIntentExamples.Sorting
 
 @[expose] def assistant : Statement := mk (.of "assistant") <| .delegation
   { delegator := ⟨.of "richard", none⟩
-    delegate := ⟨.of "claude", []⟩
+    delegate := ⟨.of "agent", []⟩
     scope := ⟨.only ["sorting"], true, true, true⟩
     mayPassOn := false }
 
@@ -54,7 +54,7 @@ open LeanIntent LeanIntent.Confirmation LeanIntentExamples.Sorting
 
 @[expose] def isSort : Question := ⟨"is Lean's merge sort", .entailment, "fun f => f = sort"⟩
 
-@[expose] def underDelegation : Authority := ⟨.of "claude", some (.of "assistant")⟩
+@[expose] def underDelegation : Authority := ⟨.of "agent", some (.of "assistant")⟩
 
 @[expose] def restatementBody (author : Authority) (revision : String := "revision 2")
     (verdict : Verdict := .confirmed) : Statement.Body :=
@@ -113,7 +113,7 @@ theorem emptyOwners_refused :
   decide +kernel
 
 theorem twoOwners_refused :
-    findings (mk (.of "more") (.owners ⟨[⟨.of "claude", []⟩], none⟩) :: log) [current] =
+    findings (mk (.of "more") (.owners ⟨[⟨.of "agent", []⟩], none⟩) :: log) [current] =
       [.severalOwners [.of "more", .of "owners"]] := by
   decide +kernel
 
@@ -146,7 +146,7 @@ theorem secondOwner_confirmed :
       log.erase owners) [current] :=
   findings_eq_nil_iff.mp (by decide +kernel)
 
-@[expose] def selfConfirmed : Statement := mk (.of "self") (restatementBody ⟨.of "claude", none⟩)
+@[expose] def selfConfirmed : Statement := mk (.of "self") (restatementBody ⟨.of "agent", none⟩)
 
 theorem selfConfirmed_refused :
     findings [owners, assistant, selfConfirmed, sortAnswer] [current] =
@@ -245,7 +245,7 @@ theorem derivedRetracted_confirmed :
 @[expose] def origin : Statement := mk (.of "origin") <| .origin
   { author := ⟨.of "richard", none⟩
     record := "sorting"
-    writer := "claude"
+    writer := "agent"
     hadRead := "The implementation of the sort, and the change that added it."
     words := "The function sorts its input, and keeps its elements." }
 
@@ -271,7 +271,7 @@ theorem origin_read :
     origins project declared (log ++ [origin]) =
       [(origin, { author := ⟨.of "richard", none⟩
                   record := "sorting"
-                  writer := "claude"
+                  writer := "agent"
                   hadRead := "The implementation of the sort, and the change that added it."
                   words := "The function sorts its input, and keeps its elements." }, true)] := by
   decide +kernel

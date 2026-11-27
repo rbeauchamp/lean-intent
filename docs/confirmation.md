@@ -36,7 +36,7 @@ A raw string holds a statement's text unchanged, since a printed text has no con
 
 Once a deliverable's implementation exists, the project records it in a value of its own, which names the deliverable and which this check does not read, so recording or replacing it changes no confirmation ([the implementation of a deliverable](implementation.md)).
 
-The theorems a deliverable relies on, its obligations and the comparison with a second model's blind formalization among them, are named in values of their own (`LeanIntent.Required`), which this check does not read either; [the required-theorems check](required-theorems.md), run beside this one on the same build, refuses, once it reads such a value, the project's own or another package's, a deliverable no such value names, such a value or a named theorem declared in a module the project's build does not list, and a deliverable declared in such a module, whose kept answers are then checked by nothing.
+The theorems a deliverable relies on, its obligations and the comparison with an independent blind formalization among them, are named in values of their own (`LeanIntent.Required`), which this check does not read either; [the required-theorems check](required-theorems.md), run beside this one on the same build, refuses, once it reads such a value, the project's own or another package's, a deliverable no such value names, such a value or a named theorem declared in a module the project's build does not list, and a deliverable declared in such a module, whose kept answers are then checked by nothing.
 
 `Read.answerStatement` writes the text of a new answer to one question of a deliverable—either `.restatement` for the revision's plain restatement or `.consequence name` for a uniquely named shown consequence (refusing an absent name or an ambiguous name shared by two or more shown consequences)—holding the two texts it must hold:
 
@@ -48,7 +48,7 @@ run_meta do
     (.consequence "is Lean's merge sort") (.of "my-project") (.of "merge-sort-answer")
     ⟨2026, 10, 30, by decide⟩
     (.words "This follows from the restatement confirmed on 2026-10-29.")
-    ⟨.of "claude", some (.of "assistant")⟩ .confirmed)
+    ⟨.of "agent", some (.of "assistant")⟩ .confirmed)
 ```
 
 ## What it decides

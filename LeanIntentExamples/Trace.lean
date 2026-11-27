@@ -19,19 +19,19 @@ deriving instance @[expose] DecidableEq for Except
 
 @[expose] def assistant : Statement := mk (.of "assistant") <| .delegation
   { delegator := ⟨.of "richard", none⟩
-    delegate := ⟨.of "claude", []⟩
+    delegate := ⟨.of "agent", []⟩
     scope := ⟨.only ["LeanIntentExamples.sorting"], true, true, true⟩
     mayPassOn := true }
 
 @[expose] def reviewer : Statement := mk (.of "reviewer") <| .delegation
-  { delegator := ⟨.of "claude", some (.of "assistant")⟩
-    delegate := ⟨.of "codex", []⟩
+  { delegator := ⟨.of "agent", some (.of "assistant")⟩
+    delegate := ⟨.of "auditor", []⟩
     scope := ⟨.all, true, false, false⟩
     mayPassOn := false }
 
 @[expose] def helper : Statement := mk (.of "helper") <| .delegation
-  { delegator := ⟨.of "codex", some (.of "reviewer")⟩
-    delegate := ⟨.of "gemini", []⟩
+  { delegator := ⟨.of "auditor", some (.of "reviewer")⟩
+    delegate := ⟨.of "worker", []⟩
     scope := ⟨.all, true, false, false⟩
     mayPassOn := false }
 
@@ -44,19 +44,19 @@ deriving instance @[expose] DecidableEq for Except
   answer (.of "by-owner") ⟨.of "richard", none⟩ "LeanIntentExamples.sorting" .declined
 
 @[expose] def byReviewer : Statement :=
-  answer (.of "by-reviewer") ⟨.of "codex", some (.of "reviewer")⟩ "LeanIntentExamples.sorting"
+  answer (.of "by-reviewer") ⟨.of "auditor", some (.of "reviewer")⟩ "LeanIntentExamples.sorting"
     .confirmed
 
 @[expose] def reviewerDeclines : Statement :=
-  answer (.of "reviewer-declines") ⟨.of "codex", some (.of "reviewer")⟩
+  answer (.of "reviewer-declines") ⟨.of "auditor", some (.of "reviewer")⟩
     "LeanIntentExamples.sorting" .declined
 
 @[expose] def otherRecord : Statement :=
-  answer (.of "other-record") ⟨.of "codex", some (.of "reviewer")⟩ "LeanIntentExamples.counter"
+  answer (.of "other-record") ⟨.of "auditor", some (.of "reviewer")⟩ "LeanIntentExamples.counter"
     .confirmed
 
 @[expose] def byHelper : Statement :=
-  answer (.of "by-helper") ⟨.of "gemini", some (.of "helper")⟩ "LeanIntentExamples.sorting"
+  answer (.of "by-helper") ⟨.of "worker", some (.of "helper")⟩ "LeanIntentExamples.sorting"
     .confirmed
 
 @[expose] def forged : Statement :=
@@ -74,17 +74,17 @@ theorem byReviewer_accepted : Accepted project owners log byReviewer :=
 
 theorem reviewerDeclines_refused :
     check project owners log reviewerDeclines =
-      .error ⟨.of "reviewer-declines", .broken ⟨.of "codex", some (.of "reviewer")⟩ .outOfScope⟩ := by
+      .error ⟨.of "reviewer-declines", .broken ⟨.of "auditor", some (.of "reviewer")⟩ .outOfScope⟩ := by
   decide +kernel
 
 theorem otherRecord_refused :
     check project owners log otherRecord =
-      .error ⟨.of "other-record", .broken ⟨.of "claude", some (.of "assistant")⟩ .outOfScope⟩ := by
+      .error ⟨.of "other-record", .broken ⟨.of "agent", some (.of "assistant")⟩ .outOfScope⟩ := by
   decide +kernel
 
 theorem byHelper_refused :
     check project owners log byHelper =
-      .error ⟨.of "by-helper", .broken ⟨.of "codex", some (.of "reviewer")⟩ .notPassable⟩ := by
+      .error ⟨.of "by-helper", .broken ⟨.of "auditor", some (.of "reviewer")⟩ .notPassable⟩ := by
   decide +kernel
 
 theorem forged_refused :
@@ -93,16 +93,16 @@ theorem forged_refused :
   decide +kernel
 
 @[expose] def revokeReviewer : Statement :=
-  mk (.of "revoke-reviewer") <| .revocation ⟨⟨.of "claude", some (.of "assistant")⟩, .of "reviewer"⟩
+  mk (.of "revoke-reviewer") <| .revocation ⟨⟨.of "agent", some (.of "assistant")⟩, .of "reviewer"⟩
 
 theorem byReviewer_revoked :
     check project owners (log ++ [revokeReviewer]) byReviewer =
       .error ⟨.of "by-reviewer",
-        .broken ⟨.of "codex", some (.of "reviewer")⟩ (.revoked (.of "revoke-reviewer"))⟩ := by
+        .broken ⟨.of "auditor", some (.of "reviewer")⟩ (.revoked (.of "revoke-reviewer"))⟩ := by
   decide +kernel
 
 @[expose] def retractOwner : Statement :=
-  mk (.of "retract-owner") <| .retraction ⟨⟨.of "claude", some (.of "assistant")⟩, .of "by-owner"⟩
+  mk (.of "retract-owner") <| .retraction ⟨⟨.of "agent", some (.of "assistant")⟩, .of "by-owner"⟩
 
 theorem byOwner_retracted :
     check project owners (log ++ [retractOwner]) byOwner =

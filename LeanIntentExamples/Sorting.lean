@@ -276,7 +276,7 @@ theorem sort_fulfils : sorting.Fulfilled sort := fulfils implSpec_refines fun _ 
           allows := "Exactly one function, the one returning the ascending rearrangement of its \
             input."
           freedom := "None: obligation O5 holds with equality." }
-      settled := .answered (.onBehalf (.of "claude") (.of "assistant")
+      settled := .answered (.onBehalf (.of "agent") (.of "assistant")
         "The owner confirmed that the output is an ascending rearrangement of the input, which \
           leaves one such function.") .confirmed }]
 

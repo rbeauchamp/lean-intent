@@ -174,7 +174,7 @@ For several receivers, give each the shared purpose plus its own obligation and 
 For several intenders, apply their authorized combination and conflict procedure.
 Intersecting every proposal, counting copies of one principal, or choosing the most ambitious statement creates no authority; where obligations conflict, isolate the conflicting core, continue the compatible authorized work, and surface the conflict to whoever may decide it.
 For a round designated as blind independent discovery, give every peer the same primary facts and prompt without your conclusions, preserve your own draft before you see theirs, and disclose any earlier exposure; cross-review rounds deliberately exchange conclusions under their owning protocol.
-Where your project or tools have a procedure for such rounds, it owns sealing drafts and the rounds; [intent-first](../intent-first/SKILL.md)'s step 3 is one, for a second model's blind formalization of a Lean intent record.
+Where your project or tools have a procedure for such rounds, it owns sealing drafts and the rounds; [intent-first](../intent-first/SKILL.md)'s step 3 is one, for an independent blind formalization of a Lean intent record.
 
 ## Honest closure
 
