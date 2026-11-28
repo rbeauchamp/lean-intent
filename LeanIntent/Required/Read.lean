@@ -111,7 +111,7 @@ def readComparison (e : Expr) : MetaM ComparisonEntry := asking do
   else if e.isAppOfArity ``BlindComparison.cases 6 then
     let args ← ctorArgs e ``BlindComparison.cases 6
     let theorems ← (← listElems args[2]).mapM citedOf
-    let reason ← try strLit args[4] catch err =>
+    let reason ← try strLit args[3] catch err =>
       throwError "the reason for a concrete-cases comparison is not read as a string literal: \
         {err.toMessageData}"
     return .cases theorems.toList reason

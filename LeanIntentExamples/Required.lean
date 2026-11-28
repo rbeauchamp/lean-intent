@@ -29,7 +29,7 @@ theorem nilSort_separates : sortedOnly.Meets nilSort ∧ ¬ sorting.Meets nilSor
 
 theorem emptyCases_unrepresentable :
     ¬ ∃ (v : Required sortingDeliverable) (r : String) (s : r.toList.any (!·.isWhitespace) = true)
-        (h : ([] : List Proof) ≠ []), v.comparison = .cases [] h r s :=
+        (h : ([] : List Proof) ≠ []), v.comparison = .cases [] r h s :=
   fun ⟨_, _, _, h, _⟩ => h rfl
 
 theorem blankDeferred_unrepresentable :

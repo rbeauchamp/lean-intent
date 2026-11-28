@@ -35,8 +35,8 @@ inductive BlindComparison {W : Type u} (r : IntentRecord W) where
       (backward : ComparisonDirection blind r)
       (hasProof : forward.isProved || backward.isProved = true := by rfl)
   | cases (theorems : List Proof)
-      (nonempty : theorems ≠ [] := by simp)
       (reason : String)
+      (nonempty : theorems ≠ [] := by simp)
       (stated : reason.toList.any (!·.isWhitespace) = true := by decide +kernel)
 
 structure Required {W : Type u} (d : Deliverable W) where
