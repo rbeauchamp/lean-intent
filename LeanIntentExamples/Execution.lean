@@ -113,4 +113,29 @@ theorem specializationRedArg_not_counted :
 theorem lambda_not_counted : isCompiledCodeOf [`c, `main].contains `c `c._lam_0 = false := by
   decide +kernel
 
+theorem strict_runs :
+    strictFindings [``sortingDeliverable] implemented [] [sorter] [claim] [] = [] := by
+  decide +kernel
+
+theorem strict_idle_refused :
+    strictFindings [``sortingDeliverable] implemented []
+      [sorter, { sorter with name := `unusedExe }] [claim] [] =
+      [.idleExecutable `unusedExe] := by
+  decide +kernel
+
+theorem strict_notRun_refused :
+    strictFindings [``sortingDeliverable, `otherDeliverable] implemented [] [sorter] [claim] [] =
+      [.deliverableNotRun `otherDeliverable] := by
+  decide +kernel
+
+theorem strict_library_refused :
+    strictFindings [``sortingDeliverable] implemented [] [sorter] [] [] =
+      [.idleExecutable `sorter, .deliverableNotRun ``sortingDeliverable] := by
+  decide +kernel
+
+theorem strict_noncomputable_refused :
+    strictFindings [``sortingDeliverable] implemented [] [sorter] [claim] [program] =
+      [.noncomputableSubject ``sortingDeliverable `sorter program] := by
+  decide +kernel
+
 end LeanIntentExamples.Execution

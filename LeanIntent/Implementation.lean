@@ -1,6 +1,7 @@
 module
 
 public import LeanIntent.Confirmation
+public import LeanIntent.Progress
 
 public section
 
@@ -10,7 +11,7 @@ universe u
 
 structure Implementation {W : Type u} (d : Deliverable W) where
   subject : W
-  fulfils : d.record.Fulfilled subject
+  meets : d.record.Meets subject
 
 structure AwaitingImplementation {W : Type u} (d : Deliverable W) where
   reason : String
@@ -22,13 +23,24 @@ section
 
 variable {W : Type u} {d : Deliverable W}
 
-theorem fulfilled (v : Implementation d) : d.record.Fulfilled v.subject := v.fulfils
+theorem dom (v : Implementation d) : d.record.Dom v.subject := v.meets.1
 
-theorem exists_iff {w : W} : (∃ v : Implementation d, v.subject = w) ↔ d.record.Fulfilled w :=
-  ⟨fun ⟨v, h⟩ => h ▸ v.fulfils, fun h => ⟨⟨w, h⟩, rfl⟩⟩
+theorem props (v : Implementation d) : d.record.Props v.subject := v.meets.2
 
-theorem meets (v : Implementation d) (hd : d.record.Dom v.subject) : d.record.Meets v.subject :=
-  IntentRecord.meets_of_fulfilled v.fulfils hd
+theorem fulfilled (v : Implementation d) : d.record.Fulfilled v.subject := fun _ => v.meets.2
+
+theorem exists_iff {w : W} : (∃ v : Implementation d, v.subject = w) ↔ d.record.Meets w :=
+  ⟨fun ⟨v, h⟩ => h ▸ v.meets, fun h => ⟨⟨w, h⟩, rfl⟩⟩
+
+theorem o2Run (v : Implementation d) : O2Run d.record :=
+  o2Run_of_meets v.meets
+
+theorem not_idle (v : Implementation d) (h4 : O4 d.record) : ¬ d.record.shape.Idle v.subject :=
+  fun hi => not_o4_of_idle hi v.meets h4
+
+theorem relates (v : Implementation d) {R : Freedom W} (h5 : O5 d.record R) {w : W}
+    (hw : d.record.Meets w) : R.relates d.record v.subject w :=
+  h5.relates v.meets hw
 
 end
 

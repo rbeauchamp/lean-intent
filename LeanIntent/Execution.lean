@@ -214,6 +214,9 @@ inductive Finding where
   | noEntryPoint (executable : Name) (root : Name)
   | unimplemented (deliverable : Name) (executable : Name)
   | unreached (deliverable : Name) (executable : Name) (implementation : Constant)
+  | idleExecutable (executable : Name)
+  | deliverableNotRun (deliverable : Name)
+  | noncomputableSubject (deliverable : Name) (executable : Name) (implementation : Constant)
   deriving @[expose] DecidableEq, Repr
 
 @[expose] def named (es : List Executable) (x : Name) : List Executable :=
@@ -245,12 +248,41 @@ inductive Finding where
   (if ds = [] then [.noDeliverable] else []) ++ es.flatMap exeFindings ++
     cls.flatMap (claimFindings ds is as es)
 
+@[expose] def idleFindings (es : List Executable) (cls : List Claim) : List Finding :=
+  (es.filter fun e => !cls.any (·.executable == e.name)).map fun e => .idleExecutable e.name
+
+@[expose] def notRunFindings (ds : List Name) (cls : List Claim) : List Finding :=
+  (ds.filter fun d => !cls.any (·.deliverable == some d)).map .deliverableNotRun
+
+@[expose] def noncomputableFindings (ds : List Name) (is : List (Name × Constant)) (as : List Name)
+    (ncs : List Constant) (cl : Claim) : List Finding :=
+  match cl.deliverable with
+  | none => []
+  | some d =>
+    if d ∈ ds ∧ d ∉ as then
+      (implementationsOf is d).filterMap fun c =>
+        if ncs.contains c then some (.noncomputableSubject d cl.executable c) else none
+    else []
+
+@[expose] def strictFindings (ds : List Name) (is : List (Name × Constant)) (as : List Name)
+    (es : List Executable) (cls : List Claim) (ncs : List Constant) : List Finding :=
+  findings ds is as es cls ++ idleFindings es cls ++ notRunFindings ds cls ++
+    cls.flatMap (noncomputableFindings ds is as ncs)
+
 @[expose] def Accounted (ds : List Name) (is : List (Name × Constant)) (as : List Name)
     (es : List Executable) (cls : List Claim) : Prop :=
   ds ≠ [] ∧ (∀ e ∈ es, e.entry = true) ∧
     ∀ cl ∈ cls, ∃ d, cl.deliverable = some d ∧ d ∈ ds ∧ (∃ e ∈ es, e.name = cl.executable) ∧
       (d ∈ as ∨ ((∃ c, (d, c) ∈ is) ∧
         ∀ c, (d, c) ∈ is → ∀ e ∈ es, e.name = cl.executable → c ∈ e.reaches))
+
+@[expose] def StrictAccounted (ds : List Name) (is : List (Name × Constant)) (as : List Name)
+    (es : List Executable) (cls : List Claim) (ncs : List Constant) : Prop :=
+  Accounted ds is as es cls ∧
+    (∀ e ∈ es, ∃ cl ∈ cls, cl.executable = e.name) ∧
+    (∀ d ∈ ds, ∃ cl ∈ cls, cl.deliverable = some d) ∧
+    ∀ cl ∈ cls, ∀ d, cl.deliverable = some d → d ∈ ds → d ∉ as →
+      ∀ c, (d, c) ∈ is → c ∉ ncs
 
 @[expose] def claimReached (ds : List Name) (is : List (Name × Constant)) (as : List Name)
     (es : List Executable) (cl : Claim) : List (Name × Name × Constant) :=
@@ -282,6 +314,11 @@ structure Report where
     cls.filterMap (claimAwaiting ds as),
     ds.filter fun d => !cls.any (·.deliverable == some d),
     (es.filter fun e => !cls.any (·.executable == e.name)).map (·.name)⟩
+
+@[expose] def strictReport (ds : List Name) (is : List (Name × Constant)) (as : List Name)
+    (es : List Executable) (cls : List Claim) (ncs : List Constant) : Report :=
+  let r := report ds is as es cls
+  { r with findings := strictFindings ds is as es cls ncs }
 
 section Decides
 
@@ -367,7 +404,7 @@ theorem findings_eq_nil_iff : findings ds is as es cls = [] ↔ Accounted ds is 
     exact ⟨d, hdl, hd, hx, h.imp id fun ⟨hi, hr⟩ => ⟨hi, fun c hc e he hn _ => hr c hc e he hn⟩⟩
 
 @[expose] def Finding.Holds (ds : List Name) (is : List (Name × Constant)) (as : List Name)
-    (es : List Executable) (cls : List Claim) : Finding → Prop
+    (es : List Executable) (cls : List Claim) (ncs : List Constant := []) : Finding → Prop
   | .noDeliverable => ds = []
   | .untied n => ∃ cl ∈ cls, cl.name = n ∧ ∀ d ∈ ds, cl.deliverable ≠ some d
   | .unknownExecutable n x => ∃ cl ∈ cls, cl.name = n ∧ cl.executable = x ∧ ∀ e ∈ es, e.name ≠ x
@@ -377,9 +414,14 @@ theorem findings_eq_nil_iff : findings ds is as es cls = [] ↔ Accounted ds is 
   | .unreached d x c =>
     ∃ cl ∈ cls, cl.deliverable = some d ∧ cl.executable = x ∧ d ∈ ds ∧ d ∉ as ∧ (d, c) ∈ is ∧
       ∃ e ∈ es, e.name = x ∧ e.entry = true ∧ c ∉ e.reaches
+  | .idleExecutable x => ∃ e ∈ es, e.name = x ∧ ∀ cl ∈ cls, cl.executable ≠ x
+  | .deliverableNotRun d => d ∈ ds ∧ ∀ cl ∈ cls, cl.deliverable ≠ some d
+  | .noncomputableSubject d x c =>
+    ∃ cl ∈ cls, cl.deliverable = some d ∧ cl.executable = x ∧ d ∈ ds ∧ d ∉ as ∧
+      (d, c) ∈ is ∧ c ∈ ncs
 
-theorem claimFindings_sound {cl : Claim} (hc : cl ∈ cls) {f : Finding}
-    (hf : f ∈ claimFindings ds is as es cl) : f.Holds ds is as es cls := by
+theorem claimFindings_sound {cl : Claim} (hc : cl ∈ cls) {f : Finding} {ncs : List Constant}
+    (hf : f ∈ claimFindings ds is as es cl) : f.Holds ds is as es cls ncs := by
   unfold claimFindings at hf
   cases hcl : cl.deliverable with
   | none =>
@@ -414,8 +456,9 @@ theorem claimFindings_sound {cl : Claim} (hc : cl ∈ cls) {f : Finding}
             exact ⟨cl, hc, hcl, rfl, Classical.not_not.mp hd, ha, mem_implementationsOf.mp hci, e,
               hes, hen, hent, by simpa using hr⟩
 
-theorem findings_sound {f : Finding} (hf : f ∈ findings ds is as es cls) :
-    f.Holds ds is as es cls := by
+theorem findings_sound {f : Finding} {ncs : List Constant}
+    (hf : f ∈ findings ds is as es cls) :
+    f.Holds ds is as es cls ncs := by
   unfold findings at hf
   simp only [List.mem_append, List.mem_flatMap] at hf
   rcases hf with (hf | ⟨e, he, hf⟩) | ⟨cl, hc, hf⟩
@@ -509,6 +552,103 @@ theorem listed_of_nil (h : findings ds is as es cls = []) {cl : Claim} (hc : cl 
     rcases hr with hr | ⟨-, hr⟩
     · exact absurd hr ha
     · exact hr c hci e he hn
+
+theorem idleFindings_eq_nil_iff :
+    idleFindings es cls = [] ↔ ∀ e ∈ es, ∃ cl ∈ cls, cl.executable = e.name := by
+  simp only [idleFindings, List.map_eq_nil_iff, List.filter_eq_nil_iff, Bool.not_eq_true',
+    Bool.eq_false_iff, Classical.not_not, List.any_eq_true, beq_iff_eq]
+
+theorem notRunFindings_eq_nil_iff :
+    notRunFindings ds cls = [] ↔ ∀ d ∈ ds, ∃ cl ∈ cls, cl.deliverable = some d := by
+  simp only [notRunFindings, List.map_eq_nil_iff, List.filter_eq_nil_iff, Bool.not_eq_true',
+    Bool.eq_false_iff, Classical.not_not, List.any_eq_true, beq_iff_eq]
+
+theorem noncomputableFindings_eq_nil_iff {ncs : List Constant} {cl : Claim} :
+    noncomputableFindings ds is as ncs cl = [] ↔
+      ∀ d, cl.deliverable = some d → d ∈ ds → d ∉ as → ∀ c, (d, c) ∈ is → c ∉ ncs := by
+  unfold noncomputableFindings
+  cases hcl : cl.deliverable with
+  | none => simp
+  | some d =>
+    dsimp only
+    split
+    · rename_i hda
+      simp only [List.eq_nil_iff_forall_not_mem, List.mem_filterMap, not_exists, not_and]
+      constructor
+      · intro h d' heq _ _ c hci hcn
+        cases heq
+        exact h (.noncomputableSubject d cl.executable c) c (mem_implementationsOf.mpr hci)
+          (by simp [hcn])
+      · intro h f c hci hf
+        split at hf
+        · rename_i hcn
+          exact h d rfl hda.1 hda.2 c (mem_implementationsOf.mp hci) (List.contains_iff_mem.mp hcn)
+        · cases hf
+    · rename_i hda
+      simp only [true_iff]
+      intro d' heq hd ha
+      cases heq
+      exact absurd ⟨hd, ha⟩ hda
+
+theorem strictFindings_eq_nil_iff {ncs : List Constant} :
+    strictFindings ds is as es cls ncs = [] ↔ StrictAccounted ds is as es cls ncs := by
+  unfold strictFindings StrictAccounted
+  simp only [List.append_eq_nil_iff, List.flatMap_eq_nil_iff, findings_eq_nil_iff,
+    idleFindings_eq_nil_iff, notRunFindings_eq_nil_iff, noncomputableFindings_eq_nil_iff,
+    and_assoc]
+
+theorem strictFindings_sound {ncs : List Constant} {f : Finding}
+    (hf : f ∈ strictFindings ds is as es cls ncs) : f.Holds ds is as es cls ncs := by
+  unfold strictFindings at hf
+  simp only [List.mem_append, List.mem_flatMap] at hf
+  rcases hf with ((hf | hf) | hf) | ⟨cl, hcl, hf⟩
+  · exact findings_sound hf
+  · simp only [idleFindings, List.mem_map, List.mem_filter, Bool.not_eq_true',
+      List.any_eq_false, beq_iff_eq] at hf
+    obtain ⟨e, ⟨he, hno⟩, rfl⟩ := hf
+    exact ⟨e, he, rfl, fun cl hc h => hno cl hc h⟩
+  · simp only [notRunFindings, List.mem_map, List.mem_filter, Bool.not_eq_true',
+      List.any_eq_false, beq_iff_eq] at hf
+    obtain ⟨d, ⟨hd, hno⟩, rfl⟩ := hf
+    exact ⟨hd, fun cl hc h => hno cl hc h⟩
+  · unfold noncomputableFindings at hf
+    cases hdl : cl.deliverable with
+    | none => simp [hdl] at hf
+    | some d =>
+      simp only [hdl] at hf
+      split at hf
+      · rename_i hda
+        simp only [List.mem_filterMap] at hf
+        obtain ⟨c, hci, hc⟩ := hf
+        split at hc
+        · rename_i hcn
+          cases hc
+          exact ⟨cl, hcl, hdl, rfl, hda.1, hda.2, mem_implementationsOf.mp hci,
+            List.contains_iff_mem.mp hcn⟩
+        · cases hc
+      · exact absurd hf List.not_mem_nil
+
+theorem idle_eq_nil_of_strict {ncs : List Constant}
+    (h : strictFindings ds is as es cls ncs = []) :
+    (strictReport ds is as es cls ncs).idle = [] := by
+  obtain ⟨-, hidle, -, -⟩ := strictFindings_eq_nil_iff.mp h
+  rw [List.eq_nil_iff_forall_not_mem]
+  intro x hx
+  have hx' : x ∈ (report ds is as es cls).idle := hx
+  obtain ⟨e, he, rfl, hno⟩ := mem_idle.mp hx'
+  obtain ⟨cl, hcl, hce⟩ := hidle e he
+  exact hno cl hcl hce
+
+theorem notRun_eq_nil_of_strict {ncs : List Constant}
+    (h : strictFindings ds is as es cls ncs = []) :
+    (strictReport ds is as es cls ncs).notRun = [] := by
+  obtain ⟨-, -, hnotRun, -⟩ := strictFindings_eq_nil_iff.mp h
+  rw [List.eq_nil_iff_forall_not_mem]
+  intro d hd
+  have hd' : d ∈ (report ds is as es cls).notRun := hd
+  obtain ⟨hds, hno⟩ := mem_notRun.mp hd'
+  obtain ⟨cl, hcl, hcd⟩ := hnotRun d hds
+  exact hno cl hcl hcd
 
 end Decides
 

@@ -348,7 +348,9 @@ end Table
   let reached ← if entry then targets.filterM (reachesIn s) else pure []
   return ⟨name, root, entry, reached⟩
 
-def check (mods : Array Name) (exes : Array (Name × Name)) : MetaM Report := asking do
+def check (mods : Array Name) (exes : Array (Name × Name)) (strict : Bool := false) :
+    MetaM Report := asking do
+  let env ← getEnv
   let ds ← declaredIn mods ``Deliverable
   let implemented ← Implementation.Read.check mods
   let is := implemented.implementations.map fun (d, _, c) => (d, c)
@@ -364,6 +366,13 @@ def check (mods : Array Name) (exes : Array (Name × Name)) : MetaM Report := as
     catch err =>
       throwError "the executable {name}, whose root module is {root}, cannot be read: \
         {err.toMessageData}"
-  return report ds.toList is as es.toList cls.toList
+  if strict then
+    let ncs := (is.map (·.2)).eraseDups.filter fun c => Lean.isNoncomputable env c.name
+    return strictReport ds.toList is as es.toList cls.toList ncs
+  else
+    return report ds.toList is as es.toList cls.toList
+
+def checkStrict (mods : Array Name) (exes : Array (Name × Name)) : MetaM Report := asking <|
+  check mods exes (strict := true)
 
 end LeanIntent.Execution.Read
