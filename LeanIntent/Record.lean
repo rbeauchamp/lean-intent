@@ -51,6 +51,9 @@ variable {W : Type u}
 theorem meets_of_fulfilled {r : IntentRecord W} {w : W} (h : r.Fulfilled w) (hd : r.Dom w) :
     r.Meets w := ⟨hd, h hd⟩
 
+theorem dom_of_nil {r : IntentRecord W} (h : r.dom = []) (w : W) : r.Dom w :=
+  fun _ hd => nomatch h ▸ hd
+
 end IntentRecord
 
 end LeanIntent

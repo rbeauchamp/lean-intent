@@ -37,9 +37,8 @@ def ownDeclaration (c : Name) : MetaM (Name × ConstantInfo) := asking do
       throwError "the environment records {c} under no module, and the file being elaborated \
         does not declare it, so the module that declares it cannot be read"
 
-def citedOf (e : Expr) : MetaM Cited := asking do
-  let args ← ctorArgs e ``Proof.mk 2
-  match constOf? args[1] with
+def citedProof (e : Expr) : MetaM Cited := asking do
+  match constOf? e with
   | none => return .term
   | some c =>
     let (m, own) ← ownDeclaration c
@@ -52,13 +51,103 @@ def citedOf (e : Expr) : MetaM Cited := asking do
       return .thm ⟨m, c⟩
     | _ => return .other ⟨m, c⟩
 
+def citedOf (e : Expr) : MetaM Cited := asking do
+  let args ← ctorArgs e ``Proof.mk 2
+  citedProof args[1]
+
+def constantOf? (e : Expr) : MetaM (Option Implementation.Constant) := asking do
+  match constOf? e with
+  | none => return none
+  | some c =>
+    let (m, own) ← ownDeclaration c
+    unless proofSafe own do
+      throwError "{c} is unsafe or partial, so it is not read"
+    let held ← getConstInfo c
+    unless sameDeclaration own held do
+      throwError "the module {m} declares {c}, and the environment holds another declaration of \
+        that name, so it is not read"
+    return some ⟨m, c⟩
+
+def readO2Run (e : Expr) : MetaM O2RunEntry := asking do
+  let e ← readWhnf e
+  if e.isAppOfArity ``O2RunProof.proved 3 then
+    let args ← ctorArgs e ``O2RunProof.proved 3
+    return .proved (← citedProof args[2])
+  else if e.isAppOfArity ``O2RunProof.deferred 4 then
+    let args ← ctorArgs e ``O2RunProof.deferred 4
+    let reason ← try strLit args[2] catch err =>
+      throwError "the reason for deferring `O2Run` is not read as a string literal: \
+        {err.toMessageData}"
+    return .deferred reason
+  else
+    throwError "expected `LeanIntent.O2RunProof.proved` or `LeanIntent.O2RunProof.deferred`, \
+      found{indentExpr e}"
+
+def readDirection (e : Expr) : MetaM DirectionEntry := asking do
+  let e ← readWhnf e
+  if e.isAppOfArity ``ComparisonDirection.implies 4 then
+    let args ← ctorArgs e ``ComparisonDirection.implies 4
+    return .proved (← citedProof args[3])
+  else if e.isAppOfArity ``ComparisonDirection.separates 5 then
+    let args ← ctorArgs e ``ComparisonDirection.separates 5
+    return .proved (← citedProof args[4])
+  else if e.isAppOfArity ``ComparisonDirection.unproved 5 then
+    let args ← ctorArgs e ``ComparisonDirection.unproved 5
+    let reason ← try strLit args[3] catch err =>
+      throwError "the reason for an unproved comparison direction is not read as a string literal: \
+        {err.toMessageData}"
+    return .unproved reason
+  else
+    throwError "expected a `LeanIntent.ComparisonDirection` constructor, found{indentExpr e}"
+
+def readComparison (e : Expr) : MetaM ComparisonEntry := asking do
+  let e ← readWhnf e
+  if e.isAppOfArity ``BlindComparison.records 6 then
+    let args ← ctorArgs e ``BlindComparison.records 6
+    let blind ← constantOf? args[2]
+    let fwd ← readDirection args[3]
+    let bwd ← readDirection args[4]
+    return .records blind fwd bwd
+  else if e.isAppOfArity ``BlindComparison.cases 6 then
+    let args ← ctorArgs e ``BlindComparison.cases 6
+    let theorems ← (← listElems args[2]).mapM citedOf
+    let reason ← try strLit args[3] catch err =>
+      throwError "the reason for a concrete-cases comparison is not read as a string literal: \
+        {err.toMessageData}"
+    return .cases theorems.toList reason
+  else
+    throwError "expected `LeanIntent.BlindComparison.records` or `LeanIntent.BlindComparison.cases`, \
+      found{indentExpr e}"
+
+def deliverableEntryOf (c : Implementation.Constant) : MetaM DeliverableEntry := asking do
+  let e ← readWhnf (← Confirmation.Read.constOf c.name)
+  let record :=
+    if e.isAppOfArity ``Deliverable.mk 5 then
+      let args := e.getAppArgs
+      if h : 1 < args.size then constOf? args[1] else none
+    else none
+  return ⟨c.module, c.name, record⟩
+
+def implEntryOf (c : Implementation.Constant) : MetaM ImplEntry := asking do
+  let t ← readWhnf (← getConstInfo c.name).type
+  let deliverable := match t with
+    | .app (.app (.const ``Implementation _) _) d => constOf? d
+    | _ => none
+  return ⟨c.module, c.name, deliverable⟩
+
 def entryOf (decl : Implementation.Constant) : MetaM Entry := asking do
   let t ← readWhnf (← getConstInfo decl.name).type
   let .app (.app (.const ``Required _) _) d := t
     | throwError "the type of {decl.name} is not `LeanIntent.Required` applied to a deliverable"
-  let args ← ctorArgs (← Confirmation.Read.constOf decl.name) ``Required.mk 4
-  let theorems ← (← listElems args[2]).mapM citedOf
-  return ⟨decl.name, decl.module, constOf? d, theorems.toList⟩
+  let args ← ctorArgs (← Confirmation.Read.constOf decl.name) ``Required.mk 10
+  let o2 ← citedProof args[2]
+  let o2Run ← readO2Run args[3]
+  let o3 ← citedProof args[4]
+  let o4 ← citedProof args[5]
+  let o5 ← citedProof args[7]
+  let comparison ← readComparison args[8]
+  let additional ← (← listElems args[9]).mapM citedOf
+  return ⟨decl.name, decl.module, constOf? d, o2, o2Run, o3, o4, o5, comparison, additional.toList⟩
 
 def declaredAnywhere (heads : Array Name) : MetaM (Array (Implementation.Constant × Name)) := asking do
   let env ← getEnv
@@ -96,8 +185,10 @@ def check (built : Array Name) : MetaM Report := asking do
         cannot be read"
   let found ← declaredAnywhere #[``Deliverable, ``Implementation, ``Required]
   let of (head : Name) := found.filterMap fun (c, h) => if h == head then some c else none
+  let ds ← (of ``Deliverable).mapM deliverableEntryOf
+  let vs ← (of ``Implementation).mapM implEntryOf
   let rs ← (of ``Required).mapM entryOf
-  return report built.toList (of ``Deliverable).toList (of ``Implementation).toList rs.toList
+  return report built.toList ds.toList vs.toList rs.toList
 
 @[expose] def queryModules (out : String) : Except String (Array Name) := do
   let mut mods : Array Name := #[]

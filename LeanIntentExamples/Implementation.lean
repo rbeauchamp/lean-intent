@@ -13,15 +13,20 @@ open LeanIntent LeanIntent.Implementation LeanIntentExamples.Sorting
 
 @[expose] def sortProgram (l : List Int) : List Int := l.mergeSort le
 
-theorem sortProgram_fulfils : sorting.Fulfilled sortProgram := sort_fulfils
+theorem sortProgram_meets : sorting.Meets sortProgram :=
+  implSpec_refines.meets (fun _ => rfl) (sorting.dom_of_nil rfl sortProgram)
 
 @[expose] def sortingImplementation : Implementation sortingDeliverable where
   subject := sortProgram
-  fulfils := sortProgram_fulfils
+  meets := sortProgram_meets
 
 theorem nilSort_unrecordable : ¬ ∃ v : Implementation sortingDeliverable, v.subject = nilSort :=
-  fun h => sorting_refutes_nilSort
-    (IntentRecord.meets_of_fulfilled (exists_iff.mp h) fun _ hd => nomatch hd)
+  fun h => sorting_refutes_nilSort (exists_iff.mp h)
+
+theorem vacuousDom_unrecordable {d : Deliverable (List Int → List Int)}
+    (hd : d.record = contraDom) (f : List Int → List Int) :
+    ¬ ∃ v : Implementation d, v.subject = f :=
+  fun h => (hd ▸ (exists_iff.mp h).1) _ (List.mem_singleton.mpr rfl)
 
 @[expose] def program : Constant := ⟨`LeanIntentExamples.Implementation, ``sortProgram⟩
 

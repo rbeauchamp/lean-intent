@@ -21,6 +21,10 @@ theorem fulfils {r : IntentRecord W} {m : A → W} {S : A → Prop} (hR : Refine
     (hS : S impl) : r.Fulfilled (m impl) :=
   hR impl hS
 
+theorem Refines.meets {r : IntentRecord W} {m : A → W} {S : A → Prop} (hR : Refines r m S)
+    {impl : A} (hS : S impl) (hd : r.Dom (m impl)) : r.Meets (m impl) :=
+  ⟨hd, hR impl hS hd⟩
+
 theorem Refines.comp {r : IntentRecord W} {m : A → W} {S : A → Prop} {n : C → A} {L : C → Prop}
     (hS : Refines r m S) (hL : RefinesSpec r m S n L) : Refines r (fun c => m (n c)) L :=
   fun c hc hd => hS (n c) (hL c hc hd) hd
