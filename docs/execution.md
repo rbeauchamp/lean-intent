@@ -71,7 +71,7 @@ For projects where every deliverable must be reached by an executable and every 
 
 The decisions, each made on the owner's behalf, which a later change can reverse:
 
-- **What an executable runs is declared, and checked, rather than inferred from names.** A claim names the executable target. A deliverable no claim names is reported as run by no executable rather than refused, since a library's deliverables are run by its users' programs, and an executable no claim names is reported as running no deliverable. Such an executable may be one whose `Runs` declaration was forgotten: a project whose executable runs a deliverable declares that claim, so that the check reads what the executable runs.
+- **What an executable runs is declared, and checked, rather than inferred from names.** A claim names the executable target. In default mode (`strict := false`), a deliverable no claim names is reported as run by no executable rather than refused, since a library's deliverables are run by its users' programs, and an executable no claim names is reported as running no deliverable (projects wanting refusals opt into `strict := true` / `checkStrict` above). Such an executable may be one whose `Runs` declaration was forgotten: a project whose executable runs a deliverable declares that claim, so that the check reads what the executable runs.
 - **A deliverable declared awaiting its implementation is reported as awaiting, never as reached**, even where an implementation is also recorded beside the declaration, which the implementation check refuses.
 - **An executable without an entry point is refused whether or not a claim names it**, since a gate that cannot read its entry point can say nothing of what it runs.
 - **Every implementation recorded for a claimed deliverable must be reached, by every executable of the name the claim gives.**
@@ -98,7 +98,7 @@ It follows only declarations of the modules whose imports reach the module that 
 
 | Field | What it holds |
 |---|---|
-| `findings` | what is wrong; empty exactly when every claim holds, as above |
+| `findings` | what is wrong; empty exactly when `Accounted` holds in default mode (or `StrictAccounted` in strict mode), as above |
 | `reached` | each deliverable, executable and implementation such that a claim says the executable runs the deliverable and its entry point reaches the implementation |
 | `awaiting` | each deliverable and executable such that a claim says the executable runs the deliverable, which is declared awaiting its implementation |
 | `notRun` | each deliverable that no claim says an executable runs |
